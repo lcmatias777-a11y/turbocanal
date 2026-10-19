@@ -1,0 +1,26 @@
+#tc-fab {
+  position: fixed; right: 18px; bottom: 90px; z-index: 99999;
+  width: 48px; height: 48px; border-radius: 50%;
+  background: #ff5d3b; color: #fff; border: none; cursor: pointer;
+  font-size: 22px; font-weight: 800; box-shadow: 0 4px 14px rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+#tc-fab:hover { filter: brightness(1.1); }
+#tc-panel {
+  position: fixed; right: 18px; bottom: 148px; z-index: 99999;
+  width: 320px; max-height: 70vh; overflow: auto;
+  background: #0b1020; color: #e8ecf8; border: 1px solid #27345f; border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.55); padding: 14px;
+  font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px; line-height: 1.5;
+}
+#tc-panel h3 { margin: 0 0 8px; font-size: 14px; }
+#tc-panel h3 b { color: #ff5d3b; }
+#tc-panel table { width: 100%; border-collapse: collapse; }
+#tc-panel td { padding: 3px 4px; border-bottom: 1px solid #27345f; }
+#tc-panel .tc-muted { color: #9aa7c7; font-size: 12px; }
+#tc-panel .tc-err { color: #ff6b7a; }
+#tc-panel .tc-ok { color: #37d08a; }
+#tc-panel .tc-warn { color: #ffcf5c; }
+#tc-panel a { color: #ffb03b; }
+#tc-panel .tc-close { float: right; cursor: pointer; color: #9aa7c7; background: none; border: none; font-size: 15px; }

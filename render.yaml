@@ -1,0 +1,20 @@
+# Blueprint do Render: cria o serviço com a configuração certa automaticamente.
+# Plano free: sem cartão, dorme após 15 min sem acesso e o DISCO É EFÊMERO
+# (o banco SQLite zera a cada deploy/reinício). Bom para demonstração/testes.
+# Para produção: instância paga + Disk montado em /data (DB_PATH=/data/turbocanal.db).
+services:
+  - type: web
+    name: turbocanal
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install --omit=dev
+    startCommand: node src/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: OWNER_EMAIL
+        value: lcmatias777@gmail.com
+      - key: DB_PATH
+        value: ./data/turbocanal.db

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Opções — TurboCanal</title>
+  <style>
+    body { font-family: "Segoe UI", system-ui, sans-serif; background: #0b1020; color: #e8ecf8; display: grid; place-items: center; min-height: 100vh; margin: 0; }
+    .card { background: #151f3d; border: 1px solid #27345f; border-radius: 14px; padding: 22px; width: min(460px, 92vw); }
+    label { display: block; color: #9aa7c7; font-size: .9rem; margin: 10px 0 4px; }
+    input { width: 100%; box-sizing: border-box; background: #111933; color: #e8ecf8; border: 1px solid #27345f; border-radius: 8px; padding: 10px; }
+    .btn { background: #ff5d3b; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-weight: 700; cursor: pointer; margin-top: 12px; }
+    .ok { color: #37d08a; }
+    .muted { color: #9aa7c7; font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>🚀 TurboCanal — opções</h2>
+    <label>Endereço do servidor (site do TurboCanal)</label>
+    <input id="bu" placeholder="http://localhost:8787">
+    <p class="muted">Use o endereço onde o site está rodando (local ou publicado). A extensão usa a mesma conta e o mesmo saldo do site.</p>
+    <button class="btn" id="save">Salvar</button>
+    <span id="msg"></span>
+  </div>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

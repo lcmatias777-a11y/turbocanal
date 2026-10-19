@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "TurboCanal para YouTube",
+  "version": "0.1.0",
+  "description": "Ferramentas do TurboCanal direto no YouTube: análise de SEO de vídeos, palavras-chave e seus créditos. Mesma conta do site.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "TurboCanal"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage", "activeTab"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
