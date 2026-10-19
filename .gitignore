@@ -4,3 +4,4 @@ server/data/
 .env.*
 !.env.example
 *.log
+*.zip
