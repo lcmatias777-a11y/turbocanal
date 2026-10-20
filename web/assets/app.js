@@ -98,6 +98,7 @@ views.home = async () => {
         ['🧩 Extensão Chrome', 'Analise qualquer vídeo direto na página do YouTube, com a mesma conta e o mesmo saldo.']
       ].map(([t, d]) => `<div class="card"><h3>${t}</h3><p class="muted">${d}</p></div>`).join('')}
     </section>
+    <p class="center" style="margin-top:18px"><a class="btn ghost" href="#/ajuda">🧩 Baixar a extensão para Chrome</a></p>
     <h2 class="center" style="margin-top:34px">Planos</h2>
     <p class="center muted small">Créditos renovam todo mês. As comparações de capacidade são metas internas de referência, não números auditados.</p>
     <section class="grid cols3">${plans.map(planCard).join('')}</section>`;
@@ -478,11 +479,14 @@ views.ajuda = async () => {
       <div class="card"><h3>Como funcionam os créditos?</h3>
         <p class="muted">Cada ferramenta tem um custo em créditos, mostrado antes de usar. No plano Free, seu saldo é completado até 5.000 créditos no início de cada mês. Planos pagos liberam mais créditos a cada pagamento confirmado. Se uma ferramenta falhar, os créditos daquela chamada são estornados automaticamente.</p></div>
       <div class="card"><h3>Como instalo a extensão do Chrome?</h3>
-        <ol class="muted"><li>Baixe a pasta <b>extension</b> do projeto.</li>
-        <li>No Chrome, abra <b>chrome://extensions</b> e ative o <b>Modo do desenvolvedor</b>.</li>
-        <li>Clique em <b>Carregar sem compactação</b> e escolha a pasta da extensão.</li>
-        <li>Abra a extensão, informe o endereço do site e o token gerado em <a href="#/conta">Conta</a>.</li></ol>
-        <p class="small muted">A extensão ainda não está publicada na Chrome Web Store.</p></div>
+        <p><a class="btn sm" href="/turbocanal-extensao.zip" download>⬇️ Baixar extensão (.zip)</a></p>
+        <ol class="muted">
+        <li>Baixe o arquivo acima e descompacte (botão direito &gt; Extrair tudo).</li>
+        <li>No Chrome, digite <b>chrome://extensions</b> na barra de endereço e aperte Enter.</li>
+        <li>Ative o <b>Modo do desenvolvedor</b> (chavinha no canto superior direito).</li>
+        <li>Clique em <b>Carregar sem compactação</b> e escolha a pasta descompactada (a que contém o arquivo manifest.json).</li>
+        <li>Clique no 🚀 na barra do Chrome e entre com a mesma conta do site.</li></ol>
+        <p class="small muted">A extensão ainda não está publicada na Chrome Web Store, por isso a instalação é manual (modo do desenvolvedor). Quando for publicada na loja, bastará um clique.</p></div>
       <div class="card"><h3>De onde vêm os dados?</h3>
         <p class="muted">Das APIs oficiais e públicas do YouTube (YouTube Data API v3). Quando mostramos uma estimativa ou pontuação própria, isso vem identificado. Não inventamos métricas que a API não fornece.</p></div>
       <div class="card"><h3>Pagamentos</h3>

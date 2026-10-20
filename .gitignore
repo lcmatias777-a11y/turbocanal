@@ -5,3 +5,4 @@ server/data/
 !.env.example
 *.log
 *.zip
+!web/turbocanal-extensao.zip
