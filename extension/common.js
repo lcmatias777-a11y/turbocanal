@@ -2,7 +2,7 @@
 // do site: mesma conta, mesmo saldo, mesmas regras validadas no servidor.
 export async function getCfg() {
   const { baseUrl, token } = await chrome.storage.sync.get(['baseUrl', 'token']);
-  return { baseUrl: (baseUrl || 'http://localhost:8787').replace(/\/$/, ''), token: token || '' };
+  return { baseUrl: (baseUrl || 'https://turbocanal.onrender.com').replace(/\/$/, ''), token: token || '' };
 }
 export async function setCfg(obj) {
   await chrome.storage.sync.set(obj);

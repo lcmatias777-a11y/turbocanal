@@ -7,7 +7,7 @@
 
   async function cfg() {
     const { baseUrl, token } = await chrome.storage.sync.get(['baseUrl', 'token']);
-    return { baseUrl: (baseUrl || 'http://localhost:8787').replace(/\/$/, ''), token: token || '' };
+    return { baseUrl: (baseUrl || 'https://turbocanal.onrender.com').replace(/\/$/, ''), token: token || '' };
   }
 
   function videoId() {
