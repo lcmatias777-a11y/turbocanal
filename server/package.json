@@ -4,17 +4,20 @@
   "private": true,
   "type": "module",
   "description": "TurboCanal - plataforma de ferramentas para criadores do YouTube (backend + site)",
-  "engines": { "node": "22.x" },
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "test": "node test/run-tests.js"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.10",
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^11.10.0",
     "cookie-parser": "^1.4.7",
     "express": "^4.21.2",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.23.1"
   }
 }

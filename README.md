@@ -17,7 +17,7 @@ turbocanal/
   DEPLOY.md      Opções reais de hospedagem de baixo custo
 ```
 
-Decisões técnicas (resumo): Node + Express + better-sqlite3 foram escolhidos porque rodam em qualquer VPS/host barato, sem etapa de build, com banco persistente em arquivo (WAL) e migração simples para Postgres no futuro. O frontend é uma SPA estática servida pelo próprio backend (zero custo extra de hospedagem). Senhas com bcrypt, sessão JWT (cookie httpOnly no site, Bearer na extensão), SQL sempre com prepared statements, permissões e saldos validados SEMPRE no servidor.
+Decisões técnicas (resumo): Node + Express + Postgres (driver pg em produção; PGlite, um Postgres embutido, para rodar local e nos testes sem instalar nada). O frontend é uma SPA estática servida pelo próprio backend (zero custo extra de hospedagem). Senhas com bcrypt, sessão JWT (cookie httpOnly no site, Bearer na extensão), SQL sempre com prepared statements, permissões e saldos validados SEMPRE no servidor.
 
 ## Rodar localmente
 
@@ -28,7 +28,7 @@ npm start          # http://localhost:8787
 npm test           # roda os testes obrigatórios (34 verificações)
 ```
 
-O banco é criado sozinho em `server/data/turbocanal.db` com os 6 planos, a tabela de custos e as configurações iniciais.
+Sem DATABASE_URL, o banco embutido é criado sozinho em `server/data/pglite` com os 6 planos, a tabela de custos e as configurações iniciais. Em produção, defina DATABASE_URL (Postgres).
 
 ## Primeiro acesso do administrador principal (lcmatias777@gmail.com)
 
@@ -50,6 +50,12 @@ O administrador principal pode promover outras contas a administrador e removê-
 4. Login com Google (opcional): credenciais OAuth no Google Cloud (`GOOGLE_CLIENT_ID/SECRET`), redirect `SEU_SITE/api/auth/google/callback`.
 5. IA real (opcional): `ANTHROPIC_API_KEY` (a API da Anthropic é paga por uso). Sem ela, títulos/descrições usam gerador local e avisam o método.
 6. Hospedagem: veja DEPLOY.md.
+
+## Canal do YouTube (OAuth) e IA
+
+1. Login com Google e "Conectar meu canal" usam OAuth 2.0 (GOOGLE_CLIENT_ID/SECRET). Com o canal conectado: página Meu canal (vídeos e estatísticas), enviar capa (thumbnails.set), editar título/descrição (videos.update) e teste A/B de capas (alternância agendada pelo servidor, com views por período). Só vídeos do canal conectado podem ser alterados (verificado no servidor).
+2. Entrar com o Google usando o e-mail do administrador principal concede o papel de owner automaticamente (e-mail verificado pelo Google), sem token de console.
+3. IA Gemini (chave gratuita do Google AI Studio, colada em Admin > Configurações): "IA assiste o vídeo" (insights a partir da URL pública) e "Capa com IA" (imagem 16:9). Sem chave, as ferramentas avisam a pendência e não cobram.
 
 ## Sistema de créditos e planos
 

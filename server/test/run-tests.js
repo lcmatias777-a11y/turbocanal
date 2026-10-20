@@ -3,18 +3,14 @@
 // (as ferramentas de YouTube devolvem dados ROTULADOS como exemplo; a cobrança
 // de créditos, autenticação e permissões são 100% reais).
 
-import fs from 'node:fs';
 
-process.env.DB_PATH = './data/test.db';
+delete process.env.DATABASE_URL; // testes rodam no PGlite em memória (Postgres embutido)
 process.env.YT_MOCK = '1';
 process.env.OWNER_EMAIL = process.env.OWNER_EMAIL || 'lcmatias777@gmail.com';
-for (const f of ['./data/test.db', './data/test.db-wal', './data/test.db-shm']) {
-  try { fs.rmSync(f); } catch {}
-}
 
 const { buildApp } = await import('../src/app.js');
 const { getSetting } = await import('../src/db.js');
-const { app, db } = buildApp();
+const { app, db } = await buildApp({ databaseUrl: undefined, dataDir: ':memory:', scheduler: false });
 
 const server = app.listen(0);
 await new Promise((r) => server.on('listening', r));
@@ -54,12 +50,12 @@ check('primeira chamada cobra', a1.data.credits?.charged === 3, `(charged=${a1.d
 check('repetição com a mesma chave não cobra de novo', a2.status === 200 && a2.data.credits?.charged === 0 && a2.data.credits?.reused === true, `(charged=${a2.data.credits?.charged})`);
 
 console.log('\n== Saldo insuficiente: bloqueia sem ficar negativo ==');
-db.prepare('UPDATE users SET credits=2 WHERE email=?').run('maria@example.com');
+await db.run('UPDATE users SET credits=2 WHERE email=?', ['maria@example.com']);
 const poor = await req('/api/tools/video_analysis', { method: 'POST', token: t1, body: { video: 'dQw4w9WgXcQ' } });
 const after = await req('/api/me', { token: t1 });
 check('retorna 402 com aviso de saldo insuficiente', poor.status === 402, `(status=${poor.status})`);
 check('saldo não ficou negativo', after.data.user?.credits === 2, `(saldo=${after.data.user?.credits})`);
-db.prepare('UPDATE users SET credits=4992 WHERE email=?').run('maria@example.com');
+await db.run('UPDATE users SET credits=4992 WHERE email=?', ['maria@example.com']);
 
 console.log('\n== 4) Usuário comum NÃO vira admin forjando o e-mail no navegador ==');
 const adm1 = await req('/api/admin/users', { token: t1 });
@@ -75,9 +71,9 @@ const admBefore = await req('/api/admin/users', { token: tOwn });
 check('antes de reivindicar, ainda é 403 no painel', admBefore.status === 403);
 const badClaim = await req('/api/auth/claim-owner', { method: 'POST', token: tOwn, body: { token: 'token-errado' } });
 check('reivindicação com token errado é recusada', badClaim.status === 403);
-const wrongUserClaim = await req('/api/auth/claim-owner', { method: 'POST', token: t1, body: { token: getSetting(db, 'admin_setup_token') } });
+const wrongUserClaim = await req('/api/auth/claim-owner', { method: 'POST', token: t1, body: { token: await getSetting(db, 'admin_setup_token') } });
 check('outra conta com o token certo também é recusada (e-mail não bate)', wrongUserClaim.status === 403);
-const goodClaim = await req('/api/auth/claim-owner', { method: 'POST', token: tOwn, body: { token: getSetting(db, 'admin_setup_token') } });
+const goodClaim = await req('/api/auth/claim-owner', { method: 'POST', token: tOwn, body: { token: await getSetting(db, 'admin_setup_token') } });
 check('reivindicação correta (e-mail + token do console) vira owner', goodClaim.status === 200 && goodClaim.data.user?.role === 'owner', `(status=${goodClaim.status})`);
 
 const ownTool1 = await req('/api/tools/keyword_research', { method: 'POST', token: tOwn, body: { q: 'geometry dash' } });
@@ -106,12 +102,12 @@ const admByJoao = await req('/api/admin/users', { token: t2 });
 check('novo admin acessa o painel', admByJoao.status === 200);
 const promoByAdmin = await req('/api/admin/admins', { method: 'POST', token: t2, body: { email: 'maria@example.com' } });
 check('admin comum NÃO promove outros admins (só o principal)', promoByAdmin.status === 403);
-const ownerId = db.prepare('SELECT id FROM users WHERE email=?').get('lcmatias777@gmail.com').id;
+const ownerId = (await db.get('SELECT id FROM users WHERE email=?', ['lcmatias777@gmail.com'])).id;
 const demoteOwnerByAdmin = await req(`/api/admin/admins/${ownerId}`, { method: 'DELETE', token: t2 });
 check('admin não consegue remover/rebaixar o administrador principal', demoteOwnerByAdmin.status === 403);
 const demoteOwnerByOwner = await req(`/api/admin/admins/${ownerId}`, { method: 'DELETE', token: tOwn });
 check('nem o próprio fluxo permite rebaixar o principal', demoteOwnerByOwner.status === 403);
-const joaoId = db.prepare('SELECT id FROM users WHERE email=?').get('joao@example.com').id;
+const joaoId = (await db.get('SELECT id FROM users WHERE email=?', ['joao@example.com'])).id;
 const demoteJoao = await req(`/api/admin/admins/${joaoId}`, { method: 'DELETE', token: tOwn });
 const joaoAfter = await req('/api/admin/users', { token: t2 });
 check('owner remove o admin João, que perde o painel', demoteJoao.status === 200 && joaoAfter.status === 403);
@@ -135,6 +131,20 @@ const extMe = await req('/api/me', { token: tokenResp.data.token });
 check('token da extensão autentica a MESMA conta e o MESMO saldo', extMe.status === 200 && extMe.data.user?.email === 'maria@example.com');
 const extTool = await req('/api/tools/trends', { method: 'POST', token: tokenResp.data.token, body: {} });
 check('ferramenta via extensão também debita no servidor', extTool.status === 200 && typeof extTool.data.credits?.balance === 'number');
+
+console.log('\n== Canal do YouTube e IA: sem credenciais, avisam a pendência e não cobram ==');
+const ch = await req('/api/channel/videos', { token: t1 });
+check('Meu canal sem conexão retorna 409 explicando', ch.status === 409, `(status=${ch.status})`);
+const thumbNo = await req('/api/channel/videos/abc123/thumbnail', { method: 'POST', token: t1, body: { image: 'data:image/png;base64,iVBORw0KGgo=' } });
+const meAfter = await req('/api/me', { token: t1 });
+check('enviar capa sem canal conectado: 409 e créditos estornados', thumbNo.status === 409 && meAfter.data.user?.credits === 4992 - 3, `(status=${thumbNo.status}, saldo=${meAfter.data.user?.credits})`);
+const ins = await req('/api/tools/video_insights_ai', { method: 'POST', token: t1, body: { video: 'dQw4w9WgXcQ' } });
+const meAfter2 = await req('/api/me', { token: t1 });
+check('IA do Gemini sem chave: 409 e sem cobrança', ins.status === 409 && meAfter2.data.user?.credits === meAfter.data.user?.credits, `(status=${ins.status})`);
+const pub = await req('/api/settings/public');
+check('settings públicos informam o que está configurado', pub.status === 200 && pub.data.google_login === false && pub.data.gemini_configured === false);
+const health = await req('/api/health');
+check('health informa o tipo de banco', health.data.db === 'pglite');
 
 console.log(`\nRESULTADO: ${pass} passaram, ${fail} falharam.`);
 server.close();

@@ -14,13 +14,13 @@ const STOPWORDS = new Set(
   ).split(/\s+/)
 );
 
-function apiKey(db) {
-  return (getSetting(db, 'yt_api_key') || process.env.YT_API_KEY || '').trim();
+async function apiKey(db) {
+  return ((await getSetting(db, 'yt_api_key')) || process.env.YT_API_KEY || '').trim();
 }
 const isMock = () => process.env.YT_MOCK === '1';
 
 async function yt(db, endpoint, params) {
-  const key = apiKey(db);
+  const key = await apiKey(db);
   if (!key) {
     throw new HttpError(
       409,

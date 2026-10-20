@@ -1,5 +1,7 @@
-// Ferramentas de IA. Com ANTHROPIC_API_KEY configurada, usa a API da Anthropic;
-// sem chave (ou em caso de falha), usa um gerador heurístico e AVISA o usuário.
+// Ferramentas de IA de texto. Ordem de preferência:
+//   1) Anthropic (ANTHROPIC_API_KEY)  2) Gemini (chave no Admin ou GEMINI_API_KEY)
+//   3) gerador heurístico local (sempre avisa o usuário do método usado)
+import { geminiKey, geminiText } from './gemini.js';
 
 const MODEL = () => process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5';
 
@@ -9,16 +11,8 @@ async function callClaude(prompt, maxTokens = 900) {
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: MODEL(),
-        max_tokens: maxTokens,
-        messages: [{ role: 'user', content: prompt }]
-      })
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: MODEL(), max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] })
     });
     const data = await resp.json();
     if (!resp.ok) return null;
@@ -26,6 +20,20 @@ async function callClaude(prompt, maxTokens = 900) {
   } catch {
     return null;
   }
+}
+
+async function callAny(db, prompt, maxTokens) {
+  const a = await callClaude(prompt, maxTokens);
+  if (a) return { text: a, metodo: 'ia', modelo: MODEL() };
+  if (await geminiKey(db)) {
+    try {
+      const g = await geminiText(db, prompt, { maxTokens });
+      if (g) return { text: g, metodo: 'ia', modelo: 'gemini' };
+    } catch {
+      /* cai para o heurístico */
+    }
+  }
+  return null;
 }
 
 function heurTitles(topic, keywords = []) {
@@ -44,21 +52,21 @@ function heurTitles(topic, keywords = []) {
   ];
 }
 
-export async function titleSuggestions({ topic, keywords = [] }) {
+export async function titleSuggestions(db, { topic, keywords = [] }) {
   const prompt =
     `Você é um especialista em títulos de vídeos do YouTube em português do Brasil. ` +
     `Gere 8 títulos originais, com no máximo 70 caracteres cada, para um vídeo sobre: "${topic}". ` +
     (keywords.length ? `Palavras-chave para considerar: ${keywords.join(', ')}. ` : '') +
     `Varie o estilo (lista, pergunta, curiosidade, tutorial). Responda apenas com os títulos, um por linha, sem numeração.`;
-  const ai = await callClaude(prompt);
+  const ai = await callAny(db, prompt, 900);
   if (ai) {
-    const titles = ai.split('\n').map((l) => l.replace(/^[\d.)\-*\s]+/, '').trim()).filter(Boolean).slice(0, 8);
-    if (titles.length >= 4) return { titles, metodo: 'ia', modelo: MODEL() };
+    const titles = ai.text.split('\n').map((l) => l.replace(/^[\d.)\-*\s]+/, '').trim()).filter(Boolean).slice(0, 8);
+    if (titles.length >= 4) return { titles, metodo: 'ia', modelo: ai.modelo };
   }
   return {
     titles: heurTitles(topic, keywords),
     metodo: 'heuristica',
-    aviso: 'Gerado por regras locais (IA não configurada neste servidor). O administrador pode ativar a IA com uma chave da API da Anthropic.'
+    aviso: 'Gerado por regras locais (nenhuma IA configurada neste servidor). O administrador pode ativar a IA em Admin > Configurações.'
   };
 }
 
@@ -77,18 +85,18 @@ function heurDescription({ topic, draft = '', keywords = [] }) {
     .join('\n');
 }
 
-export async function descriptionOptimize({ topic, draft = '', keywords = [] }) {
+export async function descriptionOptimize(db, { topic, draft = '', keywords = [] }) {
   const prompt =
     `Você é um especialista em SEO para YouTube (pt-BR). Escreva uma descrição otimizada (até 1500 caracteres) ` +
     `para um vídeo sobre "${topic}". ` +
     (draft ? `Rascunho atual do criador: """${draft.slice(0, 1500)}""". Melhore mantendo a voz dele. ` : '') +
     (keywords.length ? `Inclua naturalmente: ${keywords.join(', ')}. ` : '') +
     `Estrutura: 2 primeiras linhas com a promessa do vídeo, seção de capítulos com 00:00, chamada para inscrição, e 3 a 5 hashtags no final. Responda só com a descrição.`;
-  const ai = await callClaude(prompt, 1200);
-  if (ai) return { description: ai, metodo: 'ia', modelo: MODEL() };
+  const ai = await callAny(db, prompt, 1200);
+  if (ai) return { description: ai.text, metodo: 'ia', modelo: ai.modelo };
   return {
     description: heurDescription({ topic, draft, keywords }),
     metodo: 'heuristica',
-    aviso: 'Gerado por modelo local de regras (IA não configurada neste servidor).'
+    aviso: 'Gerado por modelo local de regras (nenhuma IA configurada neste servidor).'
   };
 }

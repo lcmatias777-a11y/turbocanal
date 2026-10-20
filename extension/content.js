@@ -1,81 +1,101 @@
-// Content script do TurboCanal: botão flutuante nas páginas de vídeo do YouTube
-// que abre um painel com a análise do vídeo atual (via backend, cobrando créditos
-// no servidor, com as mesmas regras do site).
+// Content script do TurboCanal: injeta um painel fixo na coluna lateral das páginas
+// de vídeo do YouTube (como ferramentas do gênero), com estatísticas, pontuação de
+// SEO, palavras-chave e atalhos. Tudo passa pelo backend, que cobra créditos no
+// servidor com as mesmas regras do site.
 (() => {
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString('pt-BR'));
+  let lastVideo = null;
 
   async function cfg() {
     const { baseUrl, token } = await chrome.storage.sync.get(['baseUrl', 'token']);
     return { baseUrl: (baseUrl || 'https://turbocanal.onrender.com').replace(/\/$/, ''), token: token || '' };
   }
+  async function api(path, { method = 'GET', body } = {}) {
+    const { baseUrl, token } = await cfg();
+    const r = await fetch(baseUrl + '/api' + path, {
+      method,
+      headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { const e = new Error(data.error || 'Erro ' + r.status); e.status = r.status; throw e; }
+    return data;
+  }
 
   function videoId() {
-    const m = location.href.match(/[?&]v=([A-Za-z0-9_-]{11})|shorts\/([A-Za-z0-9_-]{11})/);
-    return m ? m[1] || m[2] : null;
+    const m = location.href.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+    return m ? m[1] : null;
   }
 
-  function removePanel() {
-    document.getElementById('tc-panel')?.remove();
+  function ensurePanel() {
+    let p = document.getElementById('tc-panel');
+    if (p) return p;
+    const host = document.querySelector('#secondary-inner') || document.querySelector('#secondary') || document.body;
+    p = document.createElement('div');
+    p.id = 'tc-panel';
+    p.className = host === document.body ? 'tc-floating' : 'tc-inline';
+    host.prepend(p);
+    return p;
   }
 
-  async function openPanel() {
-    removePanel();
-    const panel = document.createElement('div');
-    panel.id = 'tc-panel';
-    panel.innerHTML = `<button class="tc-close" title="Fechar">✕</button><h3>🚀 Turbo<b>Canal</b></h3><div id="tc-body" class="tc-muted">Carregando…</div>`;
-    document.body.appendChild(panel);
-    panel.querySelector('.tc-close').onclick = removePanel;
-    const body = panel.querySelector('#tc-body');
+  function header(extra = '') {
+    return `<div class="tc-head"><span>🚀 Turbo<b>Canal</b></span><span class="tc-head-right">${extra}<button class="tc-close" title="Fechar">✕</button></span></div>`;
+  }
 
+  async function render() {
+    const vid = videoId();
+    if (!vid) { document.getElementById('tc-panel')?.remove(); return; }
+    const panel = ensurePanel();
+    if (lastVideo === vid && panel.dataset.ready === '1') return;
+    lastVideo = vid;
+    panel.dataset.ready = '0';
     const { baseUrl, token } = await cfg();
     if (!token) {
-      body.innerHTML = `<span class="tc-warn">Você ainda não entrou na extensão.</span><br>Clique no ícone do TurboCanal na barra do Chrome e faça login (mesma conta do site).`;
-      return;
+      panel.innerHTML = header() + `<div class="tc-body"><p>Entre na extensão (ícone 🚀 na barra do Chrome) com a mesma conta do site para ver a análise deste vídeo aqui.</p>
+        <p><a class="tc-btn" href="${esc(baseUrl)}/#/login" target="_blank" rel="noopener">Entrar / criar conta grátis</a></p></div>`;
+      wire(panel); panel.dataset.ready = '1'; return;
     }
-    const vid = videoId();
-    if (!vid) {
-      body.innerHTML = `<span class="tc-warn">Abra um vídeo para analisar.</span>`;
-      return;
-    }
+    panel.innerHTML = header() + `<div class="tc-body tc-muted">Analisando este vídeo…</div>`;
+    wire(panel);
     try {
-      const r = await fetch(baseUrl + '/api/tools/video_analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ video: vid })
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error || 'Erro ' + r.status);
-      const v = data.result.video, s = data.result.seo;
-      body.innerHTML = `
-        ${data.result.mock ? `<p class="tc-err">⚠️ ${esc(data.result.aviso)}</p>` : ''}
-        <b>${esc(v.title)}</b>
-        <table>
-          <tr><td>👁 Views</td><td>${fmt(v.views)}</td></tr>
-          <tr><td>👍 Likes</td><td>${fmt(v.likes)}</td></tr>
-          <tr><td>💬 Comentários</td><td>${fmt(v.comments)}</td></tr>
-          <tr><td>📈 SEO</td><td><b>${s.score}/100</b> <span class="tc-muted">(heurística)</span></td></tr>
-        </table>
-        ${s.checks.filter((c) => !c.ok).slice(0, 3).map((c) => `<p>⚠️ <b>${esc(c.item)}</b><br><span class="tc-muted">${esc(c.dica)}</span></p>`).join('') || '<p class="tc-ok">✅ Checklist de SEO completo!</p>'}
-        <p class="tc-muted">${data.credits.unlimited ? 'Conta do administrador: sem consumo de créditos.' : `Usados ${data.credits.charged} créditos · saldo ${fmt(data.credits.balance)}`}
-        · <a href="${esc(baseUrl)}/#/ferramentas/video" target="_blank" rel="noopener">abrir no painel</a></p>`;
+      const me = (await api('/me')).user;
+      const r = await api('/tools/video_analysis', { method: 'POST', body: { video: vid } });
+      const v = r.result.video, s = r.result.seo;
+      const kws = (v.tags || []).slice(0, 12);
+      panel.innerHTML = header(`<span class="tc-credits">💎 ${me.unlimited ? '∞' : fmt(r.credits.balance)}</span>`) + `
+        <div class="tc-body">
+          ${r.result.mock ? `<p class="tc-err">⚠️ ${esc(r.result.aviso)}</p>` : ''}
+          <div class="tc-score"><div class="tc-score-n">${s.score}</div><div><b>Pontuação de SEO</b><br><span class="tc-muted">heurística TurboCanal (0 a 100)</span></div></div>
+          <table class="tc-table">
+            <tr><td>👁 Views</td><td>${fmt(v.views)}</td><td>👍 Likes</td><td>${fmt(v.likes)}</td></tr>
+            <tr><td>💬 Coment.</td><td>${fmt(v.comments)}</td><td>⏱ Duração</td><td>${Math.round((v.durationSec || 0) / 60)} min</td></tr>
+            <tr><td>📅 Publicado</td><td colspan="3">${esc((v.publishedAt || '').slice(0, 10))}</td></tr>
+          </table>
+          ${kws.length ? `<div class="tc-sec"><b>Tags do vídeo</b><div class="tc-tags">${kws.map((k) => `<span>${esc(k)}</span>`).join('')}</div></div>` : '<div class="tc-sec tc-muted">Este vídeo não tem tags públicas.</div>'}
+          <div class="tc-sec"><b>Checklist</b>${s.checks.map((c) => `<div class="tc-check">${c.ok ? '✅' : '⚠️'} ${esc(c.item)}</div>`).join('')}</div>
+          <div class="tc-actions">
+            <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/palavras" target="_blank" rel="noopener">🔑 Palavras-chave</a>
+            <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/insights" target="_blank" rel="noopener">🎥 IA assiste</a>
+            <a class="tc-btn" href="${esc(baseUrl)}/#/canal" target="_blank" rel="noopener">📺 Meu canal</a>
+          </div>
+          <p class="tc-muted tc-foot">${r.credits.unlimited ? 'Conta do administrador: sem consumo de créditos.' : `Usados ${r.credits.charged} créditos nesta análise.`}</p>
+        </div>`;
+      wire(panel);
     } catch (e) {
-      body.innerHTML = `<span class="tc-err">${esc(e.message)}</span><br><span class="tc-muted">Confira se o servidor do TurboCanal está no ar e o endereço nas opções da extensão.</span>`;
+      panel.innerHTML = header() + `<div class="tc-body"><p class="tc-err">${esc(e.message)}</p>
+        <p class="tc-muted">${e.status === 401 ? 'Sessão expirada: entre de novo pelo ícone da extensão.' : e.status === 409 ? 'Configuração pendente no servidor (nenhum crédito foi cobrado).' : 'Confira se o servidor do TurboCanal está no ar.'}</p></div>`;
+      wire(panel);
     }
+    panel.dataset.ready = '1';
   }
 
-  function ensureFab() {
-    if (document.getElementById('tc-fab')) return;
-    const b = document.createElement('button');
-    b.id = 'tc-fab';
-    b.title = 'TurboCanal: analisar este vídeo';
-    b.textContent = 'TC';
-    b.onclick = openPanel;
-    document.body.appendChild(b);
+  function wire(panel) {
+    const c = panel.querySelector('.tc-close');
+    if (c) c.onclick = () => { panel.remove(); lastVideo = '__closed__' + videoId(); };
   }
 
-  ensureFab();
-  // O YouTube é uma SPA: reinstala o botão a cada navegação interna.
-  window.addEventListener('yt-navigate-finish', () => { ensureFab(); removePanel(); });
-  setInterval(ensureFab, 4000);
+  render();
+  window.addEventListener('yt-navigate-finish', () => { lastVideo = null; setTimeout(render, 800); });
+  setInterval(() => { if (videoId() && !document.getElementById('tc-panel') && lastVideo !== '__closed__' + videoId()) render(); }, 3000);
 })();

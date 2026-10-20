@@ -25,18 +25,19 @@ export function isEmail(v) {
   return typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v) && v.length <= 190;
 }
 
-export function audit(db, actor, action, target = '', detail = '') {
+export async function audit(db, actor, action, target = '', detail = '') {
   try {
-    db.prepare(
-      'INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)'
-    ).run(
-      uid(),
-      actor?.id || null,
-      actor?.email || 'sistema',
-      action,
-      String(target || ''),
-      typeof detail === 'string' ? detail : JSON.stringify(detail),
-      now()
+    await db.run(
+      'INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)',
+      [
+        uid(),
+        actor?.id || null,
+        actor?.email || 'sistema',
+        action,
+        String(target || ''),
+        typeof detail === 'string' ? detail : JSON.stringify(detail),
+        now()
+      ]
     );
   } catch (e) {
     console.error('[audit] falha ao registrar auditoria:', e.message);

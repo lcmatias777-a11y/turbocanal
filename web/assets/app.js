@@ -41,6 +41,8 @@ const TOOL_LINKS = [
   ['#/ferramentas/tendencias', 'Tendências'],
   ['#/ferramentas/titulos', 'Títulos (IA)'],
   ['#/ferramentas/descricao', 'Descrição (IA)'],
+  ['#/ferramentas/insights', 'IA assiste o vídeo'],
+  ['#/ferramentas/capa', 'Capa com IA'],
   ['#/ferramentas/busca', 'Buscar vídeos']
 ];
 
@@ -54,7 +56,7 @@ function renderNav() {
     <div class="container nav">
       <a class="brand" href="#/">🚀 Turbo<b>Canal</b></a>
       <div class="links">
-        ${u ? link('#/dashboard', 'Painel') + link('#/ferramentas/palavras', 'Ferramentas') + link('#/historico', 'Histórico') : ''}
+        ${u ? link('#/dashboard', 'Painel') + link('#/ferramentas/palavras', 'Ferramentas') + link('#/canal', '📺 Meu canal') + link('#/historico', 'Histórico') : ''}
         ${link('#/planos', 'Planos')}
         ${link('#/extensao', 'Extensão')}
         ${link('#/ajuda', 'Ajuda')}
@@ -118,6 +120,15 @@ function planCard(p) {
   </div>`;
 }
 
+// Botão do Google: aparece sempre; se as credenciais ainda não foram configuradas no
+// servidor, explica em vez de fingir que funciona.
+function googleButton(label, connect = false) {
+  const href = connect ? '/api/auth/google?connect=1' : '/api/auth/google';
+  if (state.pub.google_login) return `<p class="center"><a class="btn ghost" href="${href}">🔵 ${label}</a></p>`;
+  return `<p class="center"><button class="btn ghost" type="button" onclick="alert('O login com Google ainda não foi ativado neste servidor: falta o administrador criar as credenciais no Google Cloud (que exige verificação em duas etapas na conta Google) e colocá-las no servidor. Assim que ativar, este botão funciona.')">🔵 ${label}</button>
+    <br><span class="muted small">aguardando configuração do administrador</span></p>`;
+}
+
 views.login = async (params) => {
   appEl().innerHTML = `
     <div class="card" style="max-width:420px;margin:30px auto">
@@ -129,7 +140,7 @@ views.login = async (params) => {
         <label>Senha</label><input name="password" type="password" required>
         <p><button class="btn" style="width:100%">Entrar</button></p>
       </form>
-      ${state.pub.google_login ? `<p class="center"><a class="btn ghost" href="/api/auth/google">Entrar com Google</a></p>` : ''}
+      ${googleButton('Entrar com Google')}
       <p class="muted small center">Não tem conta? <a href="#/cadastro">Crie grátis</a>.</p>
     </div>`;
   $('#f').onsubmit = async (ev) => {
@@ -155,7 +166,7 @@ views.cadastro = async () => {
         <label>Senha (mín. 8 caracteres)</label><input name="password" type="password" minlength="8" required>
         <p><button class="btn" style="width:100%">Criar conta</button></p>
       </form>
-      ${state.pub.google_login ? `<p class="center"><a class="btn ghost" href="/api/auth/google">Cadastrar com Google</a></p>` : ''}
+      ${googleButton('Cadastrar com Google')}
     </div>`;
   $('#f').onsubmit = async (ev) => {
     ev.preventDefault();
@@ -192,6 +203,8 @@ views.dashboard = async () => {
       <div class="card"><h3>Seu plano</h3><div class="kpi">${esc(u.plan?.name || u.plan_id)}</div>
         <p class="muted small">${u.plan?.price_cents ? money(u.plan.price_cents) + '/mês' : 'Gratuito'} · ${fmt(u.plan?.monthly_credits)} créditos/mês</p>
         ${u.unlimited ? '' : '<a class="btn sm secondary" href="#/planos">Fazer upgrade</a>'}</div>
+      <div class="card"><h3>📺 Meu canal</h3><p class="muted small">${u.youtube?.connected ? `Conectado: <b>${esc(u.youtube.channel_title || 'canal')}</b>. Capas, A/B, edição de títulos.` : 'Conecte seu canal do YouTube para gerenciar capas, títulos e testes A/B.'}</p>
+        <a class="btn sm secondary" href="#/canal">${u.youtube?.connected ? 'Abrir meu canal' : 'Conectar canal'}</a></div>
       <div class="card"><h3>Extensão Chrome</h3><p class="muted small">Analise vídeos direto no YouTube com a mesma conta.</p>
         <a class="btn sm secondary" href="#/extensao">Baixar e instalar</a></div>
     </section>
@@ -207,7 +220,8 @@ views.dashboard = async () => {
 function toolCostLabel(hash) {
   const map = {
     palavras: 'keyword_research', video: 'video_analysis', canal: 'channel_analysis',
-    tendencias: 'trends', titulos: 'title_ai', descricao: 'description_ai', busca: 'video_search'
+    tendencias: 'trends', titulos: 'title_ai', descricao: 'description_ai', busca: 'video_search',
+    insights: 'video_insights_ai', capa: 'thumbnail_ai'
   };
   const key = map[hash.split('/').pop()];
   const c = state.costs.find((x) => x.tool === key);
@@ -358,6 +372,148 @@ views['ferramentas/descricao'] = toolPage({
     <textarea style="min-height:260px" readonly>${esc(r.description)}</textarea>
     <p><button class="btn sm secondary" onclick="navigator.clipboard.writeText(document.querySelector('#out textarea').value)">Copiar descrição</button></p></div>`
 });
+
+views['ferramentas/insights'] = toolPage({
+  title: '🎥 IA assiste o vídeo', toolKey: 'video_insights_ai',
+  desc: 'A IA (Gemini) assiste ao vídeo pela URL e devolve resumo, ganchos, títulos, tags, ideia de capa e melhorias.',
+  formHtml: `<label>Link ou ID do vídeo (público)</label><input name="video" required placeholder="https://www.youtube.com/watch?v=...">`,
+  getBody: (fd) => ({ video: fd.get('video') }),
+  render: (r) => {
+    const i = r.insights || {};
+    const list = (arr) => `<ul>${(arr || []).map((x) => `<li>${esc(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('')}</ul>`;
+    return `<div class="grid cols2">
+      <div class="card"><h3>Resumo</h3><p>${esc(i.resumo || '')}</p><p class="muted small">Público: ${esc(i.publico || '')}</p>
+        <p>Nota de retenção (heurística): <b>${esc(String(i.nota_retencao ?? ''))}</b></p></div>
+      <div class="card"><h3>Ganchos de abertura</h3>${list(i.ganchos)}</div>
+      <div class="card"><h3>Títulos sugeridos</h3>${list(i.titulos)}</div>
+      <div class="card"><h3>Tags</h3><p>${(i.tags || []).map((t) => `<span class="pill">${esc(t)}</span> `).join('')}</p></div>
+      <div class="card"><h3>Ideia de capa</h3><p>${esc(typeof i.capa === 'string' ? i.capa : JSON.stringify(i.capa || ''))}</p>
+        <p><a class="btn sm secondary" href="#/ferramentas/capa">Gerar essa capa com IA →</a></p></div>
+      <div class="card"><h3>Melhorias</h3>${list(i.melhorias)}</div>
+    </div>`;
+  }
+});
+
+views['ferramentas/capa'] = toolPage({
+  title: '🖼️ Capa com IA', toolKey: 'thumbnail_ai',
+  desc: 'Gere uma thumbnail 16:9 com IA (Gemini). Depois você pode enviá-la direto para um vídeo seu em "Meu canal".',
+  formHtml: `<label>Título ou tema do vídeo</label><input name="title" required maxlength="200" placeholder="ex.: Como vencer no Bedwars">
+    <label>Detalhes da cena (opcional)</label><textarea name="brief" maxlength="600" placeholder="ex.: personagem surpreso, explosão colorida ao fundo, texto 'IMPOSSÍVEL'"></textarea>
+    <label>Estilo</label><select name="style"><option>vibrante</option><option>minimalista</option><option>gamer</option><option>cinematográfico</option><option>cartoon</option></select>`,
+  getBody: (fd) => ({ title: fd.get('title'), brief: fd.get('brief'), style: fd.get('style') }),
+  render: (r) => {
+    const src = `data:${r.mime};base64,${r.base64}`;
+    state.lastThumb = src;
+    return `<div class="card"><img src="${src}" style="max-width:100%;border-radius:10px" alt="Capa gerada">
+      <p><a class="btn sm" download="capa-turbocanal.png" href="${src}">Baixar imagem</a>
+         <a class="btn sm secondary" href="#/canal">Enviar para um vídeo meu →</a></p>
+      <p class="muted small">Modelo: ${esc(r.modelo)}. Confira o texto da imagem antes de usar.</p></div>`;
+  }
+});
+
+/* ------------------------------ Meu canal (OAuth YouTube) ------------------------------ */
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve(null);
+    if (file.size > 2 * 1024 * 1024) return reject(new Error('A imagem precisa ter no máximo 2 MB.'));
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error('Não foi possível ler a imagem.'));
+    fr.readAsDataURL(file);
+  });
+}
+
+views.canal = async () => {
+  if (!state.user) return needLogin();
+  const u = state.user;
+  if (!u.youtube?.connected) {
+    appEl().innerHTML = `
+      <h1>📺 Meu canal</h1>
+      <div class="card" style="max-width:640px">
+        <p>Conecte seu canal do YouTube para: ver seus vídeos e estatísticas, enviar capas (inclusive as geradas por IA), editar títulos e descrições e rodar testes A/B de capa. Só vídeos do canal conectado podem ser alterados, e tudo é validado no servidor.</p>
+        ${googleButton('Conectar meu canal do YouTube', true)}
+        <p class="muted small">Você autoriza pelo próprio Google (OAuth). Pode desconectar quando quiser.</p>
+      </div>`;
+    return;
+  }
+  appEl().innerHTML = `<h1>📺 Meu canal</h1><div id="cmsg"></div><div id="cbody"><span class="spin"></span></div>`;
+  try {
+    const data = await api('/channel/videos');
+    const ab = (await api('/channel/ab')).items;
+    const c = data.channel;
+    $('#cbody').innerHTML = `
+      <div class="card"><div class="thumbrow">${c.thumb ? `<img src="${esc(c.thumb)}" style="border-radius:50%;width:80px">` : ''}
+        <div><h3>${esc(c.title)}</h3><p>👥 ${c.subs == null ? 'inscritos ocultos' : fmt(c.subs) + ' inscritos'} · 👁 ${fmt(c.views)} views · 🎬 ${fmt(c.videos)} vídeos</p>
+        <p><button class="btn sm ghost" id="ytoff">Desconectar canal</button></p></div></div></div>
+      ${ab.length ? `<h2>Testes A/B de capa</h2><div class="card scroll"><table><tr><th>Vídeo</th><th>Período</th><th>Capa atual</th><th>Status</th><th>Resultados</th><th></th></tr>
+        ${ab.map((t) => `<tr><td>${esc(t.title || t.video_id)}</td><td>${t.hours}h</td><td>${esc(t.current)}</td><td><span class="pill ${t.status === 'running' ? 'ok' : ''}">${esc(t.status)}</span></td>
+          <td class="small">${(t.log || []).map((l) => `${l.variant}: ${l.views_gain != null ? '+' + fmt(l.views_gain) + ' views' : 'em andamento'}`).join('<br>')}</td>
+          <td>${t.status === 'running' ? `<button class="btn sm secondary" data-stop="${t.id}" data-keep="A">Parar e manter A</button> <button class="btn sm secondary" data-stop="${t.id}" data-keep="B">Parar e manter B</button>` : ''}</td></tr>`).join('')}
+      </table></div>` : ''}
+      <h2>Meus vídeos</h2>
+      <div class="grid cols2">${data.videos.map((v) => `
+        <div class="card" id="v-${esc(v.id)}">
+          <div class="thumbrow">${v.thumb ? `<img src="${esc(v.thumb)}">` : ''}<div><b>${esc(v.title)}</b>
+            <p class="muted small">👁 ${fmt(v.views)} · 👍 ${fmt(v.likes)} · 💬 ${fmt(v.comments)} · ${dt(v.publishedAt).split(',')[0]} · ${esc(v.privacy || '')}</p></div></div>
+          <details><summary class="small">✏️ Editar título e descrição</summary>
+            <label>Título</label><input data-f="title" value="${esc(v.title)}" maxlength="100">
+            <label>Descrição</label><textarea data-f="description">${esc(v.description)}</textarea>
+            <p><button class="btn sm" data-save="${esc(v.id)}">Salvar no YouTube</button> <span class="muted small">${costOf('video_update')}</span></p></details>
+          <details><summary class="small">🖼️ Enviar capa</summary>
+            <label>Imagem (JPG/PNG, até 2 MB, 1280x720)</label><input type="file" accept="image/*" data-file="${esc(v.id)}">
+            ${state.lastThumb ? `<p class="small"><label style="display:inline"><input type="checkbox" data-uselast="${esc(v.id)}" style="width:auto"> usar a última capa gerada por IA</label></p>` : ''}
+            <p><button class="btn sm" data-thumb="${esc(v.id)}">Enviar para o YouTube</button> <span class="muted small">${costOf('thumbnail_upload')}</span></p></details>
+          <details><summary class="small">🧪 Teste A/B de capas</summary>
+            <label>Capa A</label><input type="file" accept="image/*" data-a="${esc(v.id)}">
+            <label>Capa B</label><input type="file" accept="image/*" data-b="${esc(v.id)}">
+            <label>Trocar a cada (horas)</label><input type="number" min="1" max="168" value="24" data-h="${esc(v.id)}">
+            <p><button class="btn sm" data-ab="${esc(v.id)}">Iniciar teste</button> <span class="muted small">${costOf('ab_test')}</span></p></details>
+          <div class="small" id="m-${esc(v.id)}"></div>
+        </div>`).join('')}</div>
+      ${data.videos.length ? '' : '<p class="muted">Nenhum vídeo encontrado neste canal.</p>'}`;
+
+    $('#ytoff').onclick = async () => { if (confirm('Desconectar o canal do YouTube desta conta?')) { await api('/auth/youtube/disconnect', { method: 'POST' }); await refreshMe(); route(); } };
+    const msg = (id, kind, html) => ($('#m-' + id).innerHTML = alertBox(kind, html));
+    for (const b of document.querySelectorAll('[data-save]')) b.onclick = async () => {
+      const id = b.dataset.save, card = $('#v-' + id);
+      try {
+        const r = await api('/channel/videos/' + id, { method: 'PUT', body: { title: card.querySelector('[data-f=title]').value, description: card.querySelector('[data-f=description]').value } });
+        await refreshMe(); msg(id, 'ok', 'Salvo no YouTube. ' + creditsNote(r.credits));
+      } catch (e) { msg(id, 'err', esc(e.message)); }
+    };
+    for (const b of document.querySelectorAll('[data-thumb]')) b.onclick = async () => {
+      const id = b.dataset.thumb, card = $('#v-' + id);
+      try {
+        const useLast = card.querySelector('[data-uselast]')?.checked;
+        const image = useLast ? state.lastThumb : await fileToDataUrl(card.querySelector('[data-file]').files[0]);
+        if (!image) throw new Error('Escolha uma imagem.');
+        const r = await api('/channel/videos/' + id + '/thumbnail', { method: 'POST', body: { image } });
+        await refreshMe(); msg(id, 'ok', 'Capa enviada ao YouTube (pode levar alguns minutos para aparecer). ' + creditsNote(r.credits));
+      } catch (e) { msg(id, 'err', esc(e.message)); }
+    };
+    for (const b of document.querySelectorAll('[data-ab]')) b.onclick = async () => {
+      const id = b.dataset.ab, card = $('#v-' + id);
+      try {
+        const thumb_a = await fileToDataUrl(card.querySelector('[data-a]').files[0]);
+        const thumb_b = await fileToDataUrl(card.querySelector('[data-b]').files[0]);
+        if (!thumb_a || !thumb_b) throw new Error('Escolha as duas capas (A e B).');
+        const r = await api('/channel/ab', { method: 'POST', body: { video_id: id, thumb_a, thumb_b, hours: parseInt(card.querySelector('[data-h]').value, 10) || 24 } });
+        await refreshMe(); msg(id, 'ok', 'Teste iniciado com a capa A. ' + esc(r.result.aviso) + ' ' + creditsNote(r.credits)); setTimeout(route, 1500);
+      } catch (e) { msg(id, 'err', esc(e.message)); }
+    };
+    for (const b of document.querySelectorAll('[data-stop]')) b.onclick = async () => {
+      try { await api('/channel/ab/' + b.dataset.stop + '/stop', { method: 'POST', body: { keep: b.dataset.keep } }); route(); }
+      catch (e) { $('#cmsg').innerHTML = alertBox('err', esc(e.message)); }
+    };
+  } catch (e) {
+    $('#cbody').innerHTML = alertBox(e.status === 409 ? 'warn' : 'err', esc(e.message)) + (e.status === 409 ? googleButton('Conectar meu canal do YouTube', true) : '');
+  }
+};
+function costOf(tool) {
+  const c = state.costs.find((x) => x.tool === tool);
+  if (!c) return '';
+  return state.user?.unlimited ? '(ilimitado)' : `(${c.cost} créditos)`;
+}
 
 /* ------------------------------ Planos e pagamento ------------------------------ */
 views.planos = async () => {
@@ -538,6 +694,9 @@ const adminTabs = {
       </section>
       <div class="card"><h3>Status da configuração</h3>
         <p>YouTube API: ${cfgPill(o.config.youtubeApiConfigured, 'configurada', 'pendente')} ·
+           IA Gemini: ${cfgPill(o.config.geminiConfigured, 'configurada', 'pendente')} ·
+           Login Google: ${cfgPill(o.config.googleLoginConfigured, 'ativo', 'pendente')} ·
+           Banco: ${cfgPill(o.config.database === 'postgres', 'Postgres persistente', esc(o.config.database || ''))} ·
            Provedor de pagamentos: ${cfgPill(o.config.paymentProviderConfigured, 'configurado', 'pendente')} ·
            Pagamentos: ${cfgPill(o.config.paymentsEnabled, 'ativados', 'desativados')} ·
            Chave Pix: ${cfgPill(o.config.pixKeyConfirmed, 'confirmada', 'não confirmada')}</p></div>
@@ -630,6 +789,10 @@ const adminTabs = {
         <label>Recarga mensal do plano Free (créditos)</label><input id="c_topup" type="number" value="${esc(s.free_monthly_topup)}">
         <label>Chave da YouTube Data API ${s.yt_api_key.set ? `<span class="pill ok">configurada (${esc(s.yt_api_key.masked)})</span>` : '<span class="pill warn">pendente</span>'}</label>
         <input id="c_yt" placeholder="cole a chave para atualizar (vazio mantém a atual)">
+        <label>Chave da API do Gemini (IA que assiste vídeos e gera capas) ${s.gemini_api_key.set ? `<span class="pill ok">configurada (${esc(s.gemini_api_key.masked)})</span>` : '<span class="pill warn">pendente</span>'}</label>
+        <input id="c_gem" placeholder="chave do Google AI Studio (aistudio.google.com), plano gratuito">
+        <p class="small muted">Login com Google: ${s.google_login_configured ? '<span class="pill ok">ativo</span>' : '<span class="pill warn">pendente</span> (variáveis GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no servidor; URI de redirecionamento: <span class="copybox" style="display:inline-block">' + esc(s.google_redirect_uri) + '</span>)'}
+        <br>Banco de dados: <span class="pill ${s.database === 'postgres' ? 'ok' : 'warn'}">${esc(s.database)}</span>${s.database !== 'postgres' ? ' (sem DATABASE_URL os dados não persistem em hospedagem com disco efêmero)' : ''}</p>
         <p><button id="csave" class="btn sm">Salvar</button></p></div>
       <div class="card"><h3>Pagamentos (Pix)</h3><div id="pmsg2"></div>
         <label>Chave Pix de recebimento</label><input id="c_pix" value="${esc(s.pix_key_value)}">
@@ -647,6 +810,7 @@ const adminTabs = {
       try {
         const updates = { site_name: $('#c_site').value, free_monthly_topup: $('#c_topup').value };
         if ($('#c_yt').value.trim()) updates.yt_api_key = $('#c_yt').value.trim();
+        if ($('#c_gem').value.trim()) updates.gemini_api_key = $('#c_gem').value.trim();
         await api('/admin/settings', { method: 'PUT', body: { updates } });
         $('#cmsg').innerHTML = alertBox('ok', 'Configurações salvas.');
       } catch (e) { showErr($('#cmsg'), e); }
