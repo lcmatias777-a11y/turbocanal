@@ -2,6 +2,6 @@
 chrome.runtime.onInstalled.addListener(async () => {
   const { baseUrl } = await chrome.storage.sync.get('baseUrl');
   if (!baseUrl) {
-    await chrome.storage.sync.set({ baseUrl: 'http://localhost:8787' });
+    await chrome.storage.sync.set({ baseUrl: 'https://turbocanal.onrender.com' });
   }
 });
