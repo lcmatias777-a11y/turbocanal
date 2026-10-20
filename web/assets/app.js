@@ -56,6 +56,7 @@ function renderNav() {
       <div class="links">
         ${u ? link('#/dashboard', 'Painel') + link('#/ferramentas/palavras', 'Ferramentas') + link('#/historico', 'Histórico') : ''}
         ${link('#/planos', 'Planos')}
+        ${link('#/extensao', 'Extensão')}
         ${link('#/ajuda', 'Ajuda')}
         ${isAdmin ? link('#/admin', '🛠 Admin') : ''}
       </div>
@@ -86,6 +87,7 @@ views.home = async () => {
       <p>
         <a class="btn" href="#/cadastro">Começar grátis com 5.000 créditos</a>
         <a class="btn ghost" href="#/planos">Ver planos</a>
+        <a class="btn ghost" href="#/extensao">⬇️ Baixar extensão</a>
       </p>
     </section>
     <section class="grid cols3">
@@ -191,7 +193,7 @@ views.dashboard = async () => {
         <p class="muted small">${u.plan?.price_cents ? money(u.plan.price_cents) + '/mês' : 'Gratuito'} · ${fmt(u.plan?.monthly_credits)} créditos/mês</p>
         ${u.unlimited ? '' : '<a class="btn sm secondary" href="#/planos">Fazer upgrade</a>'}</div>
       <div class="card"><h3>Extensão Chrome</h3><p class="muted small">Analise vídeos direto no YouTube com a mesma conta.</p>
-        <a class="btn sm secondary" href="#/ajuda">Como instalar</a></div>
+        <a class="btn sm secondary" href="#/extensao">Baixar e instalar</a></div>
     </section>
     <h2>Ferramentas</h2>
     <section class="grid cols3">
@@ -503,6 +505,8 @@ const ADMIN_TABS = [
   ['geral', 'Visão geral'], ['usuarios', 'Usuários'], ['planos', 'Planos'], ['custos', 'Custos'],
   ['pagamentos', 'Pagamentos'], ['config', 'Configurações'], ['admins', 'Administradores'], ['auditoria', 'Auditoria']
 ];
+
+views.extensao = (p) => views.ajuda(p);
 
 views.admin = async (params, sub) => {
   if (!state.user) return needLogin();
