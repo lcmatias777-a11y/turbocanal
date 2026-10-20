@@ -127,7 +127,10 @@ const TOOL_SEED = [
   ['channel_sync', 5, 'Sincronizar meu canal'],
   ['thumbnail_upload', 10, 'Enviar capa para o YouTube'],
   ['video_update', 10, 'Editar título/descrição no YouTube'],
-  ['ab_test', 30, 'Teste A/B de capas']
+  ['ab_test', 30, 'Teste A/B de capas'],
+  ['video_upload', 20, 'Postar vídeo no YouTube'],
+  ['live_create', 20, 'Criar transmissão ao vivo'],
+  ['comment_reply', 2, 'Responder comentário']
 ];
 
 const DEFAULT_SETTINGS = () => ({

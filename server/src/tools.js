@@ -37,13 +37,13 @@ export function toolRoutes(app, db, auth) {
     }
   };
 
-  app.post('/api/tools/video_search', auth.required, run('video_search', (req) => ytb.searchVideos(db, must(req.body?.q, 'busca'))));
-  app.post('/api/tools/keyword_research', auth.required, run('keyword_research', (req) => ytb.keywordResearch(db, must(req.body?.q, 'palavra-chave'))));
-  app.post('/api/tools/video_analysis', auth.required, run('video_analysis', (req) => ytb.videoAnalysis(db, must(req.body?.video, 'link ou ID do vídeo'))));
-  app.post('/api/tools/channel_analysis', auth.required, run('channel_analysis', (req) => ytb.channelAnalysis(db, must(req.body?.channel, 'canal'))));
+  app.post('/api/tools/video_search', auth.required, run('video_search', (req) => ytb.searchVideos(db, must(req.body?.q, 'busca'), 10, req.user)));
+  app.post('/api/tools/keyword_research', auth.required, run('keyword_research', (req) => ytb.keywordResearch(db, must(req.body?.q, 'palavra-chave'), req.user)));
+  app.post('/api/tools/video_analysis', auth.required, run('video_analysis', (req) => ytb.videoAnalysis(db, must(req.body?.video, 'link ou ID do vídeo'), req.user)));
+  app.post('/api/tools/channel_analysis', auth.required, run('channel_analysis', (req) => ytb.channelAnalysis(db, must(req.body?.channel, 'canal'), req.user)));
   app.post('/api/tools/trends', auth.required, run('trends', (req) => {
     const region = String(req.body?.region || 'BR').toUpperCase().slice(0, 2);
-    return ytb.trends(db, /^[A-Z]{2}$/.test(region) ? region : 'BR');
+    return ytb.trends(db, /^[A-Z]{2}$/.test(region) ? region : 'BR', undefined, req.user);
   }));
 
   app.post('/api/tools/title_ai', auth.required, run('title_ai', (req) => {

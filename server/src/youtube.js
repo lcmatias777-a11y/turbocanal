@@ -1,8 +1,9 @@
 import { getSetting } from './db.js';
 import { HttpError, seededRand } from './util.js';
+import { youtubeAccessToken } from './auth.js';
 
 const MOCK_AVISO =
-  'DADOS DE EXEMPLO (modo de teste, sem chave da YouTube Data API). Em produção, configure a chave em Admin > Configurações.';
+  'DADOS DE EXEMPLO (modo de teste, sem acesso ao YouTube). Em produção, entre com o Google.';
 const EST_AVISO =
   'Estimativas derivadas de dados públicos da YouTube Data API. Não são métricas oficiais de busca do YouTube.';
 
@@ -19,26 +20,44 @@ async function apiKey(db) {
 }
 const isMock = () => process.env.YT_MOCK === '1';
 
-async function yt(db, endpoint, params) {
-  const key = await apiKey(db);
-  if (!key) {
-    throw new HttpError(
-      409,
-      'A chave da YouTube Data API ainda não foi configurada neste servidor. O administrador pode configurá-la em Admin > Configurações (ou via variável YT_API_KEY).'
-    );
+/**
+ * Autenticação para a YouTube Data API: usa o token OAuth do usuário logado
+ * (concedido no "Entrar com Google"); se não houver, cai para a chave de API do
+ * servidor (opcional). Sem nenhum dos dois, explica o que fazer.
+ */
+async function authFor(db, user) {
+  if (user) {
+    try {
+      const token = await youtubeAccessToken(db, user);
+      return { headers: { Authorization: `Bearer ${token}` } };
+    } catch (e) {
+      const key = await apiKey(db);
+      if (key) return { key };
+      throw e;
+    }
   }
+  const key = await apiKey(db);
+  if (key) return { key };
+  throw new HttpError(409, 'Entre com o Google para usar as ferramentas do YouTube.');
+}
+
+async function yt(db, endpoint, params, user) {
+  const a = await authFor(db, user);
   const u = new URL('https://www.googleapis.com/youtube/v3/' + endpoint);
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) u.searchParams.set(k, v);
-  u.searchParams.set('key', key);
+  if (a.key) u.searchParams.set('key', a.key);
   let resp, data;
   try {
-    resp = await fetch(u);
+    resp = await fetch(u, { headers: a.headers || {} });
     data = await resp.json();
   } catch (e) {
     throw new HttpError(502, 'Não foi possível falar com a API do YouTube agora. Tente de novo em instantes.');
   }
   if (!resp.ok) {
     const msg = data?.error?.message || `HTTP ${resp.status}`;
+    if (/has not been used|is disabled|accessNotConfigured/i.test(msg)) {
+      throw new HttpError(502, 'A YouTube Data API ainda não está ativada no projeto do Google Cloud deste site.');
+    }
     throw new HttpError(502, 'Erro da API do YouTube: ' + msg);
   }
   return data;
@@ -99,18 +118,18 @@ function mockVideos(q, n = 10) {
   }));
 }
 
-async function fetchVideosByIds(db, ids) {
+async function fetchVideosByIds(db, ids, user) {
   if (!ids.length) return [];
-  const data = await yt(db, 'videos', { part: 'snippet,statistics,contentDetails', id: ids.join(','), maxResults: 50 });
+  const data = await yt(db, 'videos', { part: 'snippet,statistics,contentDetails', id: ids.join(','), maxResults: 50 }, user);
   return (data.items || []).map(mapVideo);
 }
 
 // ---------------- Ferramentas ----------------
-export async function searchVideos(db, q, max = 10) {
+export async function searchVideos(db, q, max = 10, user = null) {
   if (isMock()) return { mock: true, aviso: MOCK_AVISO, items: mockVideos(q, max) };
-  const s = await yt(db, 'search', { part: 'snippet', q, type: 'video', maxResults: Math.min(max, 25) });
+  const s = await yt(db, 'search', { part: 'snippet', q, type: 'video', maxResults: Math.min(max, 25) }, user);
   const ids = (s.items || []).map((i) => i.id?.videoId).filter(Boolean);
-  const items = await fetchVideosByIds(db, ids);
+  const items = await fetchVideosByIds(db, ids, user);
   return { items };
 }
 
@@ -131,20 +150,20 @@ export function seoChecklist(v) {
   return { score: Math.round((ok / checks.length) * 100), checks, aviso: 'Pontuação heurística do TurboCanal, não é uma métrica oficial do YouTube.' };
 }
 
-export async function videoAnalysis(db, idOrUrl) {
+export async function videoAnalysis(db, idOrUrl, user = null) {
   const id = parseVideoId(idOrUrl);
   if (isMock()) {
     const v = mockVideos(id, 1)[0];
     v.id = id;
     return { mock: true, aviso: MOCK_AVISO, video: v, seo: seoChecklist(v) };
   }
-  const items = await fetchVideosByIds(db, [id]);
+  const items = await fetchVideosByIds(db, [id], user);
   if (!items.length) throw new HttpError(404, 'Vídeo não encontrado (pode ser privado ou removido).');
   const video = items[0];
   return { video, seo: seoChecklist(video) };
 }
 
-export async function channelAnalysis(db, q) {
+export async function channelAnalysis(db, q, user = null) {
   if (isMock()) {
     const rnd = seededRand('c:' + q);
     const recent = mockVideos(q, 6);
@@ -159,14 +178,14 @@ export async function channelAnalysis(db, q) {
   const query = String(q || '').trim();
   let ch;
   if (/^UC[A-Za-z0-9_-]{22}$/.test(query)) {
-    ch = await yt(db, 'channels', { part: 'snippet,statistics,contentDetails', id: query });
+    ch = await yt(db, 'channels', { part: 'snippet,statistics,contentDetails', id: query }, user);
   } else {
     const handle = query.startsWith('@') ? query : '@' + query.replace(/^.*youtube\.com\/@?/, '').split(/[/?]/)[0];
-    ch = await yt(db, 'channels', { part: 'snippet,statistics,contentDetails', forHandle: handle });
+    ch = await yt(db, 'channels', { part: 'snippet,statistics,contentDetails', forHandle: handle }, user);
     if (!ch.items?.length) {
-      const s = await yt(db, 'search', { part: 'snippet', q: query, type: 'channel', maxResults: 1 });
+      const s = await yt(db, 'search', { part: 'snippet', q: query, type: 'channel', maxResults: 1 }, user);
       const cid = s.items?.[0]?.id?.channelId;
-      if (cid) ch = await yt(db, 'channels', { part: 'snippet,statistics,contentDetails', id: cid });
+      if (cid) ch = await yt(db, 'channels', { part: 'snippet,statistics,contentDetails', id: cid }, user);
     }
   }
   const c = ch.items?.[0];
@@ -174,9 +193,9 @@ export async function channelAnalysis(db, q) {
   const uploads = c.contentDetails?.relatedPlaylists?.uploads;
   let recent = [];
   if (uploads) {
-    const pl = await yt(db, 'playlistItems', { part: 'contentDetails', playlistId: uploads, maxResults: 10 });
+    const pl = await yt(db, 'playlistItems', { part: 'contentDetails', playlistId: uploads, maxResults: 10 }, user);
     const ids = (pl.items || []).map((i) => i.contentDetails?.videoId).filter(Boolean);
-    recent = await fetchVideosByIds(db, ids);
+    recent = await fetchVideosByIds(db, ids, user);
   }
   const st = c.statistics || {};
   return {
@@ -195,13 +214,13 @@ export async function channelAnalysis(db, q) {
   };
 }
 
-export async function keywordResearch(db, q) {
+export async function keywordResearch(db, q, user = null) {
   let items;
   if (isMock()) items = mockVideos(q, 20);
   else {
-    const s = await yt(db, 'search', { part: 'snippet', q, type: 'video', maxResults: 25 });
+    const s = await yt(db, 'search', { part: 'snippet', q, type: 'video', maxResults: 25 }, user);
     const ids = (s.items || []).map((i) => i.id?.videoId).filter(Boolean);
-    items = await fetchVideosByIds(db, ids);
+    items = await fetchVideosByIds(db, ids, user);
   }
   const terms = new Map();
   for (const v of items) {
@@ -240,7 +259,7 @@ export async function keywordResearch(db, q) {
   };
 }
 
-export async function trends(db, region = 'BR', categoryId) {
+export async function trends(db, region = 'BR', categoryId, user = null) {
   if (isMock()) return { mock: true, aviso: MOCK_AVISO, region, items: mockVideos('tendências ' + region, 12) };
   const data = await yt(db, 'videos', {
     part: 'snippet,statistics,contentDetails',
@@ -248,6 +267,6 @@ export async function trends(db, region = 'BR', categoryId) {
     regionCode: region,
     maxResults: 12,
     ...(categoryId ? { videoCategoryId: categoryId } : {})
-  });
+  }, user);
   return { region, items: (data.items || []).map(mapVideo) };
 }

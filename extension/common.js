@@ -1,8 +1,11 @@
 // Funções compartilhadas (popup e options). A extensão fala com o MESMO backend
 // do site: mesma conta, mesmo saldo, mesmas regras validadas no servidor.
+const DEFAULT_URL = 'https://turbocanal.onrender.com';
+
 export async function getCfg() {
-  const { baseUrl, token } = await chrome.storage.sync.get(['baseUrl', 'token']);
-  return { baseUrl: (baseUrl || 'https://turbocanal.onrender.com').replace(/\/$/, ''), token: token || '' };
+  const { baseUrl } = await chrome.storage.sync.get(['baseUrl']);
+  const { token } = await chrome.runtime.sendMessage({ type: 'getToken' });
+  return { baseUrl: (baseUrl || DEFAULT_URL).replace(/\/$/, ''), token: token || '' };
 }
 export async function setCfg(obj) {
   await chrome.storage.sync.set(obj);
@@ -11,10 +14,7 @@ export async function api(path, { method = 'GET', body } = {}) {
   const { baseUrl, token } = await getCfg();
   const r = await fetch(baseUrl + '/api' + path, {
     method,
-    headers: {
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: 'Bearer ' + token } : {})
-    },
+    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
     body: body ? JSON.stringify(body) : undefined
   });
   let data = {};

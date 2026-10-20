@@ -8,8 +8,10 @@
   let lastVideo = null;
 
   async function cfg() {
-    const { baseUrl, token } = await chrome.storage.sync.get(['baseUrl', 'token']);
-    return { baseUrl: (baseUrl || 'https://turbocanal.onrender.com').replace(/\/$/, ''), token: token || '' };
+    const { baseUrl } = await chrome.storage.sync.get(['baseUrl']);
+    let token = '';
+    try { token = (await chrome.runtime.sendMessage({ type: 'getToken' }))?.token || ''; } catch {}
+    return { baseUrl: (baseUrl || 'https://turbocanal.onrender.com').replace(/\/$/, ''), token };
   }
   async function api(path, { method = 'GET', body } = {}) {
     const { baseUrl, token } = await cfg();
@@ -52,8 +54,9 @@
     panel.dataset.ready = '0';
     const { baseUrl, token } = await cfg();
     if (!token) {
-      panel.innerHTML = header() + `<div class="tc-body"><p>Entre na extensão (ícone 🚀 na barra do Chrome) com a mesma conta do site para ver a análise deste vídeo aqui.</p>
-        <p><a class="tc-btn" href="${esc(baseUrl)}/#/login" target="_blank" rel="noopener">Entrar / criar conta grátis</a></p></div>`;
+      panel.innerHTML = header() + `<div class="tc-body"><p>Entre com o Google no TurboCanal para ver aqui a análise deste vídeo, suas tags e atalhos do seu canal.</p>
+        <p><a class="tc-btn" href="${esc(baseUrl)}/api/auth/google" target="_blank" rel="noopener">🔵 Entrar com Google</a></p>
+        <p class="tc-muted">Depois de entrar, recarregue esta página.</p></div>`;
       wire(panel); panel.dataset.ready = '1'; return;
     }
     panel.innerHTML = header() + `<div class="tc-body tc-muted">Analisando este vídeo…</div>`;
@@ -78,6 +81,7 @@
             <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/palavras" target="_blank" rel="noopener">🔑 Palavras-chave</a>
             <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/insights" target="_blank" rel="noopener">🎥 IA assiste</a>
             <a class="tc-btn" href="${esc(baseUrl)}/#/canal" target="_blank" rel="noopener">📺 Meu canal</a>
+            <a class="tc-btn" href="${esc(baseUrl)}/#/canal/postar" target="_blank" rel="noopener">⬆️ Postar</a>
           </div>
           <p class="tc-muted tc-foot">${r.credits.unlimited ? 'Conta do administrador: sem consumo de créditos.' : `Usados ${r.credits.charged} créditos nesta análise.`}</p>
         </div>`;

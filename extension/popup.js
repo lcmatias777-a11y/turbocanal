@@ -10,34 +10,15 @@ async function openDash() {
 function loginView(msg = '') {
   root.innerHTML = `
     <h1>🚀 Turbo<b>Canal</b></h1>
-    <p class="muted">Entre com a MESMA conta do site. Você pode usar e-mail e senha, ou um token gerado em Conta &gt; Token para a extensão.</p>
-    <label>E-mail</label><input id="em" type="email">
-    <label>Senha</label><input id="pw" type="password">
-    <button class="btn" id="go">Entrar</button>
-    <label style="margin-top:12px">Ou cole um token de acesso</label><input id="tk" placeholder="token gerado no site">
-    <button class="btn sec" id="gotk">Usar token</button>
+    <p class="muted">Entre com a sua conta do Google (a mesma do site). Depois de entrar no site, a extensão reconhece sozinha.</p>
+    <button class="btn" id="go">🔵 Entrar com Google</button>
+    <button class="btn sec" id="again">Já entrei, verificar de novo</button>
     <p class="muted">Servidor: <span id="bu"></span> — <a href="#" id="opt">alterar</a></p>
     <div class="err">${esc(msg)}</div>`;
   getCfg().then((c) => (document.getElementById('bu').textContent = c.baseUrl));
   document.getElementById('opt').onclick = (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); };
-  document.getElementById('go').onclick = async () => {
-    try {
-      const { baseUrl } = await getCfg();
-      const r = await fetch(baseUrl + '/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: document.getElementById('em').value, password: document.getElementById('pw').value })
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error || 'Falha no login');
-      await setCfg({ token: data.token });
-      main();
-    } catch (e) { loginView(e.message); }
-  };
-  document.getElementById('gotk').onclick = async () => {
-    await setCfg({ token: document.getElementById('tk').value.trim() });
-    main();
-  };
+  document.getElementById('go').onclick = () => chrome.runtime.sendMessage({ type: 'openLogin' });
+  document.getElementById('again').onclick = () => main();
 }
 
 async function main() {
@@ -56,12 +37,18 @@ async function main() {
       <button class="btn" id="an">Analisar vídeo aberto</button>
       <button class="btn sec" id="dash">Abrir painel</button>
     </div>
+    <div class="rowb">
+      <button class="btn sec" id="canal">📺 Meu canal</button>
+      <button class="btn sec" id="postar">⬆️ Postar vídeo</button>
+    </div>
     <label>Pesquisa rápida de palavras-chave</label><input id="kw" placeholder="ex.: bedwars dicas">
     <button class="btn sec" id="kwgo">Pesquisar</button>
     <div id="out"></div>
     <p class="muted" style="margin-top:10px"><a href="#" id="sair">Sair da conta</a></p>`;
   document.getElementById('dash').onclick = openDash;
-  document.getElementById('sair').onclick = async (e) => { e.preventDefault(); await setCfg({ token: '' }); loginView(); };
+  document.getElementById('canal').onclick = async () => { const { baseUrl } = await getCfg(); chrome.tabs.create({ url: baseUrl + '/#/canal' }); };
+  document.getElementById('postar').onclick = async () => { const { baseUrl } = await getCfg(); chrome.tabs.create({ url: baseUrl + '/#/canal/postar' }); };
+  document.getElementById('sair').onclick = async (e) => { e.preventDefault(); await setCfg({ token: '' }); const { baseUrl } = await getCfg(); try { await chrome.cookies.remove({ url: baseUrl + '/', name: 'tc_token' }); } catch {} loginView(); };
 
   document.getElementById('an').onclick = async () => {
     const out = document.getElementById('out');

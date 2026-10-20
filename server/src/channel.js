@@ -208,6 +208,148 @@ export function channelRoutes(app, db, auth) {
       next(e);
     }
   });
+
+  studioRoutes(app, db, auth, charged);
+}
+
+
+// ---------- Studio: postar vídeo, live, analytics, comentários ----------
+export function studioRoutes(app, db, auth, charged) {
+  // 1) Postar vídeo: o servidor abre a sessão de upload "resumable" no YouTube com os
+  //    metadados; o navegador envia os bytes DIRETO para o Google (sem passar pelo servidor).
+  app.post('/api/channel/upload/start', auth.required, charged('video_upload', async (req) => {
+    const title = must(req.body?.title, 'título', { max: 100 });
+    const description = String(req.body?.description || '').slice(0, 5000);
+    const tags = Array.isArray(req.body?.tags) ? req.body.tags.map(String).slice(0, 60) : [];
+    const privacy = ['public', 'unlisted', 'private'].includes(req.body?.privacy) ? req.body.privacy : 'private';
+    const publishAt = req.body?.publishAt ? new Date(req.body.publishAt) : null;
+    if (publishAt && isNaN(publishAt.getTime())) throw new HttpError(400, 'Data de agendamento inválida.');
+    const size = parseInt(req.body?.size, 10) || 0;
+    const mime = String(req.body?.mime || 'video/*').slice(0, 60);
+    const categoryId = String(req.body?.categoryId || '20').slice(0, 4); // 20 = Games, 22 = People & Blogs
+    const { token } = await myChannel(db, req.user);
+    const status = { privacyStatus: publishAt ? 'private' : privacy, selfDeclaredMadeForKids: false };
+    if (publishAt) status.publishAt = publishAt.toISOString();
+    const metadata = { snippet: { title, description, tags, categoryId, defaultLanguage: 'pt' }, status };
+    let resp;
+    try {
+      resp = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json; charset=UTF-8',
+          'X-Upload-Content-Type': mime,
+          ...(size ? { 'X-Upload-Content-Length': String(size) } : {})
+        },
+        body: JSON.stringify(metadata)
+      });
+    } catch {
+      throw new HttpError(502, 'Não foi possível iniciar o envio no YouTube.');
+    }
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new HttpError(502, 'YouTube: ' + (data?.error?.message || `HTTP ${resp.status}`));
+    }
+    const uploadUrl = resp.headers.get('location');
+    if (!uploadUrl) throw new HttpError(502, 'O YouTube não devolveu a URL de envio.');
+    await audit(db, req.user, 'youtube.upload_start', title, publishAt ? `agendado ${status.publishAt}` : privacy);
+    return { uploadUrl, title, scheduled: !!publishAt, privacy: status.privacyStatus };
+  }));
+
+  app.post('/api/channel/upload/done', auth.required, async (req, res, next) => {
+    try {
+      const videoId = must(req.body?.videoId, 'vídeo', { max: 20 });
+      await audit(db, req.user, 'youtube.upload_done', videoId);
+      res.json({ ok: true, url: `https://www.youtube.com/watch?v=${videoId}`, studio: `https://studio.youtube.com/video/${videoId}/edit` });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // 2) Live: cria a transmissão + o stream RTMP e devolve a chave de transmissão.
+  app.post('/api/channel/live', auth.required, charged('live_create', async (req) => {
+    const title = must(req.body?.title, 'título', { max: 100 });
+    const description = String(req.body?.description || '').slice(0, 5000);
+    const privacy = ['public', 'unlisted', 'private'].includes(req.body?.privacy) ? req.body.privacy : 'public';
+    const start = req.body?.scheduledStart ? new Date(req.body.scheduledStart) : new Date(Date.now() + 5 * 60000);
+    if (isNaN(start.getTime())) throw new HttpError(400, 'Data de início inválida.');
+    const { token } = await myChannel(db, req.user);
+    const broadcast = await yt(token, 'liveBroadcasts', {
+      method: 'POST',
+      params: { part: 'snippet,status,contentDetails' },
+      body: {
+        snippet: { title, description, scheduledStartTime: start.toISOString() },
+        status: { privacyStatus: privacy, selfDeclaredMadeForKids: false },
+        contentDetails: { enableAutoStart: true, enableAutoStop: true, latencyPreference: 'normal' }
+      }
+    });
+    const stream = await yt(token, 'liveStreams', {
+      method: 'POST',
+      params: { part: 'snippet,cdn,contentDetails' },
+      body: { snippet: { title: `${title} (stream)` }, cdn: { frameRate: 'variable', ingestionType: 'rtmp', resolution: 'variable' }, contentDetails: { isReusable: true } }
+    });
+    await yt(token, 'liveBroadcasts/bind', { method: 'POST', params: { part: 'id,contentDetails', id: broadcast.id, streamId: stream.id } });
+    await audit(db, req.user, 'youtube.live_create', broadcast.id, title);
+    const ing = stream.cdn?.ingestionInfo || {};
+    return {
+      broadcastId: broadcast.id,
+      watchUrl: `https://www.youtube.com/watch?v=${broadcast.id}`,
+      studioUrl: `https://studio.youtube.com/video/${broadcast.id}/livestreaming`,
+      rtmpUrl: ing.ingestionAddress || 'rtmp://a.rtmp.youtube.com/live2',
+      streamKey: ing.streamName || null,
+      scheduledStart: start.toISOString(),
+      aviso: 'Cole a URL RTMP e a chave de transmissão no OBS/Streamlabs. A chave dá acesso à sua live: não compartilhe.'
+    };
+  }));
+
+  // 3) Analytics do canal (YouTube Analytics API): últimos N dias.
+  app.get('/api/channel/analytics', auth.required, async (req, res, next) => {
+    try {
+      const days = Math.min(90, Math.max(7, parseInt(req.query.days, 10) || 28));
+      const { token, channel } = await myChannel(db, req.user);
+      const end = new Date(); end.setUTCDate(end.getUTCDate() - 1);
+      const start = new Date(end); start.setUTCDate(start.getUTCDate() - days + 1);
+      const fmt = (d) => d.toISOString().slice(0, 10);
+      const base = { ids: 'channel==MINE', startDate: fmt(start), endDate: fmt(end) };
+      const daily = await yt(token, 'https://youtubeanalytics.googleapis.com/v2/reports', { params: { ...base, metrics: 'views,estimatedMinutesWatched,subscribersGained,subscribersLost,likes', dimensions: 'day', sort: 'day' } });
+      const top = await yt(token, 'https://youtubeanalytics.googleapis.com/v2/reports', { params: { ...base, metrics: 'views,estimatedMinutesWatched,averageViewDuration', dimensions: 'video', sort: '-views', maxResults: 10 } });
+      const rows = daily.rows || [];
+      const tot = rows.reduce((a, r) => ({ views: a.views + r[1], minutes: a.minutes + r[2], subs: a.subs + r[3] - r[4], likes: a.likes + r[5] }), { views: 0, minutes: 0, subs: 0, likes: 0 });
+      let topVideos = (top.rows || []).map((r) => ({ id: r[0], views: r[1], minutes: r[2], avgSec: r[3] }));
+      if (topVideos.length) {
+        const vs = await yt(token, 'videos', { params: { part: 'snippet', id: topVideos.map((v) => v.id).join(',') } });
+        const titles = Object.fromEntries((vs.items || []).map((v) => [v.id, v.snippet?.title]));
+        topVideos = topVideos.map((v) => ({ ...v, title: titles[v.id] || v.id }));
+      }
+      res.json({ channel: { id: channel.id, title: channel.snippet?.title }, days, totals: tot, daily: rows.map((r) => ({ day: r[0], views: r[1], minutes: r[2], subsNet: r[3] - r[4], likes: r[5] })), topVideos });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // 4) Comentários recentes do canal + responder
+  app.get('/api/channel/comments', auth.required, async (req, res, next) => {
+    try {
+      const { token, channel } = await myChannel(db, req.user);
+      const r = await yt(token, 'commentThreads', { params: { part: 'snippet', allThreadsRelatedToChannelId: channel.id, maxResults: 30, order: 'time', textFormat: 'plainText' } });
+      const items = (r.items || []).map((t) => {
+        const c = t.snippet?.topLevelComment?.snippet || {};
+        return { id: t.snippet?.topLevelComment?.id, videoId: t.snippet?.videoId, author: c.authorDisplayName, text: c.textDisplay, likes: c.likeCount, publishedAt: c.publishedAt, replies: t.snippet?.totalReplyCount || 0 };
+      });
+      res.json({ items });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/channel/comments/:id/reply', auth.required, charged('comment_reply', async (req) => {
+    const parentId = must(req.params.id, 'comentário', { max: 80 });
+    const text = must(req.body?.text, 'resposta', { max: 5000 });
+    const { token } = await myChannel(db, req.user);
+    const r = await yt(token, 'comments', { method: 'POST', params: { part: 'snippet' }, body: { snippet: { parentId, textOriginal: text } } });
+    await audit(db, req.user, 'youtube.comment_reply', parentId);
+    return { id: r.id, text };
+  }));
 }
 
 function safeJson(s) {

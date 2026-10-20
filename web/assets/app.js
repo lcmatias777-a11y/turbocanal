@@ -68,7 +68,7 @@ function renderNav() {
            ${u.role !== 'user' ? `<span class="badge role">${u.role === 'owner' ? 'Administrador principal' : 'Administrador'}</span>` : ''}
            <a class="navlink" href="#/conta">⚙️ Conta</a>
            <a class="navlink" href="#/sair">Sair</a>`
-        : `<a class="navlink" href="#/login">Entrar</a> <a class="btn sm" href="#/cadastro">Criar conta grátis</a>`}
+        : `<a class="btn sm" href="#/login">Entrar com Google</a>`}
     </div>`;
 }
 
@@ -87,7 +87,7 @@ views.home = async () => {
       <h1>Faça seu canal crescer com dados de verdade</h1>
       <p>Pesquisa de palavras-chave, análise de SEO de vídeos e canais, tendências e ferramentas de IA para criadores do YouTube. Plano gratuito generoso com recarga mensal de créditos, site e extensão para Chrome na mesma conta.</p>
       <p>
-        <a class="btn" href="#/cadastro">Começar grátis com 5.000 créditos</a>
+        <a class="btn" href="#/login">Entrar com Google e ganhar 5.000 créditos</a>
         <a class="btn ghost" href="#/planos">Ver planos</a>
         <a class="btn ghost" href="#/extensao">⬇️ Baixar extensão</a>
       </p>
@@ -116,7 +116,7 @@ function planCard(p) {
     <p class="muted small">${esc(p.description || '')}</p>
     ${p.price_cents
       ? `<a class="btn" href="#/checkout?plan=${esc(p.id)}">Assinar via Pix</a>`
-      : `<a class="btn secondary" href="#/cadastro">Criar conta grátis</a>`}
+      : `<a class="btn secondary" href="#/login">Entrar com Google</a>`}
   </div>`;
 }
 
@@ -131,53 +131,17 @@ function googleButton(label, connect = false) {
 
 views.login = async (params) => {
   appEl().innerHTML = `
-    <div class="card" style="max-width:420px;margin:30px auto">
-      <h2>Entrar</h2>
+    <div class="card" style="max-width:440px;margin:30px auto;text-align:center">
+      <h2>Entrar no TurboCanal</h2>
       ${params.get('erro') ? alertBox('err', esc(params.get('erro'))) : ''}
-      <div id="msg"></div>
-      <form id="f">
-        <label>E-mail</label><input name="email" type="email" required>
-        <label>Senha</label><input name="password" type="password" required>
-        <p><button class="btn" style="width:100%">Entrar</button></p>
-      </form>
+      <p class="muted">Entre com sua conta do Google (a mesma do seu canal do YouTube). Sua conta é criada automaticamente na primeira vez, com 5.000 créditos.</p>
       ${googleButton('Entrar com Google')}
-      <p class="muted small center">Não tem conta? <a href="#/cadastro">Crie grátis</a>.</p>
+      <p class="muted small">Ao entrar, você autoriza a leitura de dados públicos do YouTube para as ferramentas de pesquisa. Gerenciar o seu canal (capas, vídeos, lives) é uma autorização separada, feita em "Meu canal".</p>
+      <p class="small"><a href="#/privacidade">Privacidade</a> · <a href="#/termos">Termos de uso</a></p>
     </div>`;
-  $('#f').onsubmit = async (ev) => {
-    ev.preventDefault();
-    const fd = new FormData(ev.target);
-    try {
-      await api('/auth/login', { method: 'POST', body: { email: fd.get('email'), password: fd.get('password') } });
-      await refreshMe();
-      location.hash = '#/dashboard';
-    } catch (e) { showErr($('#msg'), e); }
-  };
 };
 
-views.cadastro = async () => {
-  appEl().innerHTML = `
-    <div class="card" style="max-width:460px;margin:30px auto">
-      <h2>Criar conta grátis</h2>
-      <p class="muted small">Você começa com 5.000 créditos, com recarga mensal automática no plano Free.</p>
-      <div id="msg"></div>
-      <form id="f">
-        <label>Seu nome</label><input name="name" maxlength="120">
-        <label>E-mail</label><input name="email" type="email" required>
-        <label>Senha (mín. 8 caracteres)</label><input name="password" type="password" minlength="8" required>
-        <p><button class="btn" style="width:100%">Criar conta</button></p>
-      </form>
-      ${googleButton('Cadastrar com Google')}
-    </div>`;
-  $('#f').onsubmit = async (ev) => {
-    ev.preventDefault();
-    const fd = new FormData(ev.target);
-    try {
-      await api('/auth/register', { method: 'POST', body: { name: fd.get('name'), email: fd.get('email'), password: fd.get('password') } });
-      await refreshMe();
-      location.hash = '#/dashboard';
-    } catch (e) { showErr($('#msg'), e); }
-  };
-};
+views.cadastro = async (p) => views.login(p);
 
 views.sair = async () => {
   try { await api('/auth/logout', { method: 'POST' }); } catch {}
@@ -188,7 +152,7 @@ views.sair = async () => {
 function needLogin() {
   appEl().innerHTML = `<div class="card center" style="max-width:420px;margin:40px auto">
     <h3>Faça login para continuar</h3>
-    <p><a class="btn" href="#/login">Entrar</a> <a class="btn ghost" href="#/cadastro">Criar conta grátis</a></p></div>`;
+    <p><a class="btn" href="#/login">Entrar com Google</a></p></div>`;
 }
 
 views.dashboard = async () => {
@@ -423,45 +387,52 @@ function fileToDataUrl(file) {
   });
 }
 
-views.canal = async () => {
+const CANAL_TABS = [['videos', '🎬 Meus vídeos'], ['postar', '⬆️ Postar vídeo'], ['live', '🔴 Live'], ['analytics', '📊 Analytics'], ['comentarios', '💬 Comentários'], ['ab', '🧪 Testes A/B']];
+
+views.canal = async (params, sub) => {
   if (!state.user) return needLogin();
   const u = state.user;
   if (!u.youtube?.connected) {
     appEl().innerHTML = `
       <h1>📺 Meu canal</h1>
-      <div class="card" style="max-width:640px">
-        <p>Conecte seu canal do YouTube para: ver seus vídeos e estatísticas, enviar capas (inclusive as geradas por IA), editar títulos e descrições e rodar testes A/B de capa. Só vídeos do canal conectado podem ser alterados, e tudo é validado no servidor.</p>
-        ${googleButton('Conectar meu canal do YouTube', true)}
-        <p class="muted small">Você autoriza pelo próprio Google (OAuth). Pode desconectar quando quiser.</p>
+      <div class="card" style="max-width:680px">
+        <h3>Vincule seu canal do YouTube</h3>
+        <p>Com o canal vinculado você tem, aqui dentro: seus vídeos e estatísticas, <b>postar vídeo</b> (com agendamento), <b>criar live</b> (com chave de transmissão), <b>analytics</b>, <b>comentários</b> (ler e responder), <b>capas</b> (inclusive geradas por IA), <b>teste A/B de capas</b> e edição de título/descrição. Só vídeos do canal vinculado podem ser alterados, e tudo é verificado no servidor.</p>
+        ${googleButton('Vincular meu canal do YouTube', true)}
+        <p class="muted small">Você autoriza pelo próprio Google. Pode desvincular quando quiser (em Conta).</p>
       </div>`;
     return;
   }
-  appEl().innerHTML = `<h1>📺 Meu canal</h1><div id="cmsg"></div><div id="cbody"><span class="spin"></span></div>`;
-  try {
+  const tab = sub || 'videos';
+  appEl().innerHTML = `<h1>📺 Meu canal <span class="muted small">${esc(u.youtube.channel_title || '')}</span></h1>
+    <div class="tabs">${CANAL_TABS.map(([k, l]) => `<a href="#/canal/${k}" class="${tab === k ? 'active' : ''}">${l}</a>`).join('')}</div>
+    <div id="cmsg"></div><div id="cbody"><span class="spin"></span></div>`;
+  const el = $('#cbody');
+  try { await canalTabs[tab]?.(el); } catch (e) {
+    el.innerHTML = alertBox(e.status === 409 ? 'warn' : 'err', esc(e.message)) + (e.status === 409 ? googleButton('Vincular meu canal do YouTube', true) : '');
+  }
+};
+
+const canalTabs = {
+  async videos(el) {
     const data = await api('/channel/videos');
-    const ab = (await api('/channel/ab')).items;
     const c = data.channel;
-    $('#cbody').innerHTML = `
+    el.innerHTML = `
       <div class="card"><div class="thumbrow">${c.thumb ? `<img src="${esc(c.thumb)}" style="border-radius:50%;width:80px">` : ''}
         <div><h3>${esc(c.title)}</h3><p>👥 ${c.subs == null ? 'inscritos ocultos' : fmt(c.subs) + ' inscritos'} · 👁 ${fmt(c.views)} views · 🎬 ${fmt(c.videos)} vídeos</p>
-        <p><button class="btn sm ghost" id="ytoff">Desconectar canal</button></p></div></div></div>
-      ${ab.length ? `<h2>Testes A/B de capa</h2><div class="card scroll"><table><tr><th>Vídeo</th><th>Período</th><th>Capa atual</th><th>Status</th><th>Resultados</th><th></th></tr>
-        ${ab.map((t) => `<tr><td>${esc(t.title || t.video_id)}</td><td>${t.hours}h</td><td>${esc(t.current)}</td><td><span class="pill ${t.status === 'running' ? 'ok' : ''}">${esc(t.status)}</span></td>
-          <td class="small">${(t.log || []).map((l) => `${l.variant}: ${l.views_gain != null ? '+' + fmt(l.views_gain) + ' views' : 'em andamento'}`).join('<br>')}</td>
-          <td>${t.status === 'running' ? `<button class="btn sm secondary" data-stop="${t.id}" data-keep="A">Parar e manter A</button> <button class="btn sm secondary" data-stop="${t.id}" data-keep="B">Parar e manter B</button>` : ''}</td></tr>`).join('')}
-      </table></div>` : ''}
-      <h2>Meus vídeos</h2>
+        <p><a class="btn sm ghost" href="https://studio.youtube.com" target="_blank" rel="noopener">Abrir YouTube Studio</a> <button class="btn sm ghost" id="ytoff">Desvincular canal</button></p></div></div></div>
       <div class="grid cols2">${data.videos.map((v) => `
         <div class="card" id="v-${esc(v.id)}">
           <div class="thumbrow">${v.thumb ? `<img src="${esc(v.thumb)}">` : ''}<div><b>${esc(v.title)}</b>
-            <p class="muted small">👁 ${fmt(v.views)} · 👍 ${fmt(v.likes)} · 💬 ${fmt(v.comments)} · ${dt(v.publishedAt).split(',')[0]} · ${esc(v.privacy || '')}</p></div></div>
+            <p class="muted small">👁 ${fmt(v.views)} · 👍 ${fmt(v.likes)} · 💬 ${fmt(v.comments)} · ${dt(v.publishedAt).split(',')[0]} · ${esc(v.privacy || '')}</p>
+            <p class="small"><a href="https://studio.youtube.com/video/${esc(v.id)}/edit" target="_blank" rel="noopener">editar no Studio ↗</a></p></div></div>
           <details><summary class="small">✏️ Editar título e descrição</summary>
             <label>Título</label><input data-f="title" value="${esc(v.title)}" maxlength="100">
             <label>Descrição</label><textarea data-f="description">${esc(v.description)}</textarea>
             <p><button class="btn sm" data-save="${esc(v.id)}">Salvar no YouTube</button> <span class="muted small">${costOf('video_update')}</span></p></details>
           <details><summary class="small">🖼️ Enviar capa</summary>
             <label>Imagem (JPG/PNG, até 2 MB, 1280x720)</label><input type="file" accept="image/*" data-file="${esc(v.id)}">
-            ${state.lastThumb ? `<p class="small"><label style="display:inline"><input type="checkbox" data-uselast="${esc(v.id)}" style="width:auto"> usar a última capa gerada por IA</label></p>` : ''}
+            ${state.lastThumb ? `<p class="small"><label style="display:inline"><input type="checkbox" data-uselast="${esc(v.id)}" style="width:auto"> usar a última capa gerada por IA</label></p>` : '<p class="small muted">Dica: gere uma capa em <a href="#/ferramentas/capa">Capa com IA</a> e volte aqui.</p>'}
             <p><button class="btn sm" data-thumb="${esc(v.id)}">Enviar para o YouTube</button> <span class="muted small">${costOf('thumbnail_upload')}</span></p></details>
           <details><summary class="small">🧪 Teste A/B de capas</summary>
             <label>Capa A</label><input type="file" accept="image/*" data-a="${esc(v.id)}">
@@ -471,17 +442,16 @@ views.canal = async () => {
           <div class="small" id="m-${esc(v.id)}"></div>
         </div>`).join('')}</div>
       ${data.videos.length ? '' : '<p class="muted">Nenhum vídeo encontrado neste canal.</p>'}`;
-
-    $('#ytoff').onclick = async () => { if (confirm('Desconectar o canal do YouTube desta conta?')) { await api('/auth/youtube/disconnect', { method: 'POST' }); await refreshMe(); route(); } };
+    $('#ytoff').onclick = async () => { if (confirm('Desvincular o canal do YouTube desta conta?')) { await api('/auth/youtube/disconnect', { method: 'POST' }); await refreshMe(); route(); } };
     const msg = (id, kind, html) => ($('#m-' + id).innerHTML = alertBox(kind, html));
-    for (const b of document.querySelectorAll('[data-save]')) b.onclick = async () => {
+    for (const b of el.querySelectorAll('[data-save]')) b.onclick = async () => {
       const id = b.dataset.save, card = $('#v-' + id);
       try {
         const r = await api('/channel/videos/' + id, { method: 'PUT', body: { title: card.querySelector('[data-f=title]').value, description: card.querySelector('[data-f=description]').value } });
         await refreshMe(); msg(id, 'ok', 'Salvo no YouTube. ' + creditsNote(r.credits));
       } catch (e) { msg(id, 'err', esc(e.message)); }
     };
-    for (const b of document.querySelectorAll('[data-thumb]')) b.onclick = async () => {
+    for (const b of el.querySelectorAll('[data-thumb]')) b.onclick = async () => {
       const id = b.dataset.thumb, card = $('#v-' + id);
       try {
         const useLast = card.querySelector('[data-uselast]')?.checked;
@@ -491,24 +461,148 @@ views.canal = async () => {
         await refreshMe(); msg(id, 'ok', 'Capa enviada ao YouTube (pode levar alguns minutos para aparecer). ' + creditsNote(r.credits));
       } catch (e) { msg(id, 'err', esc(e.message)); }
     };
-    for (const b of document.querySelectorAll('[data-ab]')) b.onclick = async () => {
+    for (const b of el.querySelectorAll('[data-ab]')) b.onclick = async () => {
       const id = b.dataset.ab, card = $('#v-' + id);
       try {
         const thumb_a = await fileToDataUrl(card.querySelector('[data-a]').files[0]);
         const thumb_b = await fileToDataUrl(card.querySelector('[data-b]').files[0]);
         if (!thumb_a || !thumb_b) throw new Error('Escolha as duas capas (A e B).');
         const r = await api('/channel/ab', { method: 'POST', body: { video_id: id, thumb_a, thumb_b, hours: parseInt(card.querySelector('[data-h]').value, 10) || 24 } });
-        await refreshMe(); msg(id, 'ok', 'Teste iniciado com a capa A. ' + esc(r.result.aviso) + ' ' + creditsNote(r.credits)); setTimeout(route, 1500);
+        await refreshMe(); msg(id, 'ok', 'Teste iniciado com a capa A. ' + esc(r.result.aviso) + ' ' + creditsNote(r.credits));
       } catch (e) { msg(id, 'err', esc(e.message)); }
     };
-    for (const b of document.querySelectorAll('[data-stop]')) b.onclick = async () => {
+  },
+
+  async postar(el) {
+    el.innerHTML = `<div class="card" style="max-width:720px"><h3>Postar vídeo no YouTube</h3>
+      <p class="muted small">O arquivo vai direto do seu computador para o YouTube (não passa pelo nosso servidor). Para publicar em data marcada, escolha "Agendar". ${costOf('video_upload')}</p>
+      <div id="pmsg"></div>
+      <form id="pf">
+        <label>Arquivo de vídeo</label><input type="file" name="file" accept="video/*" required>
+        <label>Título</label><input name="title" maxlength="100" required>
+        <label>Descrição</label><textarea name="description" maxlength="5000"></textarea>
+        <label>Tags (separadas por vírgula)</label><input name="tags">
+        <div class="row">
+          <div><label>Visibilidade</label><select name="privacy"><option value="private">Privado</option><option value="unlisted">Não listado</option><option value="public">Público</option></select></div>
+          <div><label>Categoria</label><select name="categoryId"><option value="20">Jogos</option><option value="22">Pessoas e blogs</option><option value="24">Entretenimento</option><option value="27">Educação</option><option value="28">Ciência e tecnologia</option><option value="10">Música</option><option value="26">Como fazer e estilo</option></select></div>
+          <div><label>Agendar publicação (opcional)</label><input type="datetime-local" name="publishAt"></div>
+        </div>
+        <p><button class="btn" id="pbtn">Enviar para o YouTube</button></p>
+        <div id="pprog" class="muted small"></div>
+      </form></div>`;
+    $('#pf').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      const file = fd.get('file');
+      const btn = $('#pbtn'); btn.disabled = true; $('#pmsg').innerHTML = '';
+      try {
+        if (!file || !file.size) throw new Error('Escolha um arquivo de vídeo.');
+        const publishAt = fd.get('publishAt') ? new Date(fd.get('publishAt')).toISOString() : null;
+        const r = await api('/channel/upload/start', { method: 'POST', body: { title: fd.get('title'), description: fd.get('description'), tags: String(fd.get('tags') || '').split(',').map((t) => t.trim()).filter(Boolean), privacy: fd.get('privacy'), categoryId: fd.get('categoryId'), publishAt, size: file.size, mime: file.type || 'video/*' } });
+        const videoId = await uploadToYouTube(r.result.uploadUrl, file, (pct) => ($('#pprog').textContent = `Enviando… ${pct}%`));
+        const done = await api('/channel/upload/done', { method: 'POST', body: { videoId } });
+        await refreshMe();
+        $('#pmsg').innerHTML = alertBox('ok', `✅ Vídeo enviado${r.result.scheduled ? ' e agendado' : ''}! <a href="${esc(done.url)}" target="_blank" rel="noopener">Ver no YouTube</a> · <a href="${esc(done.studio)}" target="_blank" rel="noopener">Abrir no Studio</a>. O processamento do YouTube pode levar alguns minutos. ` + creditsNote(r.credits));
+        $('#pprog').textContent = '';
+      } catch (e) { $('#pmsg').innerHTML = alertBox('err', esc(e.message)); }
+      btn.disabled = false;
+    };
+  },
+
+  async live(el) {
+    el.innerHTML = `<div class="card" style="max-width:720px"><h3>Criar transmissão ao vivo</h3>
+      <p class="muted small">Cria a live no seu canal e devolve a URL RTMP e a chave de transmissão para colar no OBS/Streamlabs. Seu canal precisa ter transmissões ao vivo habilitadas no YouTube. ${costOf('live_create')}</p>
+      <div id="lmsg"></div>
+      <form id="lf">
+        <label>Título</label><input name="title" maxlength="100" required>
+        <label>Descrição</label><textarea name="description"></textarea>
+        <div class="row">
+          <div><label>Visibilidade</label><select name="privacy"><option value="public">Pública</option><option value="unlisted">Não listada</option><option value="private">Privada</option></select></div>
+          <div><label>Início (opcional; vazio = em 5 min)</label><input type="datetime-local" name="scheduledStart"></div>
+        </div>
+        <p><button class="btn">Criar live</button></p></form><div id="lout"></div></div>`;
+    $('#lf').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      try {
+        const r = await api('/channel/live', { method: 'POST', body: { title: fd.get('title'), description: fd.get('description'), privacy: fd.get('privacy'), scheduledStart: fd.get('scheduledStart') ? new Date(fd.get('scheduledStart')).toISOString() : null } });
+        await refreshMe();
+        const x = r.result;
+        $('#lout').innerHTML = `<div class="alert ok">Live criada! <a href="${esc(x.watchUrl)}" target="_blank" rel="noopener">Página da live</a> · <a href="${esc(x.studioUrl)}" target="_blank" rel="noopener">Abrir no Studio</a></div>
+          <p><b>URL do servidor (RTMP):</b> <span class="copybox">${esc(x.rtmpUrl)}</span></p>
+          <p><b>Chave de transmissão:</b> <span class="copybox" id="skey">••••••••</span> <button class="btn sm secondary" id="showkey">mostrar</button> <button class="btn sm secondary" onclick="navigator.clipboard.writeText(${JSON.stringify(x.streamKey || '')})">copiar</button></p>
+          <p class="muted small">${esc(x.aviso)} ${creditsNote(r.credits)}</p>`;
+        $('#showkey').onclick = () => ($('#skey').textContent = x.streamKey || '(indisponível)');
+      } catch (e) { $('#lmsg').innerHTML = alertBox('err', esc(e.message)); }
+    };
+  },
+
+  async analytics(el) {
+    const a = await api('/channel/analytics?days=28');
+    const max = Math.max(1, ...a.daily.map((d) => d.views));
+    el.innerHTML = `
+      <section class="grid cols3">
+        <div class="card"><h3>Views (28 dias)</h3><div class="kpi">${fmt(a.totals.views)}</div></div>
+        <div class="card"><h3>Horas assistidas</h3><div class="kpi">${fmt(Math.round(a.totals.minutes / 60))}</div></div>
+        <div class="card"><h3>Inscritos (líquido)</h3><div class="kpi">${a.totals.subs >= 0 ? '+' : ''}${fmt(a.totals.subs)}</div></div>
+      </section>
+      <div class="card"><h3>Views por dia</h3>
+        <div style="display:flex;align-items:flex-end;gap:3px;height:140px">${a.daily.map((d) => `<div title="${esc(d.day)}: ${fmt(d.views)} views" style="flex:1;background:var(--accent);height:${Math.max(2, Math.round((d.views / max) * 130))}px;border-radius:3px 3px 0 0"></div>`).join('')}</div>
+        <p class="muted small">${esc(a.daily[0]?.day || '')} → ${esc(a.daily[a.daily.length - 1]?.day || '')} · dados oficiais da YouTube Analytics API</p></div>
+      <div class="card scroll"><h3>Vídeos com mais views no período</h3>
+        ${a.topVideos.length ? `<table><tr><th>Vídeo</th><th>Views</th><th>Min. assistidos</th><th>Duração média</th></tr>${a.topVideos.map((v) => `<tr><td><a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc(v.title)}</a></td><td>${fmt(v.views)}</td><td>${fmt(Math.round(v.minutes))}</td><td>${Math.round(v.avgSec)}s</td></tr>`).join('')}</table>` : '<p class="muted">Sem dados no período.</p>'}</div>`;
+  },
+
+  async comentarios(el) {
+    const c = await api('/channel/comments');
+    el.innerHTML = `<div class="card scroll"><h3>Comentários recentes do canal</h3>
+      ${c.items.length ? c.items.map((m) => `<div style="border-bottom:1px solid var(--line);padding:8px 0" id="c-${esc(m.id)}">
+        <b>${esc(m.author)}</b> <span class="muted small">${dt(m.publishedAt)} · 👍 ${fmt(m.likes)} · ${m.replies} respostas · <a href="https://www.youtube.com/watch?v=${esc(m.videoId)}" target="_blank" rel="noopener">vídeo</a></span>
+        <p>${esc(m.text)}</p>
+        <div class="row"><div><input placeholder="Responder…" data-reply="${esc(m.id)}"></div><div class="fit"><button class="btn sm secondary" data-send="${esc(m.id)}">Responder ${costOf('comment_reply')}</button></div></div>
+        <div class="small" id="cm-${esc(m.id)}"></div></div>`).join('') : '<p class="muted">Nenhum comentário recente.</p>'}</div>`;
+    for (const b of el.querySelectorAll('[data-send]')) b.onclick = async () => {
+      const id = b.dataset.send, input = el.querySelector(`[data-reply="${id}"]`);
+      try {
+        if (!input.value.trim()) throw new Error('Escreva a resposta.');
+        const r = await api('/channel/comments/' + id + '/reply', { method: 'POST', body: { text: input.value } });
+        await refreshMe(); input.value = ''; $('#cm-' + id).innerHTML = alertBox('ok', 'Resposta publicada. ' + creditsNote(r.credits));
+      } catch (e) { $('#cm-' + id).innerHTML = alertBox('err', esc(e.message)); }
+    };
+  },
+
+  async ab(el) {
+    const ab = (await api('/channel/ab')).items;
+    el.innerHTML = `<div class="card scroll"><h3>Testes A/B de capa</h3><p class="muted small">Para iniciar um teste, abra "Meus vídeos" e use "Teste A/B de capas" no vídeo. As capas alternam sozinhas no período escolhido e as views de cada período ficam registradas.</p>
+      ${ab.length ? `<table><tr><th>Vídeo</th><th>Período</th><th>Capa atual</th><th>Status</th><th>Resultados</th><th></th></tr>
+        ${ab.map((t) => `<tr><td>${esc(t.title || t.video_id)}</td><td>${t.hours}h</td><td>${esc(t.current)}</td><td><span class="pill ${t.status === 'running' ? 'ok' : ''}">${esc(t.status)}</span></td>
+          <td class="small">${(t.log || []).map((l) => `${l.variant}: ${l.views_gain != null ? '+' + fmt(l.views_gain) + ' views' : 'em andamento'}`).join('<br>')}</td>
+          <td>${t.status === 'running' ? `<button class="btn sm secondary" data-stop="${t.id}" data-keep="A">Parar e manter A</button> <button class="btn sm secondary" data-stop="${t.id}" data-keep="B">Parar e manter B</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">Nenhum teste ainda.</p>'}</div>`;
+    for (const b of el.querySelectorAll('[data-stop]')) b.onclick = async () => {
       try { await api('/channel/ab/' + b.dataset.stop + '/stop', { method: 'POST', body: { keep: b.dataset.keep } }); route(); }
       catch (e) { $('#cmsg').innerHTML = alertBox('err', esc(e.message)); }
     };
-  } catch (e) {
-    $('#cbody').innerHTML = alertBox(e.status === 409 ? 'warn' : 'err', esc(e.message)) + (e.status === 409 ? googleButton('Conectar meu canal do YouTube', true) : '');
   }
 };
+
+// Upload "resumable" direto do navegador para o YouTube (PUT na URL de sessão)
+function uploadToYouTube(uploadUrl, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', uploadUrl, true);
+    xhr.setRequestHeader('Content-Type', file.type || 'video/*');
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100)); };
+    xhr.onload = () => {
+      try {
+        if (xhr.status >= 200 && xhr.status < 300) { const r = JSON.parse(xhr.responseText); resolve(r.id); }
+        else reject(new Error('O YouTube recusou o envio (HTTP ' + xhr.status + '). ' + (xhr.responseText || '').slice(0, 200)));
+      } catch { reject(new Error('Resposta inesperada do YouTube ao concluir o envio.')); }
+    };
+    xhr.onerror = () => reject(new Error('Falha de rede durante o envio. Tente novamente.'));
+    xhr.send(file);
+  });
+}
+
 function costOf(tool) {
   const c = state.costs.find((x) => x.tool === tool);
   if (!c) return '';
@@ -592,10 +686,8 @@ views.conta = async () => {
     <section class="grid cols2">
       <div class="card"><h3>Seus dados</h3>
         <p>E-mail: <b>${esc(u.email)}</b><br>Plano: <b>${esc(u.plan?.name)}</b> · Papel: <b>${esc(u.role)}</b></p>
-        <h3>Trocar senha</h3><div id="pmsg"></div>
-        <form id="pf"><label>Senha atual</label><input name="current" type="password" required>
-          <label>Nova senha</label><input name="next" type="password" minlength="8" required>
-          <p><button class="btn sm">Salvar nova senha</button></p></form></div>
+        <p class="muted small">Login feito com o Google: não há senha para gerenciar aqui.</p>
+        <p>Canal do YouTube: ${u.youtube?.connected ? `<span class="pill ok">conectado (${esc(u.youtube.channel_title || '')})</span>` : '<span class="pill warn">não conectado</span> <a href="#/canal">conectar</a>'}</p></div>
       <div class="card"><h3>Token para a extensão do Chrome</h3>
         <p class="muted small">Use este token para entrar na extensão. Ele dá acesso à sua conta: trate como uma senha e não compartilhe.</p>
         <p><button id="tok" class="btn sm secondary">Gerar e mostrar token</button></p><div id="tokout"></div></div>
@@ -609,12 +701,6 @@ views.conta = async () => {
     <h2>Seus pagamentos</h2>
     <div class="card scroll">${pays.length ? `<table><tr><th>Data</th><th>Plano</th><th>Valor</th><th>Status</th></tr>
       ${pays.map((p) => `<tr><td>${dt(p.created_at)}</td><td>${esc(p.plan_id)}</td><td>${money(p.amount_cents)}</td><td><span class="pill ${p.status === 'approved' ? 'ok' : p.status === 'pending' ? 'warn' : 'err'}">${esc(p.status)}</span></td></tr>`).join('')}</table>` : '<p class="muted">Nenhum pagamento ainda.</p>'}</div>`;
-  $('#pf').onsubmit = async (ev) => {
-    ev.preventDefault();
-    const fd = new FormData(ev.target);
-    try { await api('/me/password', { method: 'POST', body: { current: fd.get('current'), next: fd.get('next') } }); $('#pmsg').innerHTML = alertBox('ok', 'Senha alterada.'); ev.target.reset(); }
-    catch (e) { showErr($('#pmsg'), e); }
-  };
   $('#tok').onclick = async () => {
     const r = await api('/auth/token');
     $('#tokout').innerHTML = `<div class="copybox">${esc(r.token)}</div><p><button class="btn sm secondary" onclick="navigator.clipboard.writeText(${JSON.stringify(r.token)})">Copiar token</button></p>`;
@@ -663,6 +749,28 @@ const ADMIN_TABS = [
 ];
 
 views.extensao = (p) => views.ajuda(p);
+
+views.privacidade = async () => {
+  appEl().innerHTML = `<h1>Política de Privacidade</h1><div class="card" style="max-width:820px">
+    <p><b>Quem somos.</b> O TurboCanal é uma plataforma de ferramentas para criadores do YouTube. Não é afiliado ao YouTube, ao Google nem ao vidIQ.</p>
+    <p><b>Dados que coletamos.</b> Ao entrar com o Google, recebemos seu nome, e-mail e identificador da conta Google, usados apenas para criar e identificar sua conta. Com sua autorização, acessamos dados do YouTube: dados públicos de vídeos e canais (para pesquisas e análises) e, se você conectar seu canal, dados e ações do seu próprio canal (vídeos, estatísticas, comentários, capas, transmissões), exclusivamente para executar as ações que você solicitar.</p>
+    <p><b>Como usamos.</b> Para prestar o serviço: executar as ferramentas, registrar o uso de créditos e o histórico, e atender ao suporte. Não vendemos dados. Não usamos os dados do seu canal para treinar modelos de IA. Conteúdos enviados a provedores de IA (como títulos ou links públicos de vídeos) são usados só para gerar a resposta solicitada.</p>
+    <p><b>Dados do Google.</b> O uso e a transferência de informações recebidas das APIs do Google seguem a <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Política de Dados do Usuário dos Serviços de API do Google</a>, inclusive os requisitos de uso limitado.</p>
+    <p><b>Armazenamento e exclusão.</b> Tokens de acesso ficam cifrados em trânsito e guardados no servidor; você pode desconectar o canal a qualquer momento em "Meu canal" (os tokens são apagados) e revogar o acesso em <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>. Para excluir sua conta e seus dados, escreva para o e-mail de contato abaixo.</p>
+    <p><b>Contato.</b> lcmatias777@gmail.com</p>
+    <p class="muted small">Última atualização: outubro de 2026.</p></div>`;
+};
+
+views.termos = async () => {
+  appEl().innerHTML = `<h1>Termos de Uso</h1><div class="card" style="max-width:820px">
+    <p>1. O TurboCanal oferece ferramentas de pesquisa, análise e gestão para criadores do YouTube, por meio de um sistema de créditos. O plano Free é gratuito; os planos pagos são cobrados mensalmente e liberam créditos após a confirmação do pagamento.</p>
+    <p>2. Você é responsável pelo conteúdo que publica no YouTube por meio da plataforma e por cumprir as regras do YouTube e do Google. As ações no seu canal (envio de vídeos, capas, lives, comentários) são executadas somente a seu pedido.</p>
+    <p>3. Pontuações, estimativas e sugestões de IA são auxiliares e podem conter erros; confira antes de publicar.</p>
+    <p>4. Não garantimos disponibilidade ininterrupta. Limites de uso podem ser aplicados para respeitar as cotas das APIs do Google.</p>
+    <p>5. O uso abusivo (automação para burlar créditos, spam, violação de direitos) pode levar à suspensão da conta.</p>
+    <p>6. Dúvidas: lcmatias777@gmail.com.</p>
+    <p class="muted small">Última atualização: outubro de 2026.</p></div>`;
+};
 
 views.admin = async (params, sub) => {
   if (!state.user) return needLogin();
@@ -876,6 +984,7 @@ async function route() {
   try {
     if (!segs.length) return await views.home(params);
     if (segs[0] === 'admin') return await views.admin(params, segs[1]);
+    if (segs[0] === 'canal') return await views.canal(params, segs[1]);
     if (segs[0] === 'ferramentas' && views['ferramentas/' + segs[1]]) return await views['ferramentas/' + segs[1]](params);
     if (views[segs[0]]) return await views[segs[0]](params);
     appEl().innerHTML = alertBox('err', 'Página não encontrada.') + '<p><a class="btn" href="#/">Voltar ao início</a></p>';

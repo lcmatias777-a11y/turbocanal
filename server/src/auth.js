@@ -6,8 +6,15 @@ import { HttpError, audit, isEmail, must, now, uid, ym } from './util.js';
 import { ensureRefill, getUser } from './credits.js';
 
 const COOKIE = 'tc_token';
-const YT_SCOPES = ['https://www.googleapis.com/auth/youtube', 'https://www.googleapis.com/auth/youtube.readonly'];
-const BASIC_SCOPES = ['openid', 'email', 'profile'];
+// Login básico já inclui leitura do YouTube (as ferramentas de pesquisa/análise usam o
+// token do próprio usuário, sem chave de API). "Conectar canal" pede gestão completa.
+const BASIC_SCOPES = ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/youtube.readonly'];
+const YT_SCOPES = [
+  'https://www.googleapis.com/auth/youtube',
+  'https://www.googleapis.com/auth/youtube.force-ssl',
+  'https://www.googleapis.com/auth/yt-analytics.readonly'
+];
+export const isManageScope = (scopes) => /auth\/youtube(\s|$)|youtube\.force-ssl/.test(String(scopes || ''));
 
 const baseUrl = () => (process.env.BASE_URL || 'http://localhost:8787').replace(/\/$/, '');
 export const googleConfigured = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
@@ -33,7 +40,7 @@ function cookieOpts() {
 export async function publicUser(db, user) {
   if (!user) return null;
   const plan = await db.get('SELECT id,name,price_cents,monthly_credits FROM plans WHERE id=?', [user.plan_id]);
-  const yt = await db.get('SELECT channel_id, channel_title, refresh_token FROM yt_tokens WHERE user_id=?', [user.id]);
+  const yt = await db.get('SELECT channel_id, channel_title, refresh_token, scopes FROM yt_tokens WHERE user_id=?', [user.id]);
   return {
     id: user.id,
     email: user.email,
@@ -44,7 +51,9 @@ export async function publicUser(db, user) {
     credits: user.credits,
     unlimited: user.role === 'owner',
     created_at: user.created_at,
-    youtube: yt && yt.refresh_token ? { connected: true, channel_id: yt.channel_id, channel_title: yt.channel_title } : { connected: false }
+    youtube: yt && isManageScope(yt.scopes)
+      ? { connected: true, channel_id: yt.channel_id, channel_title: yt.channel_title }
+      : { connected: false, readonly: !!yt }
   };
 }
 
@@ -298,7 +307,7 @@ export function authRoutes(app, db, auth) {
              channel_title=COALESCE(EXCLUDED.channel_title, yt_tokens.channel_title), scopes=EXCLUDED.scopes, updated_at=EXCLUDED.updated_at`,
           [user.id, tok.access_token, refresh, Date.now() + (tok.expires_in || 3600) * 1000 - 60000, channel?.id || null, channel?.snippet?.title || null, scopes, now()]
         );
-        await audit(db, user, 'youtube.connected', channel?.snippet?.title || email);
+        if (isManageScope(scopes)) await audit(db, user, 'youtube.connected', channel?.snippet?.title || email);
       }
       res.cookie(COOKIE, await signToken(db, user.id), cookieOpts());
       res.redirect(st.connect ? '/#/canal' : '/#/dashboard');
@@ -317,10 +326,13 @@ export function authRoutes(app, db, auth) {
 /** Access token válido do YouTube para o usuário (renova com refresh_token se preciso). */
 export async function youtubeAccessToken(db, user) {
   const row = await db.get('SELECT * FROM yt_tokens WHERE user_id=?', [user.id]);
-  if (!row || !row.refresh_token) {
-    throw new HttpError(409, 'Seu canal do YouTube ainda não está conectado. Use "Conectar meu canal" para autorizar.');
+  if (!row) {
+    throw new HttpError(409, 'Entre com o Google para usar as ferramentas do YouTube (ou use "Conectar meu canal" para gerenciar seu canal).');
   }
   if (row.access_token && Number(row.expires_at) > Date.now()) return row.access_token;
+  if (!row.refresh_token) {
+    throw new HttpError(409, 'Sua sessão com o Google expirou. Saia e entre com o Google novamente.');
+  }
   if (!googleConfigured()) throw new HttpError(409, 'Login com Google não configurado neste servidor.');
   const resp = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
