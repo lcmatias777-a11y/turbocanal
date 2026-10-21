@@ -1,22 +1,18 @@
-// TurboCanal no YouTube (content script).
-//  1) Página do vídeo: painel com abas Vídeo, Canal, SEO e IA.
-//  2) Miniaturas (início, busca, canal, relacionados): VPH e outlier calculados na hora,
-//     com os números que o próprio YouTube mostra na página (grátis, sem gastar créditos).
-//  3) Busca: resumo da concorrência da busca e pesquisa de palavras-chave.
-//  4) Página de canal: análise do canal e "adicionar aos concorrentes".
-//  5) Shorts: botão para abrir o painel do Short.
-// Tudo é montado com createElement/textContent (o YouTube exige Trusted Types e bloqueia innerHTML).
+// TurboCanal no YouTube.
+// REGRA PRINCIPAL: nunca existe tela de login. Tudo o que dá para calcular com os dados
+// que a própria página do YouTube já carregou funciona sem conta e sem gastar créditos:
+// VPH, outliers, nota de SEO, tags, ordenação, baixar capa, copiar dados.
+// Só a IA e as ferramentas do servidor pedem conta, e aí é um botão dentro do painel.
 (() => {
-  if (window.__tcLoaded) return;
-  window.__tcLoaded = true;
+  if (document.documentElement.dataset.tcOn) return;
+  document.documentElement.dataset.tcOn = chrome.runtime.getManifest().version;
 
-  // ---------------- utilidades ----------------
+  /* ---------------------------- utilidades ---------------------------- */
   function h(tag, attrs, ...kids) {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs || {})) {
       if (v == null || v === false) continue;
       if (k === 'class') el.className = v;
-      else if (k === 'text') el.textContent = v;
       else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
       else el.setAttribute(k, v === true ? '' : String(v));
     }
@@ -25,34 +21,37 @@
   }
   const clear = (el) => { while (el && el.firstChild) el.firstChild.remove(); return el; };
   const fmt = (n) => (n == null || Number.isNaN(n) ? '—' : Number(n).toLocaleString('pt-BR'));
+  const dec = (n, d = 1) => (n == null ? '—' : Number(n).toLocaleString('pt-BR', { maximumFractionDigits: d }));
   const short = (n) => {
     if (n == null) return '—';
-    if (n >= 1e9) return (n / 1e9).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' bi';
-    if (n >= 1e6) return (n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mi';
-    if (n >= 1e4) return Math.round(n / 1e3).toLocaleString('pt-BR') + ' mil';
-    if (n >= 1e3) return (n / 1e3).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mil';
+    if (n >= 1e9) return dec(n / 1e9) + ' bi';
+    if (n >= 1e6) return dec(n / 1e6) + ' mi';
+    if (n >= 1e3) return dec(n / 1e3) + ' mil';
     return String(Math.round(n));
   };
+  const hoursSince = (iso) => (iso ? Math.max(1, (Date.now() - new Date(iso).getTime()) / 3600e3) : null);
   const ageText = (iso) => {
-    if (!iso) return '';
-    const d = (Date.now() - new Date(iso).getTime()) / 86400e3;
+    const hrs = hoursSince(iso);
+    if (hrs == null) return '—';
+    const d = hrs / 24;
     if (d < 1) return 'hoje';
     if (d < 60) return `há ${Math.round(d)} dia${Math.round(d) === 1 ? '' : 's'}`;
     if (d < 730) return `há ${Math.round(d / 30)} meses`;
     return `há ${Math.floor(d / 365)} anos`;
   };
-  const S = { baseUrl: 'https://turbocanal.onrender.com', badges: true, autoPanel: true };
+  const mmss = (s) => (s ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : '—');
 
-  async function loadSettings() {
+  /* ---------------------------- configuração e conta ---------------------------- */
+  const S = { baseUrl: 'https://turbocanal.onrender.com', badges: true, painel: true };
+  async function loadCfg() {
     try {
       const c = await chrome.storage.sync.get(['baseUrl', 'tc_badges', 'tc_autopanel']);
       S.baseUrl = (c.baseUrl || S.baseUrl).replace(/\/$/, '');
       S.badges = c.tc_badges !== false;
-      S.autoPanel = c.tc_autopanel !== false;
+      S.painel = c.tc_autopanel !== false;
     } catch {}
   }
-  // O content script não lê o cookie sozinho: pede ao service worker. Se ele estiver
-  // dormindo, a primeira mensagem pode falhar, então tentamos de novo uma vez.
+  const site = (hash) => S.baseUrl + '/#/' + hash;
   async function token() {
     for (let i = 0; i < 2; i++) {
       try {
@@ -63,23 +62,44 @@
     }
     return '';
   }
-  async function api(path, { method = 'GET', body } = {}) {
+  async function api(path, { method = 'GET', body, timeout = 120000 } = {}) {
     const t = await token();
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), timeout);
     let r;
     try {
       r = await fetch(S.baseUrl + '/api' + path, {
         method,
         headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...(t ? { Authorization: 'Bearer ' + t } : {}) },
-        body: body ? JSON.stringify(body) : undefined
+        body: body ? JSON.stringify(body) : undefined,
+        signal: ctrl.signal
       });
-    } catch {
-      const e = new Error('Não consegui falar com o TurboCanal (o site pode estar acordando; tente de novo em 1 minuto).'); e.status = 0; throw e;
-    }
+    } catch (e) {
+      const err = new Error(e.name === 'AbortError' ? 'O site demorou demais para responder. Tente de novo.' : 'Não consegui falar com o TurboCanal agora.');
+      err.status = 0;
+      throw err;
+    } finally { clearTimeout(to); }
     const data = await r.json().catch(() => ({}));
     if (!r.ok) { const e = new Error(data.error || 'Erro ' + r.status); e.status = r.status; throw e; }
     return data;
   }
-  const site = (hash) => S.baseUrl + '/#/' + hash;
+  let ME = null, MEtried = false;
+  async function me() {
+    if (MEtried) return ME;
+    MEtried = true;
+    if (!(await token())) return (ME = null);
+    try { ME = (await api('/me', { timeout: 20000 })).user; } catch { ME = null; }
+    return ME;
+  }
+  let COSTS = null;
+  async function cost(tool) {
+    if (!COSTS) { try { COSTS = (await api('/tools/costs', { timeout: 20000 })).costs; } catch { COSTS = []; } }
+    const c = COSTS.find((x) => x.tool === tool);
+    return c ? (ME?.unlimited ? 'incluído' : `${fmt(c.cost)} créditos`) : '';
+  }
+  const openSite = (hash) => chrome.runtime.sendMessage({ type: 'openTab', url: site(hash) }).catch(() => window.open(site(hash), '_blank'));
+  const btnLink = (hash, label, cls = 'tc-btn') => h('button', { class: cls, type: 'button', onclick: () => openSite(hash) }, label);
+  const creditLine = (c) => (!c ? '' : c.unlimited ? 'Conta de administrador: sem consumo de créditos.' : c.reused ? 'Já analisado: nada cobrado de novo.' : c.charged === 1 ? 'Usado 1 crédito.' : `Usados ${fmt(c.charged)} créditos.`);
   function copyBtn(label, getText, cls = 'tc-btn tc-sec2') {
     const b = h('button', { class: cls, type: 'button' }, label);
     b.onclick = async () => {
@@ -90,34 +110,74 @@
     };
     return b;
   }
-  const linkBtn = (href, label, cls = 'tc-btn') => h('a', { class: cls, href, target: '_blank', rel: 'noopener' }, label);
-  const creditsLine = (c) => (!c ? '' : c.unlimited ? 'Conta do administrador: sem consumo de créditos.' : c.reused ? 'Já analisado: nada cobrado de novo.' : c.charged === 1 ? 'Usado 1 crédito.' : `Usados ${fmt(c.charged)} créditos.`);
-  const errBox = (e) => h('div', { class: 'tc-err' }, e.message,
-    e.status === 401 ? h('div', { class: 'tc-muted' }, 'Sessão expirada: entre de novo pelo ícone da extensão.') : null,
-    e.status === 402 ? h('div', null, linkBtn(site('planos'), 'Ver planos', 'tc-link')) : null,
-    e.status === 409 ? h('div', { class: 'tc-muted' }, 'Nenhum crédito foi cobrado.') : null);
-  const loginBox = () => h('div', { class: 'tc-body' },
-    h('p', null, 'Entre com o Google no TurboCanal para ver a análise deste vídeo, do canal e as sugestões da IA.'),
-    h('p', null, linkBtn(S.baseUrl + '/api/auth/google', '🔵 Entrar com Google')),
-    h('p', { class: 'tc-muted' }, 'Depois de entrar, recarregue esta página.'));
-  let ME = null;
-  async function me(force = false) {
-    if (ME && !force) return ME;
-    try { ME = (await api('/me')).user; } catch (e) { ME = null; if (e.status && e.status !== 401) throw e; }
-    return ME;
+  /** Caixa discreta para o que precisa de conta. NUNCA uma tela inteira de login. */
+  function precisaConta(oQue) {
+    return h('div', { class: 'tc-need' },
+      h('div', null, `🔒 ${oQue} precisa da sua conta do TurboCanal.`),
+      h('div', { class: 'tc-actions' },
+        h('button', { class: 'tc-btn', type: 'button', onclick: () => chrome.runtime.sendMessage({ type: 'openTab', url: S.baseUrl + '/api/auth/google' }).catch(() => window.open(S.baseUrl + '/api/auth/google', '_blank')) }, '🔵 Entrar com Google'),
+        h('button', { class: 'tc-btn tc-sec2', type: 'button', onclick: () => { MEtried = false; ME = null; refreshPanel(); } }, '🔄 Já entrei')),
+      h('div', { class: 'tc-muted' }, 'O resto do painel funciona sem conta.'));
   }
-  const costOf = (() => { let costs = null; return async (tool) => { if (!costs) { try { costs = (await api('/tools/costs')).costs; } catch { costs = []; } } return costs.find((c) => c.tool === tool)?.cost; }; })();
-  const priceLabel = async (tool) => (ME?.unlimited ? 'incluído' : `${fmt(await costOf(tool))} créditos`);
+  const errBox = (e) => h('div', { class: 'tc-err' }, e.message,
+    e.status === 401 ? h('div', { class: 'tc-muted' }, 'Sessão expirada: entre de novo no site.') : null,
+    e.status === 402 ? h('div', null, btnLink('planos', 'Ver planos', 'tc-btn tc-sec2')) : null,
+    e.status === 409 ? h('div', { class: 'tc-muted' }, 'Nenhum crédito foi cobrado.') : null);
 
-  function videoIdFromUrl(u = location.href) {
+  /* ---------------------------- dados da página ---------------------------- */
+  const videoIdOf = (u = location.href) => {
     const m = String(u).match(/[?&]v=([A-Za-z0-9_-]{11})|\/shorts\/([A-Za-z0-9_-]{11})|youtu\.be\/([A-Za-z0-9_-]{11})/);
     return m ? m[1] || m[2] || m[3] : null;
+  };
+  /** Dados que o próprio YouTube carregou (title, tags, views, duração, canal). */
+  function pageVideo() {
+    try {
+      const raw = document.documentElement.dataset.tcVideo;
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      return d && d.id === videoIdOf() ? d : null;
+    } catch { return null; }
+  }
+  const digits = (s) => {
+    const m = String(s || '').replace(/ /g, ' ').match(/[\d][\d.,\s]*/);
+    if (!m) return null;
+    const n = parseInt(m[0].replace(/[^\d]/g, ''), 10);
+    return Number.isFinite(n) ? n : null;
+  };
+  /** Likes e comentários: o YouTube só mostra no DOM, então lemos de lá (sem rede). */
+  function pageEngagement() {
+    let likes = null, comments = null;
+    for (const sel of ['like-button-view-model button', 'ytd-menu-renderer like-button-view-model button', '#top-level-buttons-computed button']) {
+      const el = document.querySelector(sel);
+      const n = digits(el?.getAttribute('aria-label')) ?? digits(el?.textContent);
+      if (n != null) { likes = n; break; }
+    }
+    for (const sel of ['ytd-comments-header-renderer #count', '#comments #count', 'ytd-comments #count']) {
+      const n = digits(document.querySelector(sel)?.textContent);
+      if (n != null) { comments = n; break; }
+    }
+    return { likes, comments };
   }
 
-  // ---------------- 1) painel do vídeo ----------------
-  let panelVid = null;
-  const panelCache = new Map(); // vídeo -> resultado (se o YouTube redesenhar a coluna, não cobra de novo)
-  function panelShell(floating) {
+  /* ---------------------------- SEO calculado aqui ---------------------------- */
+  function seoLocal(v, eng) {
+    const checks = [];
+    const add = (item, ok, dica) => checks.push({ item, ok: !!ok, dica });
+    const t = v.title || '', d = v.description || '', tags = v.tags || [];
+    add('Título entre 20 e 70 caracteres', t.length >= 20 && t.length <= 70, `Está com ${t.length}. Nessa faixa o título aparece inteiro na busca e no feed.`);
+    add('Título com número ou colchete', /\d|\[|\(/.test(t), 'Números e marcadores costumam aumentar o clique. Teste no seu nicho.');
+    add('Descrição com 200+ caracteres', d.length >= 200, `Está com ${d.length}. Use as 2 primeiras linhas para a promessa do vídeo.`);
+    add('Descrição com link ou capítulo', /https?:\/\/|\n\s*0?0:00/.test(d), 'Capítulos (00:00) ajudam a navegação e a retenção.');
+    add('Pelo menos 8 tags', tags.length >= 8, `Tem ${tags.length}. Use variações da palavra-chave principal.`);
+    add('Duração acima de 3 minutos', (v.durationSec || 0) >= 180, 'Fora dos Shorts, vídeos muito curtos limitam o tempo de exibição.');
+    if (eng.likes != null && v.views > 0) add('Engajamento (likes/views) acima de 2%', eng.likes / v.views >= 0.02, 'Peça a curtida no começo e no meio, não só no fim.');
+    const ok = checks.filter((c) => c.ok).length;
+    return { score: Math.round((ok / checks.length) * 100), checks };
+  }
+
+  /* ---------------------------- painel do vídeo ---------------------------- */
+  let painelVid = null, painelAba = 'Vídeo';
+  function shell(floating) {
     let p = document.getElementById('tc-panel');
     if (p) return p;
     const host = floating ? document.body : document.querySelector('#secondary-inner') || document.querySelector('#secondary') || document.body;
@@ -125,209 +185,209 @@
     host.prepend(p);
     return p;
   }
-  function header(p, extra) {
+  function head(p, extra) {
     return h('div', { class: 'tc-head' },
       h('span', null, '🚀 Turbo', h('b', null, 'Canal')),
       h('span', { class: 'tc-head-right' }, extra || null,
         h('button', { class: 'tc-close', title: 'Minimizar', onclick: () => p.classList.toggle('tc-min') }, '—'),
-        h('button', { class: 'tc-close', title: 'Fechar', onclick: () => { p.remove(); panelVid = '__fechado__' + videoIdFromUrl(); } }, '✕')));
+        h('button', { class: 'tc-close', title: 'Fechar', onclick: () => { p.remove(); painelVid = '__x' + videoIdOf(); } }, '✕')));
   }
+  function refreshPanel() { painelVid = null; watchPanel({ floating: location.pathname.startsWith('/shorts/') }); }
 
   async function watchPanel({ floating = false, force = false } = {}) {
-    const vid = videoIdFromUrl();
-    if (!vid) return;
-    if (!force && (panelVid === vid || panelVid === '__fechado__' + vid) && document.getElementById('tc-panel')) return;
-    if (!force && panelVid === '__fechado__' + vid) return;
-    panelVid = vid;
-    const p = panelShell(floating);
+    const vid = videoIdOf();
+    if (!vid || (!S.painel && !force)) return;
+    if (painelVid === '__x' + vid) return;
+    if (painelVid === vid && document.getElementById('tc-panel')) return;
+    const v = pageVideo();
+    if (!v) return; // os dados da página ainda não chegaram
+    painelVid = vid;
+    const p = shell(floating);
     clear(p);
-    if (!(await token())) { p.append(header(p), loginBox()); return; }
-    let user;
-    try { user = await me(true); } catch (e) { p.append(header(p), h('div', { class: 'tc-body' }, errBox(e))); return; }
-    if (!user) { p.append(header(p), loginBox()); return; }
-    const credits = h('span', { class: 'tc-credits' }, '💎 ' + (user.unlimited ? '∞' : fmt(user.credits)));
-    p.append(header(p, credits));
-    const body = h('div', { class: 'tc-body' });
-    p.append(body);
-    if (!S.autoPanel && !force) {
-      body.append(h('p', { class: 'tc-muted' }, 'O painel automático está desligado (no ícone da extensão).'),
-        h('button', { class: 'tc-btn', onclick: () => watchPanel({ floating, force: true }) }, `Carregar análise (${await priceLabel('video_panel')})`));
-      return;
-    }
-    body.append(h('div', { class: 'tc-muted' }, 'Analisando este vídeo…'));
-    let r = panelCache.get(vid);
-    if (!r) {
-      try { r = await api('/tools/video_panel', { method: 'POST', body: { video: vid } }); }
-      catch (e) { clear(body).append(errBox(e)); return; }
-      panelCache.set(vid, { result: r.result, credits: { ...r.credits, charged: 0, reused: true } });
-      if (panelCache.size > 50) panelCache.delete(panelCache.keys().next().value);
-    }
-    if (videoIdFromUrl() !== vid) return; // o usuário já mudou de vídeo
-    if (!r.credits?.unlimited && r.credits?.balance != null) credits.textContent = '💎 ' + fmt(r.credits.balance);
-    renderPanel(clear(body), r.result, vid, r.credits);
-  }
-
-  function stat(label, value, title) { return h('div', { class: 'tc-stat', title: title || null }, h('span', { class: 'tc-stat-l' }, label), h('b', null, value)); }
-
-  function renderPanel(body, R, vid, credits) {
-    const v = R.video || {}, s = R.seo || {}, ch = R.channel || null;
+    const eng = pageEngagement();
+    const user = await me();
+    const credits = h('span', { class: 'tc-credits' }, user ? '💎 ' + (user.unlimited ? '∞' : fmt(user.credits)) : '');
+    p.append(head(p, credits));
     const tabsBar = h('div', { class: 'tc-tabs' });
     const pane = h('div', { class: 'tc-pane' });
-    const tabs = {
-      'Vídeo': () => tabVideo(v, R, vid),
-      'Canal': () => tabChannel(ch, v),
-      'SEO': () => tabSeo(v, s, R.seoTags || {}),
-      'IA': () => tabAI(vid)
+    const body = h('div', { class: 'tc-body' }, tabsBar, pane);
+    p.append(body);
+    const abas = {
+      'Vídeo': () => abaVideo(v, eng, vid),
+      'SEO': () => abaSeo(v, eng),
+      'Canal': () => abaCanal(v, vid),
+      'IA': () => abaIA(vid)
     };
-    let current = 'Vídeo';
-    const show = (name) => {
-      current = name;
-      for (const b of tabsBar.children) b.classList.toggle('on', b.textContent === name);
-      clear(pane).append(tabs[name]());
+    const show = (nome) => {
+      painelAba = nome;
+      for (const b of tabsBar.children) b.classList.toggle('on', b.textContent === nome);
+      clear(pane).append(abas[nome]());
     };
-    for (const name of Object.keys(tabs)) tabsBar.append(h('button', { class: 'tc-tab', type: 'button', onclick: () => show(name) }, name));
-    body.append(R.mock ? h('p', { class: 'tc-err' }, '⚠️ ' + (R.aviso || 'Dados de exemplo.')) : null, tabsBar, pane, h('p', { class: 'tc-muted tc-foot' }, creditsLine(credits)));
-    show(current);
+    for (const nome of Object.keys(abas)) tabsBar.append(h('button', { class: 'tc-tab', type: 'button', onclick: () => show(nome) }, nome));
+    show(abas[painelAba] ? painelAba : 'Vídeo');
   }
 
-  function tabVideo(v, R, vid) {
-    const out = R.outlierCanal;
+  const stat = (label, valor, title) => h('div', { class: 'tc-stat', title: title || null }, h('span', { class: 'tc-stat-l' }, label), h('b', null, valor));
+
+  function abaVideo(v, eng, vid) {
+    const hrs = hoursSince(v.publishedAt);
+    const vph = hrs ? v.views / hrs : null;
+    const engPct = eng.likes != null && v.views ? ((eng.likes + (eng.comments || 0)) / v.views) * 100 : null;
     return h('div', null,
       h('div', { class: 'tc-grid' },
         stat('👁 Views', fmt(v.views)),
-        stat('⚡ VPH', fmt(v.vph), 'Views por hora desde a publicação'),
-        stat('🔥 Outlier', out != null ? `${String(out).replace('.', ',')}x` : '—', 'Views deste vídeo ÷ mediana dos últimos vídeos do canal'),
-        stat('📊 Engajamento', v.engagement != null ? String(v.engagement).replace('.', ',') + '%' : '—', '(likes + comentários) ÷ views'),
-        stat('👍 Likes', fmt(v.likes)),
-        stat('💬 Comentários', fmt(v.comments)),
-        stat('⏱ Duração', v.durationSec ? `${Math.floor(v.durationSec / 60)}:${String(v.durationSec % 60).padStart(2, '0')}` : '—'),
-        stat('📅 Publicado', ageText(v.publishedAt))),
-      out != null ? h('p', { class: out >= 2 ? 'tc-ok' : 'tc-muted' }, out >= 2 ? `🔥 Este vídeo está ${String(out).replace('.', ',')}x acima do normal do canal.` : out < 0.7 ? 'Este vídeo está abaixo do normal do canal.' : 'Este vídeo está na média do canal.') : null,
-      h('div', { class: 'tc-actions' },
-        linkBtn(site('ferramentas/insights?video=' + vid), '✨ IA do vídeo'),
-        linkBtn(site('ferramentas/transformar?video=' + vid + '&mode=shorts'), '✂️ 3 cortes p/ Shorts'),
-        linkBtn(site('ferramentas/video?video=' + vid), '🔍 Análise completa'),
-        linkBtn(site('canal'), '📺 Meu canal')),
+        stat('⚡ VPH', vph != null ? short(vph) + '/h' : '—', 'Views por hora desde a publicação'),
+        stat('👍 Likes', fmt(eng.likes)),
+        stat('💬 Comentários', fmt(eng.comments)),
+        stat('📊 Engajamento', engPct != null ? dec(engPct, 2) + '%' : '—', '(likes + comentários) ÷ views'),
+        stat('⏱ Duração', mmss(v.durationSec)),
+        stat('📅 Publicado', ageText(v.publishedAt)),
+        stat('📺 Canal', v.channel || '—')),
+      h('p', { class: 'tc-muted' }, 'Calculado aqui no seu navegador, com os dados desta página. Não gasta créditos.'),
       h('div', { class: 'tc-actions' },
         h('a', { class: 'tc-btn tc-sec2', href: `https://i.ytimg.com/vi/${vid}/maxresdefault.jpg`, target: '_blank', rel: 'noopener', download: `capa-${vid}.jpg` }, '🖼️ Baixar a capa'),
-        copyBtn('📋 Copiar título, descrição e tags', () => `TÍTULO\n${v.title || ''}\n\nDESCRIÇÃO\n${v.description || ''}\n\nTAGS\n${(v.tags || []).join(', ')}`),
+        copyBtn('📋 Copiar título, descrição e tags', () => `TÍTULO\n${v.title}\n\nDESCRIÇÃO\n${v.description}\n\nTAGS\n${(v.tags || []).join(', ')}`),
         copyBtn('🔗 Copiar incorporação', () => {
           const t = Math.floor(document.querySelector('video')?.currentTime || 0);
           return `<iframe width="560" height="315" src="https://www.youtube.com/embed/${vid}${t > 2 ? '?start=' + t : ''}" title="YouTube" frameborder="0" allowfullscreen></iframe>`;
         })),
-      h('p', { class: 'tc-muted' }, 'A incorporação começa no tempo em que o vídeo está agora.'));
+      h('div', { class: 'tc-actions' },
+        btnLink('ferramentas/insights?video=' + vid, '✨ IA do vídeo'),
+        btnLink('ferramentas/transformar?video=' + vid + '&mode=shorts', '✂️ 3 cortes'),
+        btnLink('canal', '📺 Meu canal', 'tc-btn tc-sec2')));
   }
 
-  function tabChannel(ch, v) {
-    if (!ch) return h('p', { class: 'tc-muted' }, 'Não consegui carregar os dados do canal agora.');
-    const years = ch.publishedAt ? (Date.now() - new Date(ch.publishedAt).getTime()) / (365 * 86400e3) : null;
-    const msg = h('div');
-    const addBtn = h('button', { class: 'tc-btn', type: 'button' }, '🏆 Adicionar aos concorrentes');
-    addBtn.onclick = async () => {
-      addBtn.disabled = true; clear(msg).append(h('span', { class: 'tc-muted' }, 'Adicionando…'));
-      try { const r = await api('/competitors', { method: 'POST', body: { channel: ch.id } }); clear(msg).append(h('p', { class: 'tc-ok' }, '✅ Canal adicionado aos seus concorrentes. ', linkBtn(site('ferramentas/concorrentes'), 'ver lista', 'tc-link')), h('p', { class: 'tc-muted' }, creditsLine(r.credits))); }
-      catch (e) { clear(msg).append(errBox(e)); addBtn.disabled = false; }
-    };
-    priceLabel('competitor_check').then((l) => (addBtn.textContent = `🏆 Adicionar aos concorrentes (${l})`));
-    return h('div', null,
-      h('div', { class: 'tc-chan' }, ch.thumb ? h('img', { src: ch.thumb, alt: '' }) : null,
-        h('div', null, h('b', null, ch.title || v.channel || ''), h('div', { class: 'tc-muted' }, [ch.handle, years != null ? (years >= 1 ? `${Math.floor(years)} ano${Math.floor(years) === 1 ? '' : 's'} no YouTube` : 'canal novo') : null].filter(Boolean).join(' · ')))),
-      h('div', { class: 'tc-grid' },
-        stat('👥 Inscritos', ch.subs == null ? 'ocultos' : short(ch.subs)),
-        stat('👁 Views totais', short(ch.views)),
-        stat('🎬 Vídeos', fmt(ch.videos)),
-        stat('📈 Mediana recente', ch.medianRecentViews != null ? short(ch.medianRecentViews) : '—', `Mediana de views dos últimos ${ch.recentCount || ''} vídeos`)),
-      ch.keywords?.length ? h('div', { class: 'tc-sec' }, h('b', null, 'Tags do canal '), h('button', { class: 'tc-mini', type: 'button', onclick: (e) => { navigator.clipboard.writeText(ch.keywords.join(', ')); e.target.textContent = 'copiado ✓'; } }, 'copiar'),
-        h('div', { class: 'tc-tags' }, ch.keywords.map((k) => h('span', null, k)))) : h('p', { class: 'tc-muted' }, 'O canal não definiu tags.'),
-      h('div', { class: 'tc-actions' }, addBtn, linkBtn(site('ferramentas/canal?channel=' + encodeURIComponent(ch.handle || ch.id)), '📺 Analisar canal no site', 'tc-btn tc-sec2')),
-      msg);
-  }
-
-  function tabSeo(v, s, st) {
-    const inTitle = new Set((st.noTitulo || []).map((x) => x.toLowerCase()));
-    const inDesc = new Set((st.naDescricao || []).map((x) => x.toLowerCase()));
+  function abaSeo(v, eng) {
+    const s = seoLocal(v, eng);
     const tags = v.tags || [];
-    const copyBtn = h('button', { class: 'tc-mini', type: 'button', id: 'tc-copytags' }, 'copiar todas');
-    copyBtn.onclick = () => { navigator.clipboard.writeText(tags.join(', ')); copyBtn.textContent = 'copiado ✓'; };
+    const lower = (x) => String(x).toLowerCase();
+    const noTitulo = new Set(tags.filter((t) => lower(v.title).includes(lower(t))).map(lower));
+    const naDesc = new Set(tags.filter((t) => lower(v.description).includes(lower(t))).map(lower));
     return h('div', null,
-      h('div', { class: 'tc-score' }, h('div', { class: 'tc-score-n' + (s.score >= 80 ? ' good' : s.score >= 50 ? ' mid' : ' bad') }, String(s.score ?? '—')),
-        h('div', null, h('b', null, 'Pontuação de SEO'), h('div', { class: 'tc-muted' }, 'heurística TurboCanal (0 a 100)'))),
-      h('div', { class: 'tc-sec' }, (s.checks || []).map((c) => h('div', { class: 'tc-check', title: c.dica || '' }, (c.ok ? '✅ ' : '⚠️ ') + c.item, !c.ok && c.dica ? h('div', { class: 'tc-muted' }, c.dica) : null))),
+      h('div', { class: 'tc-score' },
+        h('div', { class: 'tc-score-n' + (s.score >= 80 ? ' good' : s.score >= 50 ? '' : ' bad') }, String(s.score)),
+        h('div', null, h('b', null, 'Pontuação de SEO'), h('div', { class: 'tc-muted' }, 'heurística TurboCanal (0 a 100), calculada aqui'))),
+      h('div', { class: 'tc-sec' }, s.checks.map((c) => h('div', { class: 'tc-check' }, (c.ok ? '✅ ' : '⚠️ ') + c.item, !c.ok ? h('div', { class: 'tc-muted' }, c.dica) : null))),
       tags.length
-        ? h('div', { class: 'tc-sec' }, h('b', null, `Tags do vídeo (${tags.length}) `), copyBtn,
-          h('div', { class: 'tc-muted' }, '★ aparece no título · ▲ aparece na descrição · clique para pesquisar'),
-          h('div', { class: 'tc-tags' }, tags.map((t) => h('a', { href: site('ferramentas/palavras?q=' + encodeURIComponent(t)), target: '_blank', rel: 'noopener', class: inTitle.has(t.toLowerCase()) ? 'star' : '' },
-            (inTitle.has(t.toLowerCase()) ? '★ ' : '') + (inDesc.has(t.toLowerCase()) ? '▲ ' : '') + t))))
+        ? h('div', { class: 'tc-sec' },
+          h('b', null, `Tags do vídeo (${tags.length}) `),
+          copyBtn('copiar todas', () => tags.join(', '), 'tc-mini'),
+          h('div', { class: 'tc-muted' }, '★ está no título · ▲ está na descrição · clique para pesquisar'),
+          h('div', { class: 'tc-tags' }, tags.map((t) => h('a', {
+            href: '/results?search_query=' + encodeURIComponent(t),
+            class: noTitulo.has(lower(t)) ? 'star' : ''
+          }, (noTitulo.has(lower(t)) ? '★ ' : '') + (naDesc.has(lower(t)) ? '▲ ' : '') + t))))
         : h('p', { class: 'tc-muted' }, 'Este vídeo não tem tags públicas.'));
   }
 
-  function tabAI(vid) {
+  function abaCanal(v, vid) {
     const box = h('div');
-    const btn = h('button', { class: 'tc-btn', type: 'button' }, '🤖 Pedir a análise da IA');
-    priceLabel('coach_ai').then((l) => (btn.textContent = `🤖 Pedir a análise da IA (${l})`));
-    btn.onclick = async () => {
-      btn.disabled = true;
-      clear(box).append(h('p', { class: 'tc-muted' }, '⏳ A IA está assistindo ao vídeo… pode levar de 20 segundos a 2 minutos.'));
+    if (!ME) {
+      box.append(
+        h('p', { class: 'tc-muted' }, 'Com a conta ligada, aqui aparecem: inscritos, idade do canal, tags do canal, a mediana de views dos últimos vídeos e o quanto ESTE vídeo está acima ou abaixo do normal do canal (outlier).'),
+        precisaConta('Ver os dados do canal'));
+      return box;
+    }
+    box.append(h('p', { class: 'tc-muted' }, 'Carregando os dados do canal…'));
+    (async () => {
+      try {
+        const r = await api('/tools/video_panel', { method: 'POST', body: { video: vid } });
+        const ch = r.result.channel, out = r.result.outlierCanal;
+        if (!ch) { clear(box).append(h('p', { class: 'tc-muted' }, 'Não consegui carregar o canal agora.')); return; }
+        const anos = ch.publishedAt ? (Date.now() - new Date(ch.publishedAt).getTime()) / (365 * 86400e3) : null;
+        const msg = h('div');
+        const add = h('button', { class: 'tc-btn', type: 'button' }, '🏆 Adicionar aos concorrentes');
+        cost('competitor_check').then((c) => (add.textContent = `🏆 Adicionar aos concorrentes (${c})`));
+        add.onclick = async () => {
+          add.disabled = true;
+          clear(msg).append(h('span', { class: 'tc-muted' }, 'Adicionando…'));
+          try {
+            const x = await api('/competitors', { method: 'POST', body: { channel: ch.id } });
+            clear(msg).append(h('p', { class: 'tc-ok' }, '✅ Adicionado aos seus concorrentes.'), h('p', { class: 'tc-muted' }, creditLine(x.credits)));
+          } catch (e) { clear(msg).append(errBox(e)); add.disabled = false; }
+        };
+        clear(box).append(
+          h('div', { class: 'tc-chan' }, ch.thumb ? h('img', { src: ch.thumb, alt: '' }) : null,
+            h('div', null, h('b', null, ch.title || v.channel), h('div', { class: 'tc-muted' }, [ch.handle, anos != null ? (anos >= 1 ? `${Math.floor(anos)} ano${Math.floor(anos) === 1 ? '' : 's'} no YouTube` : 'canal novo') : null].filter(Boolean).join(' · ')))),
+          h('div', { class: 'tc-grid' },
+            stat('👥 Inscritos', ch.subs == null ? 'ocultos' : short(ch.subs)),
+            stat('👁 Views totais', short(ch.views)),
+            stat('🎬 Vídeos', fmt(ch.videos)),
+            stat('📈 Mediana recente', ch.medianRecentViews != null ? short(ch.medianRecentViews) : '—', `Mediana dos últimos ${ch.recentCount || ''} vídeos`),
+            stat('🔥 Outlier', out != null ? dec(out) + 'x' : '—', 'Views deste vídeo ÷ mediana do canal')),
+          out != null ? h('p', { class: out >= 2 ? 'tc-ok' : 'tc-muted' }, out >= 2 ? `🔥 Este vídeo está ${dec(out)}x acima do normal do canal.` : out < 0.7 ? 'Este vídeo está abaixo do normal do canal.' : 'Este vídeo está na média do canal.') : null,
+          ch.keywords?.length ? h('div', { class: 'tc-sec' }, h('b', null, 'Tags do canal '), copyBtn('copiar', () => ch.keywords.join(', '), 'tc-mini'), h('div', { class: 'tc-tags' }, ch.keywords.map((k) => h('span', null, k)))) : null,
+          h('div', { class: 'tc-actions' }, add),
+          msg,
+          h('p', { class: 'tc-muted' }, creditLine(r.credits)));
+      } catch (e) { clear(box).append(errBox(e)); }
+    })();
+    return box;
+  }
+
+  function abaIA(vid) {
+    const box = h('div');
+    const topo = h('p', { class: 'tc-muted' }, 'A IA assiste a este vídeo e responde: resumo, nota do gancho (começo do vídeo), por que foi bem ou mal, 3 ideias parecidas para o seu canal e dicas para ganhar inscritos.');
+    if (!ME) { box.append(topo, precisaConta('A análise da IA')); return box; }
+    const b = h('button', { class: 'tc-btn', type: 'button' }, '🤖 Pedir a análise da IA');
+    cost('coach_ai').then((c) => (b.textContent = `🤖 Pedir a análise da IA (${c})`));
+    const out = h('div');
+    b.onclick = async () => {
+      b.disabled = true;
+      clear(out).append(h('p', { class: 'tc-muted' }, '⏳ A IA está assistindo ao vídeo. Pode levar de 20 segundos a 2 minutos.'));
       try {
         const r = await api('/tools/coach_ai', { method: 'POST', body: { video: vid } });
         const x = r.result;
-        clear(box).append(
+        clear(out).append(
           h('div', { class: 'tc-sec' }, h('b', null, '📝 Resumo'), h('p', null, x.resumo)),
           h('div', { class: 'tc-sec' }, h('b', null, `🎣 Gancho: ${x.gancho.nota}/10`), h('p', null, x.gancho.analise), x.gancho.sugestao ? h('p', { class: 'tc-muted' }, '💡 ' + x.gancho.sugestao) : null),
           h('div', { class: 'tc-sec' }, h('b', null, '📊 Desempenho: ' + (x.desempenho.veredito || '')), h('p', null, x.desempenho.porque)),
-          h('div', { class: 'tc-sec' }, h('b', null, '💡 3 ideias parecidas para você'), x.ideias.map((i) => h('div', { class: 'tc-check' }, '• ' + i.titulo + ' ', h('a', { class: 'tc-link', href: site('ferramentas/preparar?topic=' + encodeURIComponent(i.titulo)), target: '_blank', rel: 'noopener' }, 'preparar'), i.porque ? h('div', { class: 'tc-muted' }, i.porque) : null))),
+          h('div', { class: 'tc-sec' }, h('b', null, '💡 3 ideias parecidas'), x.ideias.map((i) => h('div', { class: 'tc-check' }, '• ' + i.titulo, h('span', null, ' '), h('button', { class: 'tc-mini', type: 'button', onclick: () => openSite('ferramentas/preparar?topic=' + encodeURIComponent(i.titulo)) }, 'preparar'), i.porque ? h('div', { class: 'tc-muted' }, i.porque) : null))),
           h('div', { class: 'tc-sec' }, h('b', null, '👥 Para ganhar inscritos'), x.inscritos.map((d) => h('div', { class: 'tc-check' }, '• ' + d))),
-          h('p', { class: 'tc-muted' }, x.aviso + ' ' + creditsLine(r.credits)));
-      } catch (e) { clear(box).append(errBox(e)); }
-      btn.disabled = false;
+          h('p', { class: 'tc-muted' }, x.aviso + ' ' + creditLine(r.credits)));
+      } catch (e) { clear(out).append(errBox(e)); }
+      b.disabled = false;
     };
-    return h('div', null,
-      h('p', { class: 'tc-muted' }, 'A IA assiste a este vídeo e responde: resumo, nota do gancho (começo do vídeo), por que foi bem ou mal, 3 ideias parecidas para o seu canal e dicas para ganhar inscritos.'),
-      btn, box,
-      h('div', { class: 'tc-actions' }, linkBtn(site('ferramentas/insights?video=' + vid), '✨ Título, descrição e tags (no site)', 'tc-btn tc-sec2')));
+    box.append(topo, h('div', { class: 'tc-actions' }, b), out);
+    return box;
   }
 
-  // ---------------- 2) VPH e outlier nas miniaturas ----------------
+  /* ---------------------------- VPH e outlier nas miniaturas ---------------------------- */
   const CONTAINERS = 'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, yt-lockup-view-model, ytd-playlist-video-renderer';
-  const registry = new Map(); // elemento -> { views, hours, badge }
-  function parseViews(text) {
-    const t = String(text).replace(/ /g, ' ');
+  const reg = new Map(); // elemento -> { views, hours, badge, titulo, ordem }
+  function parseViews(txt) {
+    const t = String(txt).replace(/ /g, ' ');
     const m = t.match(/([\d.,]+)\s*(mil|mi|bi|k|m|b)?\s*(?:de\s+)?(visualizaç(?:ão|ões)|views?)\b/i);
     if (!m) return null;
-    const unit = (m[2] || '').toLowerCase();
+    const u = (m[2] || '').toLowerCase();
     let num = m[1];
-    if (unit) num = num.replace(',', '.'); // "1,2 mi" ou "1.2M"
-    else num = num.replace(/[.,](?=\d{3}\b)/g, '').replace(',', '.'); // "1.234" ou "1,234"
+    num = u ? num.replace(',', '.') : num.replace(/[.,](?=\d{3}\b)/g, '').replace(',', '.');
     let v = parseFloat(num);
     if (!isFinite(v)) return null;
-    v *= { mil: 1e3, k: 1e3, mi: 1e6, m: 1e6, bi: 1e9, b: 1e9 }[unit] || 1;
+    v *= { mil: 1e3, k: 1e3, mi: 1e6, m: 1e6, bi: 1e9, b: 1e9 }[u] || 1;
     return Math.round(v);
   }
-  function parseAgeHours(text) {
-    const t = String(text).toLowerCase();
-    if (/assistindo agora|watching now|ao vivo agora|live now|programad|scheduled|estreia|premieres/.test(t)) return null;
-    const pt = t.match(/há\s+(\d+)\s*(minuto|hora|dia|semana|m[eê]s|meses|ano)/);
-    const en = t.match(/(\d+)\s*(minute|hour|day|week|month|year)s?\s+ago/);
-    const m = pt || en;
+  function parseAgeHours(txt) {
+    const t = String(txt).toLowerCase();
+    if (/assistindo agora|watching now|ao vivo|live now|programad|scheduled|estreia|premieres/.test(t)) return null;
+    const m = t.match(/há\s+(\d+)\s*(minuto|hora|dia|semana|m[eê]s|meses|ano)/) || t.match(/(\d+)\s*(minute|hour|day|week|month|year)s?\s+ago/);
     if (!m) return null;
-    const n = parseInt(m[1], 10);
-    const u = m[2];
-    const hours = /^min/.test(u) ? 1 / 60 : /^hora|^hour/.test(u) ? 1 : /^dia|^day/.test(u) ? 24 : /^semana|^week/.test(u) ? 168 : /^m[eê]s|^meses|^month/.test(u) ? 730 : 8760;
-    return Math.max(1, n * hours);
+    const n = parseInt(m[1], 10), u = m[2];
+    const f = /^min/.test(u) ? 1 / 60 : /^hora|^hour/.test(u) ? 1 : /^dia|^day/.test(u) ? 24 : /^semana|^week/.test(u) ? 168 : /^m[eê]s|^meses|^month/.test(u) ? 730 : 8760;
+    return Math.max(1, n * f);
   }
   function thumbAnchor(el) {
-    const as = el.querySelectorAll('a[href*="/watch?v="], a[href*="/shorts/"]');
-    for (const a of as) if (a.querySelector('img, yt-image, yt-thumbnail-view-model, ytd-thumbnail')) return a;
-    return el.querySelector('a#thumbnail') || as[0] || null;
+    for (const a of el.querySelectorAll('a[href*="/watch?v="], a[href*="/shorts/"]')) {
+      if (a.querySelector('img, yt-image, yt-thumbnail-view-model, ytd-thumbnail')) return a;
+    }
+    return el.querySelector('a#thumbnail') || el.querySelector('a[href*="/watch?v="]') || null;
   }
   function scanBadges() {
     if (!S.badges) return;
-    const all = [...document.querySelectorAll(CONTAINERS)];
-    for (const el of all) {
-      if (registry.has(el) || el.querySelector(CONTAINERS)) continue; // só o item mais interno
-      if (el.closest('#tc-panel')) continue;
-      const text = el.innerText || el.textContent || '';
-      const views = parseViews(text), hours = parseAgeHours(text);
+    for (const el of document.querySelectorAll(CONTAINERS)) {
+      if (reg.has(el) || el.querySelector(CONTAINERS) || el.closest('#tc-panel')) continue;
+      const txt = el.innerText || el.textContent || '';
+      const views = parseViews(txt), hours = parseAgeHours(txt);
       if (views == null || hours == null) continue;
       const a = thumbAnchor(el);
       if (!a) continue;
@@ -335,195 +395,210 @@
       if (cs.position === 'static') a.style.position = 'relative';
       if (cs.display === 'inline') a.style.display = 'inline-block';
       const badge = h('div', { class: 'tc-badge' });
-      const title = (el.querySelector('#video-title, h3, .yt-lockup-metadata-view-model__title')?.textContent || '').trim().slice(0, 120);
-      const idea = h('a', { class: 'tc-remix', title: 'Usar esta ideia: abre o Preparar publicação com este título', target: '_blank', rel: 'noopener', href: site('ferramentas/preparar?topic=' + encodeURIComponent(title)) }, '💡');
-      a.append(badge, idea);
-      registry.set(el, { views, hours, badge, title, ordem: registry.size });
+      const titulo = (el.querySelector('#video-title, h3, .yt-lockup-metadata-view-model__title')?.textContent || '').trim().slice(0, 120);
+      const ideia = h('button', { class: 'tc-remix', type: 'button', title: 'Usar esta ideia no Preparar publicação', onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); openSite('ferramentas/preparar?topic=' + encodeURIComponent(titulo)); } }, '💡');
+      a.append(badge, ideia);
+      reg.set(el, { views, hours, badge, titulo, ordem: reg.size });
     }
-    // outlier = views ÷ mediana dos vídeos visíveis nesta página (no Vídeos de um canal, é a média do canal)
-    for (const [el, r] of registry) if (!el.isConnected) registry.delete(el);
-    const list = [...registry.values()].map((r) => r.views).sort((x, y) => x - y);
-    const median = list.length ? list[Math.floor(list.length / 2)] : 0;
-    for (const r of registry.values()) {
+    for (const [el] of reg) if (!el.isConnected) reg.delete(el);
+    const vs = [...reg.values()].map((r) => r.views).sort((a, b) => a - b);
+    const mediana = vs.length ? vs[Math.floor(vs.length / 2)] : 0;
+    for (const r of reg.values()) {
       const vph = r.views / r.hours;
-      const out = median > 0 && list.length >= 4 ? r.views / median : null;
-      const parts = [`⚡ ${short(vph)}/h`];
-      if (out != null) parts.push(`${out >= 2 ? '🔥 ' : ''}${out.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}x`);
-      r.badge.textContent = parts.join(' · ');
+      const out = mediana > 0 && vs.length >= 4 ? r.views / mediana : null;
+      r.badge.textContent = `⚡ ${short(vph)}/h` + (out != null ? ` · ${out >= 2 ? '🔥 ' : ''}${dec(out)}x` : '');
       r.badge.classList.toggle('hot', out != null && out >= 2);
-      r.badge.title = `VPH: ${fmt(Math.round(vph))} views por hora desde a publicação` + (out != null ? `\nOutlier: ${out.toFixed(1)}x a mediana dos ${list.length} vídeos desta página` : '') + '\n(TurboCanal, calculado com os números da própria página, sem gastar créditos)';
+      r.badge.title = `VPH: ${fmt(Math.round(vph))} views por hora desde a publicação` + (out != null ? `\nOutlier: ${dec(out)}x a mediana dos ${vs.length} vídeos desta página` : '') + '\nTurboCanal, calculado nesta página, sem gastar créditos';
     }
   }
-  /** Reordena os vídeos que estão na tela (não recarrega nada, é só a ordem). */
-  function sortItems(mode) {
-    const groups = new Map();
-    for (const [el, r] of registry) {
-      if (!el.isConnected) continue;
-      const parent = el.parentElement;
-      if (!parent) continue;
-      if (!groups.has(parent)) groups.set(parent, []);
-      groups.get(parent).push({ el, r });
+  function removeBadges() {
+    for (const r of reg.values()) { r.badge.remove(); }
+    for (const b of document.querySelectorAll('.tc-remix')) b.remove();
+    reg.clear();
+  }
+  function sortItems(modo) {
+    const grupos = new Map();
+    for (const [el, r] of reg) {
+      if (!el.isConnected || !el.parentElement) continue;
+      if (!grupos.has(el.parentElement)) grupos.set(el.parentElement, []);
+      grupos.get(el.parentElement).push({ el, r });
     }
-    const list = [...registry.values()].map((r) => r.views).sort((a, b) => a - b);
-    const median = list.length ? list[Math.floor(list.length / 2)] : 1;
-    const key = { views: (r) => r.views, vph: (r) => r.views / r.hours, outlier: (r) => r.views / Math.max(1, median), novos: (r) => -r.hours }[mode];
-    for (const [parent, items] of groups) {
-      if (mode === 'padrao') { items.sort((a, b) => (a.r.ordem || 0) - (b.r.ordem || 0)); }
-      else items.sort((a, b) => key(b.r) - key(a.r));
-      for (const it of items) parent.append(it.el);
+    const vs = [...reg.values()].map((r) => r.views).sort((a, b) => a - b);
+    const mediana = vs.length ? vs[Math.floor(vs.length / 2)] : 1;
+    const chave = { views: (r) => r.views, vph: (r) => r.views / r.hours, outlier: (r) => r.views / Math.max(1, mediana), novos: (r) => -r.hours }[modo];
+    for (const [pai, itens] of grupos) {
+      itens.sort(modo === 'padrao' ? (a, b) => a.r.ordem - b.r.ordem : (a, b) => chave(b.r) - chave(a.r));
+      for (const i of itens) pai.append(i.el);
     }
   }
   function sortBar() {
     const bar = h('div', { class: 'tc-sort' }, h('span', { class: 'tc-muted' }, 'Ordenar: '));
-    for (const [mode, label] of [['views', '👁 Mais vistos'], ['vph', '⚡ Melhor VPH'], ['outlier', '🔥 Outliers'], ['novos', '🆕 Mais novos'], ['padrao', '↩️ Padrão']]) {
-      bar.append(h('button', { class: 'tc-mini', type: 'button', onclick: () => sortItems(mode) }, label));
+    for (const [m, l] of [['views', '👁 Mais vistos'], ['vph', '⚡ Melhor VPH'], ['outlier', '🔥 Outliers'], ['novos', '🆕 Mais novos'], ['padrao', '↩️ Padrão']]) {
+      bar.append(h('button', { class: 'tc-mini', type: 'button', onclick: () => sortItems(m) }, l));
     }
-    bar.append(h('div', { class: 'tc-muted' }, 'Muda só a ordem do que já está na tela (grátis).'));
     return bar;
   }
-  function removeBadges() {
-    for (const r of registry.values()) r.badge.remove();
-    registry.clear();
-  }
 
-  // ---------------- 3) resumo da busca ----------------
-  let searchQ = null;
+  /* ---------------------------- busca ---------------------------- */
+  let buscaQ = null;
   function searchPanel() {
     const q = new URLSearchParams(location.search).get('search_query');
     if (!q) return;
-    const host = document.querySelector('ytd-search ytd-section-list-renderer #contents') || document.querySelector('ytd-search #contents');
     let box = document.getElementById('tc-search');
-    if (box && searchQ === q && box.isConnected) { updateSearchStats(box); return; }
+    if (box && buscaQ === q && box.isConnected) { updateSearch(box, q); return; }
+    const host = document.querySelector('ytd-search ytd-section-list-renderer #contents') || document.querySelector('ytd-search #contents');
     if (!host) return;
     box?.remove();
-    searchQ = q;
+    buscaQ = q;
     box = h('div', { id: 'tc-search' },
-      h('div', { class: 'tc-head' }, h('span', null, '🚀 Turbo', h('b', null, 'Canal'), h('span', { class: 'tc-muted' }, ' · busca: ' + q)),
+      h('div', { class: 'tc-head' },
+        h('span', null, '🚀 Turbo', h('b', null, 'Canal'), h('span', { class: 'tc-muted' }, ' · busca: ' + q)),
         h('button', { class: 'tc-close', title: 'Fechar', onclick: () => box.remove() }, '✕')),
-      h('div', { class: 'tc-body' }, h('div', { id: 'tc-kscore' }), h('div', { class: 'tc-grid', id: 'tc-sstats' }), h('p', { class: 'tc-muted' }, 'Estimativas calculadas com os resultados que estão na tela.'), sortBar(),
-        h('div', { class: 'tc-actions' }, h('button', { class: 'tc-btn', type: 'button', id: 'tc-kwgo' }, '🔑 Pesquisa de palavras-chave'), linkBtn(site('ferramentas/palavras?q=' + encodeURIComponent(q)), 'Abrir no TurboCanal', 'tc-btn tc-sec2')),
+      h('div', { class: 'tc-body' },
+        h('div', { id: 'tc-kscore' }),
+        h('div', { class: 'tc-grid', id: 'tc-sstats' }),
+        h('p', { class: 'tc-muted' }, 'Calculado com os resultados que estão na tela, sem gastar créditos.'),
+        sortBar(),
+        h('div', { class: 'tc-actions' },
+          h('button', { class: 'tc-btn', type: 'button', id: 'tc-kwgo' }, '🔑 Termos relacionados'),
+          h('button', { class: 'tc-btn tc-sec2', type: 'button', onclick: () => openSite('ferramentas/palavras?q=' + encodeURIComponent(q)) }, 'Abrir no TurboCanal')),
         h('div', { id: 'tc-kwout' })));
     host.prepend(box);
     const go = box.querySelector('#tc-kwgo');
-    priceLabel('keyword_research').then((l) => (go.textContent = `🔑 Pesquisa de palavras-chave (${l})`));
+    cost('keyword_research').then((c) => (go.textContent = `🔑 Termos relacionados (${c})`));
     go.onclick = async () => {
       const out = clear(box.querySelector('#tc-kwout'));
-      if (!(await token())) { out.append(loginBox()); return; }
-      go.disabled = true; out.append(h('p', { class: 'tc-muted' }, 'Pesquisando…'));
+      if (!(await me())) { out.append(precisaConta('A pesquisa de termos relacionados')); return; }
+      go.disabled = true;
+      out.append(h('p', { class: 'tc-muted' }, 'Pesquisando…'));
       try {
         const r = await api('/tools/keyword_research', { method: 'POST', body: { q } });
-        clear(out).append(h('table', { class: 'tc-table' }, h('tr', null, h('th', null, 'Termo relacionado'), h('th', null, 'Média de views'), h('th', null, 'Score')),
-          (r.result.terms || []).slice(0, 10).map((t) => h('tr', null, h('td', null, h('a', { href: '/results?search_query=' + encodeURIComponent(t.term) }, t.term)), h('td', null, short(t.avgViews)), h('td', null, String(t.score))))),
-        h('p', { class: 'tc-muted' }, (r.result.mock ? '⚠️ dados de exemplo · ' : '') + creditsLine(r.credits)));
+        clear(out).append(
+          h('table', { class: 'tc-table' },
+            h('tr', null, h('th', null, 'Termo relacionado'), h('th', null, 'Média de views'), h('th', null, 'Score')),
+            (r.result.terms || []).slice(0, 10).map((t) => h('tr', null,
+              h('td', null, h('a', { href: '/results?search_query=' + encodeURIComponent(t.term) }, t.term)),
+              h('td', null, short(t.avgViews)), h('td', null, String(t.score))))),
+          h('p', { class: 'tc-muted' }, (r.result.mock ? '⚠️ dados de exemplo · ' : '') + creditLine(r.credits)));
       } catch (e) { clear(out).append(errBox(e)); }
       go.disabled = false;
     };
-    updateSearchStats(box);
+    updateSearch(box, q);
   }
-  function updateSearchStats(box) {
-    const items = [...document.querySelectorAll('ytd-search ytd-video-renderer')].slice(0, 20);
-    const rows = items.map((el) => { const t = el.innerText || ''; return { views: parseViews(t), hours: parseAgeHours(t), channel: (el.querySelector('ytd-channel-name') || {}).innerText || '' }; }).filter((r) => r.views != null);
+  function updateSearch(box) {
+    const itens = [...document.querySelectorAll('ytd-search ytd-video-renderer')].slice(0, 20);
+    const linhas = itens.map((el) => {
+      const t = el.innerText || '';
+      return { views: parseViews(t), hours: parseAgeHours(t), canal: (el.querySelector('ytd-channel-name')?.innerText || '').trim() };
+    }).filter((r) => r.views != null);
     const grid = box.querySelector('#tc-sstats');
     if (!grid) return;
     clear(grid);
-    if (rows.length < 3) { grid.append(h('span', { class: 'tc-muted' }, 'Carregando os resultados…')); return; }
-    const vs = rows.map((r) => r.views).sort((a, b) => a - b);
-    const median = vs[Math.floor(vs.length / 2)];
-    const recent = rows.filter((r) => r.hours != null && r.hours <= 30 * 24).length;
-    const channels = new Set(rows.map((r) => r.channel.trim()).filter(Boolean)).size;
-    const demand = median >= 100000 ? 'Alta' : median >= 10000 ? 'Média' : 'Baixa';
-    const fresh = Math.round((recent / rows.length) * 100);
-    // Pontuação da palavra-chave (heurística própria): metade demanda, metade espaço para entrar
-    const demandPts = Math.max(0, Math.min(50, Math.round((Math.log10(Math.max(10, median)) - 2) * 16)));
-    const spacePts = Math.round(fresh * 0.3) + Math.min(20, Math.round((channels / rows.length) * 20));
-    const score = Math.max(1, Math.min(100, demandPts + spacePts));
+    if (linhas.length < 3) { grid.append(h('span', { class: 'tc-muted' }, 'Carregando os resultados…')); return; }
+    const vs = linhas.map((r) => r.views).sort((a, b) => a - b);
+    const mediana = vs[Math.floor(vs.length / 2)];
+    const recentes = linhas.filter((r) => r.hours != null && r.hours <= 720).length;
+    const canais = new Set(linhas.map((r) => r.canal).filter(Boolean)).size;
+    const fresh = Math.round((recentes / linhas.length) * 100);
+    const demanda = mediana >= 100000 ? 'Alta' : mediana >= 10000 ? 'Média' : 'Baixa';
+    const ptsDemanda = Math.max(0, Math.min(50, Math.round((Math.log10(Math.max(10, mediana)) - 2) * 16)));
+    const ptsEspaco = Math.round(fresh * 0.3) + Math.min(20, Math.round((canais / linhas.length) * 20));
+    const score = Math.max(1, Math.min(100, ptsDemanda + ptsEspaco));
     const ks = box.querySelector('#tc-kscore');
-    if (ks) {
-      clear(ks).append(h('div', { class: 'tc-score' },
-        h('div', { class: 'tc-score-n' + (score >= 70 ? ' good' : score >= 40 ? '' : ' bad') }, String(score)),
-        h('div', null, h('b', null, 'Pontuação da palavra-chave'),
-          h('div', { class: 'tc-muted' }, score >= 70 ? 'Boa: tem procura e ainda cabe vídeo novo.' : score >= 40 ? 'Dá para tentar, com um ângulo diferente.' : 'Difícil: pouca procura ou muito dominada.'),
-          h('div', { class: 'tc-muted' }, 'heurística TurboCanal (0 a 100), não é número oficial do YouTube'))));
-    }
+    if (ks) clear(ks).append(h('div', { class: 'tc-score' },
+      h('div', { class: 'tc-score-n' + (score >= 70 ? ' good' : score >= 40 ? '' : ' bad') }, String(score)),
+      h('div', null, h('b', null, 'Pontuação da palavra-chave'),
+        h('div', { class: 'tc-muted' }, score >= 70 ? 'Boa: tem procura e ainda cabe vídeo novo.' : score >= 40 ? 'Dá para tentar, com um ângulo diferente.' : 'Difícil: pouca procura ou muito dominada.'),
+        h('div', { class: 'tc-muted' }, 'heurística TurboCanal (0 a 100), não é número oficial do YouTube'))));
     grid.append(
-      stat('📈 Demanda', demand, `Mediana de views dos ${rows.length} primeiros resultados: ${fmt(median)}`),
-      stat('👁 Views (mediana)', short(median)),
-      stat('🆕 Recentes', fresh + '%', 'Resultados publicados nos últimos 30 dias: quanto maior, mais espaço para vídeo novo'),
-      stat('📺 Canais diferentes', `${channels} de ${rows.length}`),
-      stat('🎯 Oportunidade', fresh >= 30 && demand !== 'Baixa' ? 'Boa' : demand === 'Alta' && fresh < 15 ? 'Difícil' : 'Média', 'Estimativa: demanda alta + muitos vídeos recentes = mais chance para um vídeo novo'));
+      stat('📈 Demanda', demanda, `Mediana de views dos ${linhas.length} primeiros resultados: ${fmt(mediana)}`),
+      stat('👁 Views (mediana)', short(mediana)),
+      stat('🆕 Recentes', fresh + '%', 'Publicados nos últimos 30 dias'),
+      stat('📺 Canais diferentes', `${canais} de ${linhas.length}`),
+      stat('🎯 Oportunidade', fresh >= 30 && demanda !== 'Baixa' ? 'Boa' : demanda === 'Alta' && fresh < 15 ? 'Difícil' : 'Média'));
   }
 
-  // ---------------- 4) página de canal ----------------
-  function channelKey() {
+  /* ---------------------------- página de canal ---------------------------- */
+  let canalKey = null;
+  const channelKey = () => {
     const m = location.pathname.match(/^\/(@[^/]+)|^\/channel\/(UC[\w-]{20,})|^\/(?:c|user)\/([^/]+)/);
     return m ? decodeURIComponent(m[1] || m[2] || m[3]) : null;
-  }
-  let chanKey = null;
+  };
   function channelCard() {
     const key = channelKey();
     let card = document.getElementById('tc-chan');
-    if (!key) { card?.remove(); chanKey = null; return; }
-    if (card && chanKey === key) return;
+    if (!key) { card?.remove(); canalKey = null; return; }
+    if (card && canalKey === key) return;
     card?.remove();
-    chanKey = key;
-    const out = h('div', { class: 'tc-body tc-hide' });
-    const analyze = h('button', { class: 'tc-btn', type: 'button' }, '📊 Analisar canal');
-    const add = h('button', { class: 'tc-btn tc-sec2', type: 'button' }, '🏆 Adicionar aos concorrentes');
+    canalKey = key;
+    const corpo = h('div', { class: 'tc-body tc-hide' });
     const res = h('div');
-    priceLabel('channel_analysis').then((l) => (analyze.textContent = `📊 Analisar canal (${l})`));
-    priceLabel('competitor_check').then((l) => (add.textContent = `🏆 Adicionar aos concorrentes (${l})`));
-    analyze.onclick = async () => {
-      if (!(await token())) { clear(res).append(loginBox()); return; }
-      analyze.disabled = true; clear(res).append(h('p', { class: 'tc-muted' }, 'Analisando…'));
+    const analisar = h('button', { class: 'tc-btn', type: 'button' }, '📊 Analisar canal');
+    const add = h('button', { class: 'tc-btn tc-sec2', type: 'button' }, '🏆 Adicionar aos concorrentes');
+    cost('channel_analysis').then((c) => (analisar.textContent = `📊 Analisar canal (${c})`));
+    cost('competitor_check').then((c) => (add.textContent = `🏆 Adicionar aos concorrentes (${c})`));
+    const comConta = async (fn) => { if (!(await me())) { clear(res).append(precisaConta('Esta análise')); return false; } return true; };
+    analisar.onclick = async () => {
+      if (!(await comConta())) return;
+      analisar.disabled = true;
+      clear(res).append(h('p', { class: 'tc-muted' }, 'Analisando…'));
       try {
         const r = await api('/tools/channel_analysis', { method: 'POST', body: { channel: key } });
         const c = r.result.channel;
-        clear(res).append(h('div', { class: 'tc-grid' }, stat('👥 Inscritos', c.subs == null ? 'ocultos' : short(c.subs)), stat('👁 Views totais', short(c.views)), stat('🎬 Vídeos', fmt(c.videos)), stat('📈 Média recente', short(r.result.mediaViewsRecentes))),
+        clear(res).append(
+          h('div', { class: 'tc-grid' }, stat('👥 Inscritos', c.subs == null ? 'ocultos' : short(c.subs)), stat('👁 Views totais', short(c.views)), stat('🎬 Vídeos', fmt(c.videos)), stat('📈 Média recente', short(r.result.mediaViewsRecentes))),
           h('b', null, 'Últimos vídeos'),
-          (r.result.recent || []).slice(0, 5).map((v) => h('div', { class: 'tc-check' }, h('a', { class: 'tc-link', href: '/watch?v=' + v.id }, v.title), h('div', { class: 'tc-muted' }, `${short(v.views)} views · ⚡ ${short(v.vph)}/h${v.outlier != null ? ' · ' + String(v.outlier).replace('.', ',') + 'x' : ''}`))),
-          h('p', { class: 'tc-muted' }, (r.result.mock ? '⚠️ dados de exemplo · ' : '') + creditsLine(r.credits)));
+          (r.result.recent || []).slice(0, 5).map((v) => h('div', { class: 'tc-check' },
+            h('a', { class: 'tc-link', href: '/watch?v=' + v.id }, v.title),
+            h('div', { class: 'tc-muted' }, `${short(v.views)} views · ⚡ ${short(v.vph)}/h${v.outlier != null ? ' · ' + dec(v.outlier) + 'x' : ''}`))),
+          h('p', { class: 'tc-muted' }, (r.result.mock ? '⚠️ dados de exemplo · ' : '') + creditLine(r.credits)));
       } catch (e) { clear(res).append(errBox(e)); }
-      analyze.disabled = false;
+      analisar.disabled = false;
     };
     add.onclick = async () => {
-      if (!(await token())) { clear(res).append(loginBox()); return; }
-      add.disabled = true; clear(res).append(h('p', { class: 'tc-muted' }, 'Adicionando…'));
-      try { const r = await api('/competitors', { method: 'POST', body: { channel: key } }); clear(res).append(h('p', { class: 'tc-ok' }, '✅ Adicionado aos seus concorrentes. ', linkBtn(site('ferramentas/concorrentes'), 'ver lista', 'tc-link')), h('p', { class: 'tc-muted' }, creditsLine(r.credits))); }
-      catch (e) { clear(res).append(errBox(e)); }
+      if (!(await comConta())) return;
+      add.disabled = true;
+      clear(res).append(h('p', { class: 'tc-muted' }, 'Adicionando…'));
+      try {
+        const r = await api('/competitors', { method: 'POST', body: { channel: key } });
+        clear(res).append(h('p', { class: 'tc-ok' }, '✅ Adicionado aos seus concorrentes.'), h('p', { class: 'tc-muted' }, creditLine(r.credits)));
+      } catch (e) { clear(res).append(errBox(e)); }
       add.disabled = false;
     };
-    out.append(h('p', { class: 'tc-muted' }, 'Canal: ' + key + '. As miniaturas da aba Vídeos mostram o outlier em relação aos vídeos do próprio canal.'), sortBar(), h('div', { class: 'tc-actions' }, analyze, add), res);
-    card = h('div', { id: 'tc-chan' },
-      h('button', { class: 'tc-fab', type: 'button', onclick: () => out.classList.toggle('tc-hide') }, '🚀 TurboCanal'), out);
+    corpo.append(
+      h('p', { class: 'tc-muted' }, 'Canal: ' + key + '. Na aba Vídeos, as etiquetas mostram o VPH e o outlier em relação aos vídeos do próprio canal (de graça).'),
+      sortBar(), h('div', { class: 'tc-actions' }, analisar, add), res);
+    card = h('div', { id: 'tc-chan' }, h('button', { class: 'tc-fab', type: 'button', onclick: () => corpo.classList.toggle('tc-hide') }, '🚀 TurboCanal'), corpo);
     document.body.append(card);
   }
 
-  // ---------------- 5) Shorts ----------------
+  /* ---------------------------- Shorts ---------------------------- */
   function shortsButton() {
-    const vid = videoIdFromUrl();
+    const ehShort = location.pathname.startsWith('/shorts/');
     let b = document.getElementById('tc-shorts');
-    if (!vid || !location.pathname.startsWith('/shorts/')) { b?.remove(); return; }
+    if (!ehShort) { b?.remove(); return; }
     if (b) return;
-    b = h('button', { id: 'tc-shorts', class: 'tc-fab', type: 'button', onclick: () => { document.getElementById('tc-panel')?.remove(); panelVid = null; watchPanel({ floating: true, force: true }); } }, '🚀 Analisar este Short');
+    b = h('button', { id: 'tc-shorts', class: 'tc-fab', type: 'button', onclick: () => { document.getElementById('tc-panel')?.remove(); painelVid = null; watchPanel({ floating: true, force: true }); } }, '🚀 Analisar este Short');
     document.body.append(b);
   }
 
-  // ---------------- roteamento (o YouTube troca de página sem recarregar) ----------------
+  /* ---------------------------- roteamento ---------------------------- */
   function route() {
     const p = location.pathname;
-    if (p === '/watch') watchPanel();
-    else if (!p.startsWith('/shorts/') || (panelVid && panelVid !== videoIdFromUrl())) { document.getElementById('tc-panel')?.remove(); panelVid = null; }
-    if (p === '/results') searchPanel(); else document.getElementById('tc-search')?.remove();
+    if (p === '/watch' || p.startsWith('/shorts/')) watchPanel({ floating: p.startsWith('/shorts/') });
+    else { document.getElementById('tc-panel')?.remove(); painelVid = null; }
+    if (p === '/results') searchPanel(); else { document.getElementById('tc-search')?.remove(); buscaQ = null; }
     channelCard();
     shortsButton();
     if (S.badges) scanBadges(); else removeBadges();
   }
 
   (async () => {
-    await loadSettings();
+    await loadCfg();
     route();
-    window.addEventListener('yt-navigate-finish', () => setTimeout(route, 600));
+    document.addEventListener('tc-video-data', () => route());
+    window.addEventListener('yt-navigate-finish', () => setTimeout(route, 500));
     setInterval(route, 2000);
-    chrome.storage.onChanged.addListener(async () => { await loadSettings(); if (!S.badges) removeBadges(); route(); });
+    chrome.storage.onChanged.addListener(async () => { await loadCfg(); if (!S.badges) removeBadges(); MEtried = false; route(); });
   })();
 })();

@@ -5,23 +5,25 @@
   <title>Opções — TurboCanal</title>
   <style>
     body { font-family: "Segoe UI", system-ui, sans-serif; background: #0b1020; color: #e8ecf8; display: grid; place-items: center; min-height: 100vh; margin: 0; }
-    .card { background: #151f3d; border: 1px solid #27345f; border-radius: 14px; padding: 22px; width: min(460px, 92vw); }
+    .card { background: #151f3d; border: 1px solid #27345f; border-radius: 14px; padding: 22px; width: min(480px, 92vw); }
     label { display: block; color: #9aa7c7; font-size: .9rem; margin: 10px 0 4px; }
     input { width: 100%; box-sizing: border-box; background: #111933; color: #e8ecf8; border: 1px solid #27345f; border-radius: 8px; padding: 10px; }
-    .btn { background: #ff5d3b; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-weight: 700; cursor: pointer; margin-top: 12px; }
+    .btn { background: #ff5d3b; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-weight: 700; cursor: pointer; margin: 12px 6px 0 0; font-family: inherit; }
+    .btn.sec { background: #1b2850; border: 1px solid #27345f; }
     .ok { color: #37d08a; } .err { color: #ff6b7a; }
     .muted { color: #9aa7c7; font-size: .85rem; }
+    #msg { margin-top: 12px; font-size: .88rem; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h2>🚀 TurboCanal — opções <span id="ver" style="font-size:.8rem;color:#9aa7c7"></span></h2>
-    <label>Endereço do servidor (site do TurboCanal)</label>
+    <h2>🚀 TurboCanal <span class="muted" id="ver"></span></h2>
+    <label>Endereço do site do TurboCanal</label>
     <input id="bu" placeholder="https://turbocanal.onrender.com">
-    <p class="muted">Use o endereço onde o site está rodando (local ou publicado). A extensão usa a mesma conta e o mesmo saldo do site.</p>
+    <p class="muted">A extensão usa a mesma conta e o mesmo saldo do site.</p>
     <button class="btn" id="save">Salvar</button>
-    <button class="btn" id="test" style="background:#1b2850;border:1px solid #27345f">Testar conexão</button>
-    <div id="msg" style="margin-top:10px;font-size:.88rem"></div>
+    <button class="btn sec" id="test">Testar conexão</button>
+    <div id="msg"></div>
   </div>
   <script type="module" src="options.js"></script>
 </body>

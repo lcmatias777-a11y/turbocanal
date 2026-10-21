@@ -1165,8 +1165,9 @@ views.ajuda = async () => {
         <li>No Chrome, digite <b>chrome://extensions</b> na barra de endereço e aperte Enter.</li>
         <li>Ative o <b>Modo do desenvolvedor</b> (chavinha no canto superior direito).</li>
         <li>Clique em <b>Carregar sem compactação</b> e escolha a pasta descompactada (a que contém o arquivo manifest.json).</li>
-        <li>Clique no ícone laranja do TurboCanal (fica no quebra-cabeça 🧩 da barra do Chrome; use o alfinete para fixar) e entre com o Google, a mesma conta do site.</li>
-        <li>Abra qualquer vídeo do YouTube: o painel do TurboCanal aparece ao lado do vídeo.</li></ol>
+        <li>Clique no ícone laranja do TurboCanal (fica no quebra-cabeça 🧩 da barra do Chrome; use o alfinete para fixar).</li>
+        <li>Abra qualquer vídeo do YouTube: o painel do TurboCanal já aparece ao lado do vídeo, preenchido.</li></ol>
+        <p class="small muted"><b>Não existe tela de login na extensão.</b> O VPH, os outliers, a nota de SEO, as tags, a ordenação e os atalhos funcionam sem conta e sem gastar créditos. Se você já entrou com o Google aqui no site, a extensão reconhece a sua conta sozinha e mostra o saldo no alto do painel. Só a IA e as consultas ao servidor (aba Canal, análise de canal, termos relacionados) pedem a conta, e aí aparece um botão dentro do próprio painel.</p>
         <p class="small muted"><b>Para atualizar:</b> baixe o .zip de novo, <b>substitua os arquivos da MESMA pasta</b> que você usou ao instalar (se descompactar em outra pasta, o Chrome continua usando a antiga) e, em chrome://extensions, clique no botão de recarregar (↻) do TurboCanal.</p>
         <p class="small muted"><b>Como saber se atualizou:</b> clique no ícone do TurboCanal e veja o número da versão ao lado do nome. Se estiver diferente da versão mais nova, o Chrome ainda está com a pasta antiga. Em chrome://extensions, clique em "Detalhes" e confira o caminho em "Carregado de".</p>
         <p class="small muted"><b>Botões parados?</b> No ícone da extensão há o link <b>testar conexão</b>: ele diz se o site está no ar, se a sua sessão foi encontrada e se a extensão está atualizada.</p>
@@ -1174,7 +1175,7 @@ views.ajuda = async () => {
       <div class="card"><h3>O que a extensão faz no YouTube?</h3>
         <ol class="muted">
         <li><b>Miniaturas:</b> mostra o VPH (views por hora) e o outlier (quantas vezes acima da média) em cima de cada vídeo, no início, na busca, nos relacionados e na aba Vídeos dos canais. É grátis: usa os números da própria página.</li>
-        <li><b>Página do vídeo:</b> painel com abas Vídeo (views, VPH, outlier no canal, engajamento), Canal (inscritos, idade, tags do canal, adicionar aos concorrentes), SEO (pontuação, checklist e tags) e IA (resumo, nota do gancho, por que foi bem ou mal, 3 ideias parecidas e dicas para ganhar inscritos).</li>
+        <li><b>Página do vídeo:</b> painel com 4 abas. <b>Vídeo</b> (views, VPH, likes, comentários, engajamento, duração, idade e canal) e <b>SEO</b> (pontuação de 0 a 100, checklist do que arrumar e as tags do vídeo, com ★ para as que estão no título e ▲ para as que estão na descrição) são calculados no seu navegador, de graça. <b>Canal</b> (inscritos, idade, tags do canal, mediana dos últimos vídeos e o quanto este vídeo está acima do normal) e <b>IA</b> (resumo, nota do gancho, por que foi bem ou mal, 3 ideias parecidas e dicas para ganhar inscritos) usam a sua conta.</li>
         <li><b>Busca:</b> resumo da busca (demanda, vídeos recentes, oportunidade) e pesquisa de palavras-chave.</li>
         <li><b>Canal:</b> botão para analisar o canal e adicionar aos concorrentes.</li>
         <li><b>Shorts e YouTube Studio:</b> botão do TurboCanal com SEO do vídeo e atalhos para a IA do vídeo e os 3 cortes.</li>

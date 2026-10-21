@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TurboCanal para YouTube",
-  "version": "0.6.0",
-  "description": "VPH e outlier nas miniaturas, painel do vídeo (vídeo, canal, SEO e IA), análise da busca e do canal, atalhos no Studio.",
+  "version": "1.0.0",
+  "description": "VPH, outliers, SEO e tags em qualquer vídeo do YouTube, com painel no vídeo, na busca, no canal e no Studio.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -12,47 +12,30 @@
   "action": {
     "default_popup": "popup.html",
     "default_title": "TurboCanal",
-    "default_icon": {
-      "16": "icons/icon16.png",
-      "32": "icons/icon32.png"
-    }
+    "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" }
   },
   "options_page": "options.html",
-  "background": {
-    "service_worker": "background.js"
-  },
-  "permissions": [
-    "storage",
-    "activeTab",
-    "cookies"
-  ],
+  "background": { "service_worker": "background.js" },
+  "permissions": ["storage", "activeTab", "cookies"],
   "content_scripts": [
     {
-      "matches": [
-        "https://www.youtube.com/*"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "css": [
-        "content.css"
-      ],
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["page-data.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
       "run_at": "document_idle"
     },
     {
-      "matches": [
-        "https://studio.youtube.com/*"
-      ],
-      "js": [
-        "studio-content.js"
-      ],
-      "css": [
-        "content.css"
-      ],
+      "matches": ["https://studio.youtube.com/*"],
+      "js": ["studio.js"],
+      "css": ["content.css"],
       "run_at": "document_idle"
     }
   ],
-  "host_permissions": [
-    "https://turbocanal.onrender.com/*"
-  ]
+  "host_permissions": ["https://turbocanal.onrender.com/*"]
 }
