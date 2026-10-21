@@ -156,7 +156,10 @@ async function resumo(vid) {
       <tr><td>📈 SEO</td><td><b>${s.score}/100</b></td></tr></table></div>
       <p class="muted">${r.credits.unlimited ? 'Administrador: sem consumo.' : `Usado ${r.credits.charged} crédito · saldo ${fmt(r.credits.balance)}`}</p>`;
   } catch (e) {
-    out.innerHTML = `<p class="err">${esc(e.message)}</p>` + (e.status === 401 ? '<p class="muted">Entre com o Google acima.</p>' : '');
+    out.innerHTML = `<p class="err">${esc(e.message)}</p>`
+      + (e.status === 401 ? '<p class="muted">Entre com o Google acima.</p>' : '')
+      + (e.status === 404 || e.status === 0 ? `<p class="muted">Endereço usado: ${esc(BASE)}/api/tools/video_panel · conserte em <a href="#" id="eOpt">opções</a>.</p>` : '');
+    on('#eOpt', () => chrome.runtime.openOptionsPage());
   }
 }
 
@@ -170,7 +173,9 @@ async function pesquisa() {
     out.innerHTML = `<div class="out"><table>${r.result.terms.slice(0, 10).map((t) => `<tr><td><b>${esc(t.term)}</b></td><td>${fmt(t.avgViews)} views médias</td></tr>`).join('')}</table></div>
       <p class="muted">${r.credits.unlimited ? 'Sem consumo (administrador).' : `Usados ${r.credits.charged} créditos · saldo ${fmt(r.credits.balance)}`}</p>`;
   } catch (e) {
-    out.innerHTML = `<p class="err">${esc(e.message)}</p>` + (e.status === 401 ? '<p class="muted">Entre com o Google acima.</p>' : '');
+    out.innerHTML = `<p class="err">${esc(e.message)}</p>`
+      + (e.status === 401 ? '<p class="muted">Entre com o Google acima.</p>' : '')
+      + (e.status === 404 || e.status === 0 ? `<p class="muted">Endereço usado: ${esc(BASE)}/api/tools/keyword_research</p>` : '');
   }
 }
 

@@ -43,21 +43,25 @@
 
   /* ---------------------------- configuração e conta ---------------------------- */
   const S = { baseUrl: 'https://turbocanal.onrender.com', badges: true, painel: true };
+  /** Nenhuma chamada ao Chrome pode travar a tela: tudo tem prazo e segue com o padrão. */
+  const comPrazo = (promessa, ms, padrao) => Promise.race([
+    Promise.resolve(promessa).catch(() => padrao),
+    new Promise((ok) => setTimeout(() => ok(padrao), ms))
+  ]);
   async function loadCfg() {
-    try {
-      const c = await chrome.storage.sync.get(['baseUrl', 'tc_badges', 'tc_autopanel']);
-      S.baseUrl = (c.baseUrl || S.baseUrl).replace(/\/$/, '');
-      S.badges = c.tc_badges !== false;
-      S.painel = c.tc_autopanel !== false;
-    } catch {}
+    let c = {};
+    try { c = (await comPrazo(chrome.storage.sync.get(['baseUrl', 'tc_badges', 'tc_autopanel']), 1500, {})) || {}; } catch {}
+    S.baseUrl = (c.baseUrl || 'https://turbocanal.onrender.com').replace(/\/$/, '');
+    S.badges = c.tc_badges !== false;
+    S.painel = c.tc_autopanel !== false;
+    // fica visível na página para dar para diagnosticar sem abrir o Chrome por dentro
+    try { document.documentElement.dataset.tcCfg = JSON.stringify(S); } catch {}
   }
   const site = (hash) => S.baseUrl + '/#/' + hash;
   async function token() {
     for (let i = 0; i < 2; i++) {
-      try {
-        const r = await chrome.runtime.sendMessage({ type: 'getToken' });
-        if (r && typeof r.token === 'string') return r.token;
-      } catch {}
+      const r = await comPrazo(chrome.runtime.sendMessage({ type: 'getToken' }), 2500, null);
+      if (r && typeof r.token === 'string') return r.token;
       await new Promise((ok) => setTimeout(ok, 250));
     }
     return '';
@@ -97,8 +101,11 @@
     const c = COSTS.find((x) => x.tool === tool);
     return c ? (ME?.unlimited ? 'incluído' : `${fmt(c.cost)} créditos`) : '';
   }
-  const openSite = (hash) => chrome.runtime.sendMessage({ type: 'openTab', url: site(hash) }).catch(() => window.open(site(hash), '_blank'));
-  const btnLink = (hash, label, cls = 'tc-btn') => h('button', { class: cls, type: 'button', onclick: () => openSite(hash) }, label);
+  /** Link de verdade (<a target="_blank">): funciona nem que o service worker esteja parado,
+   *  e ainda deixa abrir com o botão do meio ou com Ctrl+clique. */
+  const linkCru = (url, label, cls = 'tc-btn') => h('a', { class: cls, href: url, target: '_blank', rel: 'noopener' }, label);
+  const btnLink = (hash, label, cls = 'tc-btn') => linkCru(site(hash), label, cls);
+  const openSite = (hash) => { try { window.open(site(hash), '_blank', 'noopener'); } catch { location.href = site(hash); } };
   const creditLine = (c) => (!c ? '' : c.unlimited ? 'Conta de administrador: sem consumo de créditos.' : c.reused ? 'Já analisado: nada cobrado de novo.' : c.charged === 1 ? 'Usado 1 crédito.' : `Usados ${fmt(c.charged)} créditos.`);
   function copyBtn(label, getText, cls = 'tc-btn tc-sec2') {
     const b = h('button', { class: cls, type: 'button' }, label);
@@ -115,7 +122,7 @@
     return h('div', { class: 'tc-need' },
       h('div', null, `🔒 ${oQue} precisa da sua conta do TurboCanal.`),
       h('div', { class: 'tc-actions' },
-        h('button', { class: 'tc-btn', type: 'button', onclick: () => chrome.runtime.sendMessage({ type: 'openTab', url: S.baseUrl + '/api/auth/google' }).catch(() => window.open(S.baseUrl + '/api/auth/google', '_blank')) }, '🔵 Entrar com Google'),
+        linkCru(S.baseUrl + '/api/auth/google', '🔵 Entrar com Google'),
         h('button', { class: 'tc-btn tc-sec2', type: 'button', onclick: () => { MEtried = false; ME = null; refreshPanel(); } }, '🔄 Já entrei')),
       h('div', { class: 'tc-muted' }, 'O resto do painel funciona sem conta.'));
   }
@@ -131,12 +138,35 @@
   };
   /** Dados que o próprio YouTube carregou (title, tags, views, duração, canal). */
   function pageVideo() {
+    const vid = videoIdOf();
     try {
       const raw = document.documentElement.dataset.tcVideo;
-      if (!raw) return null;
-      const d = JSON.parse(raw);
-      return d && d.id === videoIdOf() ? d : null;
-    } catch { return null; }
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d && d.id === vid) return d;
+      }
+    } catch {}
+    return videoDoDOM(vid);
+  }
+  /** Nos Shorts (e quando o YouTube troca de vídeo sem recarregar) os dados do player
+   *  ficam no vídeo antigo. Aí montamos o básico com o que está escrito na tela. */
+  function videoDoDOM(vid) {
+    if (!vid) return null;
+    const ehShort = location.pathname.startsWith('/shorts/');
+    const tit = document.querySelector(ehShort
+      ? 'ytd-reel-video-renderer[is-active] yt-shorts-video-title-view-model, #shorts-inner-container h2, yt-shorts-video-title-view-model'
+      : '#above-the-fold #title h1, h1.ytd-watch-metadata, #title h1');
+    const titulo = (tit?.textContent || document.title.replace(/ - YouTube$/, '') || '').trim();
+    if (!titulo) return null;
+    const area = document.querySelector(ehShort ? 'ytd-reel-video-renderer[is-active]' : '#above-the-fold') || document.body;
+    const views = parseViews(area.innerText || '') ?? digits((area.innerText || '').match(/([\d.,]+)\s*(?:mil|mi|bi)?\s*visualizaç/i)?.[0]);
+    const vd = document.querySelector('video');
+    const canal = (document.querySelector(ehShort ? 'ytd-reel-video-renderer[is-active] #channel-name a, yt-reel-channel-bar-view-model a' : '#owner #channel-name a, ytd-channel-name a')?.textContent || '').trim();
+    return {
+      id: vid, title: titulo, description: '', tags: [],
+      views: views ?? 0, durationSec: Math.round(vd?.duration || 0),
+      channel: canal, channelId: '', publishedAt: null, category: null, live: false, parcial: true
+    };
   }
   const digits = (s) => {
     const m = String(s || '').replace(/ /g, ' ').match(/[\d][\d.,\s]*/);
@@ -208,8 +238,8 @@
     const p = shell(floating);
     clear(p);
     const eng = pageEngagement();
-    const user = await me();
-    const credits = h('span', { class: 'tc-credits' }, user ? '💎 ' + (user.unlimited ? '∞' : fmt(user.credits)) : '');
+    // O painel aparece JÁ, com o que a página tem. A conta chega depois e só completa.
+    const credits = h('span', { class: 'tc-credits' }, '');
     p.append(head(p, credits));
     const tabsBar = h('div', { class: 'tc-tabs' });
     const pane = h('div', { class: 'tc-pane' });
@@ -228,6 +258,13 @@
     };
     for (const nome of Object.keys(abas)) tabsBar.append(h('button', { class: 'tc-tab', type: 'button', onclick: () => show(nome) }, nome));
     show(abas[painelAba] ? painelAba : 'Vídeo');
+
+    // A conta é descoberta em paralelo: se existir, mostra o saldo e refaz a aba que precisa dela.
+    me().then((user) => {
+      if (!p.isConnected) return;
+      credits.textContent = user ? '💎 ' + (user.unlimited ? '∞' : fmt(user.credits)) : '';
+      if (user && (painelAba === 'Canal' || painelAba === 'IA')) show(painelAba);
+    }).catch(() => {});
 
     // Likes e comentários entram na página depois do resto: quando chegarem, refaz a aba.
     clearInterval(engTimer);
@@ -271,7 +308,9 @@
         stat('⏱ Duração', mmss(v.durationSec)),
         stat('📅 Publicado', ageText(v.publishedAt)),
         stat('📺 Canal', v.channel || '—')),
-      h('p', { class: 'tc-muted' }, 'Calculado aqui no seu navegador, com os dados desta página. Não gasta créditos.'),
+      h('p', { class: 'tc-muted' }, v.parcial
+        ? 'Lido da tela deste Short. Descrição e tags não aparecem aqui: use a aba Canal ou abra o vídeo normal.'
+        : 'Calculado aqui no seu navegador, com os dados desta página. Não gasta créditos.'),
       h('div', { class: 'tc-actions' },
         h('a', { class: 'tc-btn tc-sec2', href: `https://i.ytimg.com/vi/${vid}/maxresdefault.jpg`, target: '_blank', rel: 'noopener', download: `capa-${vid}.jpg` }, '🖼️ Baixar a capa'),
         copyBtn('📋 Copiar título, descrição e tags', () => `TÍTULO\n${v.title}\n\nDESCRIÇÃO\n${v.description}\n\nTAGS\n${(v.tags || []).join(', ')}`),
@@ -286,6 +325,11 @@
   }
 
   function abaSeo(v, eng) {
+    if (v.parcial) {
+      return h('div', null,
+        h('p', { class: 'tc-muted' }, 'A nota de SEO precisa da descrição e das tags, e esta tela do YouTube não mostra isso.'),
+        h('div', { class: 'tc-actions' }, linkCru('https://www.youtube.com/watch?v=' + v.id, '▶️ Abrir este vídeo na página normal', 'tc-btn tc-sec2')));
+    }
     const s = seoLocal(v, eng);
     const tags = v.tags || [];
     const lower = (x) => String(x).toLowerCase();

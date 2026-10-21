@@ -81,8 +81,13 @@ const PAGES = {
     </script>
   </body></html>`,
   shorts: `<!doctype html><html><body>
-    <script>window.ytInitialPlayerResponse = ${JSON.stringify({ ...PLAYER, videoDetails: { ...PLAYER.videoDetails, videoId: 'shortsAAAA1', lengthSeconds: '45' } })};</script>
-    <div id="shorts-player">short</div></body></html>`,
+    <script>window.ytInitialPlayerResponse = ${JSON.stringify(PLAYER)};</script>
+    <div id="shorts-player">short</div>
+    <ytd-reel-video-renderer is-active>
+      <yt-shorts-video-title-view-model>Meu short de teste</yt-shorts-video-title-view-model>
+      <div>12 mil visualizações</div>
+      <div id="channel-name"><a href="/@canaldoshort">Canal do Short</a></div>
+    </ytd-reel-video-renderer></body></html>`,
   search: `<!doctype html><html><body><ytd-search><ytd-section-list-renderer><div id="contents"><ytd-item-section-renderer>
     ${[['250 mil há 3 dias'], ['1,1 mi há 2 meses'], ['80 mil há 1 sem'], ['12 mil há 4 dias'], ['300 mil há 1 ano'], ['45 mil há 20 dias']]
       .map(([l], i) => `<ytd-video-renderer><a id="thumbnail" href="/watch?v=cccccccccc${i}"><img src="${IMG}"></a><div><h3>Bedwars ${i}</h3><ytd-channel-name>Canal ${i % 4}</ytd-channel-name><ytd-video-meta-block>${l}</ytd-video-meta-block></div></ytd-video-renderer>`).join('')}
@@ -105,8 +110,11 @@ const PAGES = {
     route.fulfill({ status: 200, headers: { 'content-type': 'text/html; charset=utf-8', ...TT }, body: PAGES[key] });
   });
   await ctx.route('https://studio.youtube.com/**', (route) => route.fulfill({ status: 200, headers: { 'content-type': 'text/html; charset=utf-8', ...TT }, body: PAGES.studio }));
+  let travarMe = false;
   await ctx.route(PUBLIC + '/**', async (route) => {
     const url = route.request().url();
+    if (travarMe && /\/api\/me$/.test(url)) return new Promise(() => {}); // nunca responde
+
     if (versionOverride && url.includes('/api/extension/version')) return route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ version: versionOverride, download: '/turbocanal-extensao.zip' }) });
     const resp = await route.fetch({ url: url.replace(PUBLIC, LOCAL) });
     await route.fulfill({ response: resp });
@@ -213,7 +221,38 @@ const PAGES = {
   await sh.click('#tc-shorts');
   await sh.waitForSelector('#tc-panel', { timeout: 10000 });
   check('Shorts: botão abre o painel flutuante do Short', (await sh.$eval('#tc-panel', (e) => e.className)).includes('tc-floating'));
+  const sht = await sh.textContent('#tc-panel');
+  check('Shorts: lê as views e o canal da própria tela quando o player ainda está no vídeo antigo',
+    /12\.000/.test(sht) && /Canal do Short/.test(sht) && /Lido da tela deste Short/.test(sht), sht.replace(/\s+/g, ' ').slice(0, 220));
+  await sh.click('#tc-panel .tc-tab:nth-child(2)');
+  check('Shorts: a aba SEO avisa que falta descrição e tags, em vez de dar nota errada',
+    /precisa da descrição e das tags/.test(await sh.textContent('#tc-panel .tc-pane')));
   await sh.close();
+
+  // Botões: têm que ser links de verdade, para funcionarem com o service worker parado
+  const lk = watch(await ctx.newPage());
+  await lk.goto('https://www.youtube.com/watch?v=' + VID);
+  await lk.waitForSelector('#tc-panel .tc-actions a[href]', { timeout: 20000 });
+  const links = await lk.$$eval('#tc-panel a[href]', (as) => as.map((a) => ({ h: a.getAttribute('href'), t: a.getAttribute('target') })));
+  check('os atalhos do painel são links de verdade (abrem mesmo com o service worker parado)',
+    links.filter((l) => l.h.startsWith(PUBLIC)).every((l) => l.t === '_blank') && links.some((l) => l.h.includes('/#/ferramentas/insights?video=' + VID)), JSON.stringify(links.slice(0, 4)));
+  const botoesMortos = await lk.$$eval('#tc-panel button', (bs) => bs.filter((b) => /IA do vídeo|cortes|Meu canal/.test(b.textContent)).length);
+  check('nenhum atalho do site ficou como botão dependente de mensagem', botoesMortos === 0, String(botoesMortos));
+  await lk.close();
+
+  // O painel não pode depender do servidor para aparecer
+  travarMe = true;
+  const lento = watch(await ctx.newPage());
+  await lento.goto('https://www.youtube.com/watch?v=' + VID);
+  await lento.waitForSelector('#tc-panel .tc-grid', { timeout: 15000 });
+  const lentoTxt = await lento.textContent('#tc-panel .tc-pane');
+  check('com o servidor travado, o painel abre do mesmo jeito com views, VPH e SEO',
+    /120\.000/.test(lentoTxt) && /2,5 mil\/h/.test(lentoTxt), lentoTxt.replace(/\s+/g, ' ').slice(0, 160));
+  await lento.click('#tc-panel .tc-tab:nth-child(2)');
+  const notaSemServidor = +(await lento.textContent('#tc-panel .tc-score-n'));
+  check('e a nota de SEO sai mesmo sem o servidor', notaSemServidor >= 50 && notaSemServidor <= 100, String(notaSemServidor));
+  await lento.close();
+  travarMe = false;
 
   /* ================= 5. Studio ================= */
   console.log('\n— YouTube Studio —');
