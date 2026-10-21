@@ -47,7 +47,7 @@ export async function startFakeGemini() {
     if (/"respostas"/.test(text)) return res.json(reply('```json\n' + JSON.stringify({ respostas: ['Valeu!', 'Boa pergunta!', 'Qual parte você mais gostou?'] }) + '\n```'));
     if (/titulos \(8 títulos/.test(text)) return res.json(reply(JSON.stringify({ titulos: ['T1', 'T2', 'T3', 'T4', 'T5'], descricao: 'desc', tags: ['a', 'b'], hashtags: ['#a'], capa_textos: ['UAU'], roteiro: [{ parte: 'Gancho', texto: 'x' }, { parte: 'Promessa', texto: 'y' }, { parte: 'Parte 1', texto: 'z' }, { parte: 'Final', texto: 'w' }], ideias: ['i1', 'i2', 'i3', 'i4', 'i5'] })));
     if (/Gere 8 títulos/.test(text)) return res.json(reply('1. Título um\n2. Título dois\n3. Título três\n4. Título quatro'));
-    if (/cortes/.test(text)) return res.json(reply(JSON.stringify({ cortes: [{ inicio: '00:10', fim: '00:40', titulo: 'Corte', gancho: 'Olha isso', motivo: 'prende' }] })));
+    if (/cortes/.test(text)) return res.json(reply(JSON.stringify({ cortes: Array.from({ length: 5 }, (_, i) => ({ inicio: `00:0${i}`, fim: `00:0${i + 2}`, titulo: `Corte ${i + 1}`, gancho: 'Olha isso', motivo: 'prende' })) })));
     return res.json(reply('Descrição otimizada de teste.'));
   });
   const server = app.listen(0);

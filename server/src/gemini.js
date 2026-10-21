@@ -1,21 +1,19 @@
 // Integração com a API do Gemini (Google AI Studio). A chave é configurada pelo
 // administrador em Admin > Configurações (gemini_api_key) ou via GEMINI_API_KEY.
-// Usos: textos das ferramentas, IA que "assiste" o vídeo do YouTube pela URL,
-// leitura de quadros do vídeo e geração de capas (imagem).
+// Usos: textos das ferramentas (títulos, descrições, tags, ideias, respostas) e a IA
+// que "assiste" o vídeo do YouTube pela URL e acha os cortes. Só texto: o site não
+// gera imagens (geração de imagem não tem uso gratuito na API do Gemini).
 //
-// Os modelos mudam com o tempo: tentamos uma lista em ordem e guardamos o que
-// funcionou. Texto tem uso gratuito (com limites); gerar IMAGEM não tem uso
-// gratuito na API do Gemini (exige faturamento ativo na chave).
+// Os modelos mudam com o tempo: tentamos uma lista em ordem e guardamos o que funcionou.
 import { getSetting } from './db.js';
 import { HttpError } from './util.js';
 
 const API_BASE = () => (process.env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com/v1beta/').replace(/\/?$/, '/');
 const uniq = (a) => [...new Set(a.filter(Boolean))];
 const MODELS = {
-  text: () => uniq([process.env.GEMINI_TEXT_MODEL, 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3-flash-preview', 'gemini-2.5-flash']),
-  image: () => uniq([process.env.GEMINI_IMAGE_MODEL, 'gemini-3.1-flash-lite-image', 'gemini-nano-banana-2.1', 'gemini-3.1-flash-image', 'gemini-2.5-flash-image'])
+  text: () => uniq([process.env.GEMINI_TEXT_MODEL, 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3-flash-preview', 'gemini-2.5-flash'])
 };
-const working = { text: null, image: null }; // último modelo que respondeu bem
+const working = { text: null }; // último modelo que respondeu bem
 
 export const AI_MISSING_MSG =
   'A IA ainda não foi ligada neste site: falta o administrador colar a chave do Gemini em Admin > Configurações (a chave é gratuita no Google AI Studio). Nenhum crédito foi cobrado.';
@@ -45,9 +43,7 @@ function errorFor(kind, cls, msg) {
     case 'quota':
       return new HttpError(429, 'A IA atingiu o limite de uso por agora. Tente de novo em alguns minutos. Os créditos foram devolvidos.');
     case 'billing':
-      return kind === 'image'
-        ? new HttpError(409, 'Gerar imagens com o Gemini não tem uso gratuito: o administrador precisa ativar o faturamento da chave no Google AI Studio (cerca de US$ 0,03 por capa). Os créditos foram devolvidos.')
-        : new HttpError(409, 'O plano gratuito do Gemini não cobre este uso. O administrador pode ativar o faturamento da chave no Google AI Studio. Os créditos foram devolvidos.');
+      return new HttpError(429, 'A IA gratuita do Gemini chegou ao limite por agora (por minuto ou do dia). Tente de novo mais tarde. Os créditos foram devolvidos.');
     case 'region':
       return new HttpError(409, 'O Gemini não está disponível para a região do servidor. Os créditos foram devolvidos.');
     case 'safety':
@@ -96,7 +92,7 @@ export async function callGemini(db, kind, body, { variants = [] } = {}) {
       if (cls === 'video') { const e = errorFor(kind, 'other', r.msg); e.videoProblem = true; throw e; }
       break; // sai do loop de corpos
     }
-    if (['model', 'payload', 'quota'].includes(lastCls) || (kind === 'image' && lastCls === 'billing')) continue; // próximo modelo (limites são por modelo)
+    if (['model', 'payload', 'quota', 'billing'].includes(lastCls)) continue; // próximo modelo (os limites gratuitos são por modelo)
     throw errorFor(kind, lastCls, lastMsg);
   }
   throw lastCls === 'model' || lastCls === 'payload'
@@ -143,19 +139,6 @@ export function youtubePart(videoId, durationSec = 0) {
   return part;
 }
 
-/** Gera imagem 16:9 a partir de texto e imagens de referência (quadros do vídeo). */
-export async function geminiImage(db, parts) {
-  const contents = [{ role: 'user', parts }];
-  const { data, model } = await callGemini(db, 'image',
-    { contents, generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: '16:9' } } },
-    { variants: [{ contents, generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } }] });
-  const out = data?.candidates?.[0]?.content?.parts || [];
-  const img = out.find((p) => (p.inlineData || p.inline_data)?.data);
-  if (!img) throw new HttpError(502, 'A IA não devolveu uma imagem desta vez. Tente gerar de novo (os créditos foram devolvidos).');
-  const d = img.inlineData || img.inline_data;
-  return { mime: d.mimeType || d.mime_type || 'image/png', base64: d.data, model, nota: out.find((p) => p.text)?.text || '' };
-}
-
 /**
  * Transformar: a IA assiste o vídeo e reaproveita o conteúdo.
  *  - shorts: encontra de 3 a 5 trechos que funcionam sozinhos como Shorts (com tempos)
@@ -164,13 +147,14 @@ export async function geminiImage(db, parts) {
 export async function transformVideo(db, videoId, mode = 'shorts') {
   const prompts = {
     shorts:
-      'Assista a este vídeo e encontre de 3 a 5 trechos que funcionam sozinhos como YouTube Shorts (cada um com no máximo 60 segundos). ' +
+      'Assista a este vídeo e encontre EXATAMENTE 3 trechos (os 3 melhores) que funcionam sozinhos como YouTube Shorts, cada um com 15 a 60 segundos e sem se sobrepor. ' +
       'Responda SOMENTE com JSON: {"cortes":[{"inicio":"mm:ss","fim":"mm:ss","titulo":"título do Short (até 60 caracteres)","gancho":"frase de abertura","motivo":"por que esse trecho prende"}]}.',
     post: 'Assista a este vídeo e escreva um post para a aba Comunidade do YouTube (até 500 caracteres) que gere comentários, mais uma enquete com 4 opções. Responda SOMENTE com JSON: {"post":"...","enquete":{"pergunta":"...","opcoes":["...","...","...","..."]}}.',
     artigo: 'Assista a este vídeo e transforme o conteúdo em um artigo de blog em português (título, introdução, 3 a 5 seções com subtítulos e conclusão). Responda SOMENTE com JSON: {"titulo":"...","texto":"... em markdown simples ..."}.',
     thread: 'Assista a este vídeo e transforme em uma sequência de 6 posts curtos para redes sociais (até 270 caracteres cada), o primeiro com um gancho forte e o último com chamada para o vídeo. Responda SOMENTE com JSON: {"posts":["...","..."]}.'
   };
   const { json, model } = await geminiJson(db, [youtubePart(videoId), { text: prompts[mode] || prompts.shorts }], { lowRes: true });
+  if (mode === 'shorts') json.cortes = (Array.isArray(json.cortes) ? json.cortes : []).filter((c) => c && c.inicio && c.fim).slice(0, 3);
   return { videoId, mode, modelo: model, resultado: json, aviso: 'Gerado por IA a partir do conteúdo público do vídeo. Confira os tempos antes de cortar.' };
 }
 

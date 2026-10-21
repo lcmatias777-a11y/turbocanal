@@ -136,7 +136,6 @@ const TOOL_SEED = [
   ['title_ai', 20, 'Sugestões de títulos (IA)'],
   ['description_ai', 15, 'Otimização de descrição (IA)'],
   ['video_insights_ai', 300, 'IA do vídeo: assiste e sugere título, descrição e tags'],
-  ['thumbnail_ai', 300, 'Capa com IA a partir do vídeo'],
   ['channel_sync', 5, 'Sincronizar meu canal'],
   ['thumbnail_upload', 10, 'Enviar capa para o YouTube'],
   ['video_update', 10, 'Editar título/descrição no YouTube'],
@@ -146,7 +145,7 @@ const TOOL_SEED = [
   ['comment_reply', 2, 'Responder comentário'],
   ['video_panel', 1, 'Painel da extensão no YouTube'],
   ['prep_ai', 15, 'Preparar publicação (IA)'],
-  ['transform_ai', 40, 'Transformar vídeo (IA)'],
+  ['transform_ai', 40, 'Transformar vídeo (IA): 3 cortes para Shorts, post, artigo'],
   ['reply_ai', 3, 'Sugerir resposta a comentário (IA)'],
   ['competitor_check', 8, 'Atualizar concorrente'],
   ['playlist_create', 10, 'Criar playlist no YouTube'],
@@ -282,9 +281,10 @@ async function seed(db) {
   }
   // Atualizações de preço/nome pedidas pelo dono (só se o valor ainda for o padrão antigo; não pisa em ajuste manual)
   const MIGRATE = [
-    ['video_insights_ai', 40, 300, 'IA assiste o vídeo (insights)', 'IA do vídeo: assiste e sugere título, descrição e tags'],
-    ['thumbnail_ai', 60, 300, 'Capa gerada por IA', 'Capa com IA a partir do vídeo']
+    ['video_insights_ai', 40, 300, 'IA assiste o vídeo (insights)', 'IA do vídeo: assiste e sugere título, descrição e tags']
   ];
+  await db.run("DELETE FROM tool_costs WHERE tool='thumbnail_ai'"); // capa com IA foi retirada do site
+  await db.run("UPDATE tool_costs SET label='Transformar vídeo (IA): 3 cortes para Shorts, post, artigo' WHERE tool='transform_ai' AND label='Transformar vídeo (IA)'");
   for (const [tool, oldCost, newCost, oldLabel, newLabel] of MIGRATE) {
     await db.run('UPDATE tool_costs SET cost=? WHERE tool=? AND cost=?', [newCost, tool, oldCost]);
     await db.run('UPDATE tool_costs SET label=? WHERE tool=? AND label=?', [newLabel, tool, oldLabel]);

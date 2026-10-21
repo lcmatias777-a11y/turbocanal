@@ -304,8 +304,6 @@ check('quem não vinculou canal recebe aviso para vincular (409)', ownC.status =
 
 console.log('\n== IA ligada (Gemini simulado): troca de modelo, IA do vídeo, capa a partir do vídeo ==');
 const { setSetting } = await import('../src/db.js');
-const noKeyThumb = await req('/api/channel/videos/vidMeu00001/ai-thumbnail', { method: 'POST', token: t1, body: {} });
-check('capa com IA sem chave: 409 e nada cobrado', noKeyThumb.status === 409);
 await setSetting(db, 'gemini_api_key', 'chave-errada');
 b0 = await bal();
 const badKey = await req('/api/tools/prep_ai', { method: 'POST', token: t1, body: { topic: 'bedwars' } });
@@ -349,26 +347,16 @@ check('se a IA não consegue assistir, usa quadros e dados (e avisa)', vf.status
 const vo = await req('/api/tools/video_insights_ai', { method: 'POST', token: t1, body: { video: 'vidAlheio01' } });
 check('vídeo público de outro canal: analisa, mas marca que não é seu (sem salvar)', vo.status === 200 && vo.data.result.own === false);
 
+const noThumb = await req('/api/channel/videos/vidMeu00001/ai-thumbnail', { method: 'POST', token: t1, body: {} });
+check('capa com IA foi retirada (a rota não existe mais)', noThumb.status === 404);
 b0 = await bal();
-gem.state.log.length = 0;
-const at = await req('/api/channel/videos/vidMeu00001/ai-thumbnail', { method: 'POST', token: t1, body: { style: 'gamer' } });
-const atImg = gem.state.log.find((l) => l.isImage);
-check('capa com IA a partir do vídeo: usa 4 quadros reais e devolve imagem 16:9 (300 créditos)', at.status === 200 && at.data.result.base64?.length > 10 && atImg?.images === 4 && atImg?.gen?.imageConfig?.aspectRatio === '16:9' && at.data.credits.charged === 300 && (await bal()) === b0 - 300, JSON.stringify({ s: at.status, e: at.data.error }));
-check('texto da capa em maiúsculas e no máximo 4 palavras', at.data.result.conceito.texto === 'VENCI SEM GASTAR NADA');
-const atOther = await req('/api/channel/videos/vidAlheio01/ai-thumbnail', { method: 'POST', token: t1, body: {} });
-check('capa com IA em vídeo de outro canal: bloqueada', atOther.status === 403);
-const atPriv = await req('/api/channel/videos/vidMeu00002/ai-thumbnail', { method: 'POST', token: t1, body: {} });
-check('vídeo privado sem quadros públicos: explica e devolve os créditos', atPriv.status === 409 && /quadros/.test(atPriv.data.error));
-gem.state.imageBilling = true;
-b0 = await bal();
-const atBill = await req('/api/channel/videos/vidMeu00001/ai-thumbnail', { method: 'POST', token: t1, body: {} });
-gem.state.imageBilling = false;
-check('imagem sem faturamento ativo: explica o custo e devolve os créditos', atBill.status === 409 && /faturamento/.test(atBill.data.error) && (await bal()) === b0, atBill.data.error);
+const tf = await req('/api/tools/transform_ai', { method: 'POST', token: t1, body: { video: 'vidMeu00001', mode: 'shorts' } });
+check('Transformar em Shorts devolve exatamente 3 cortes (40 créditos)', tf.status === 200 && tf.data.result.resultado.cortes.length === 3 && tf.data.credits.charged === 40 && (await bal()) === b0 - 40, JSON.stringify(tf.data).slice(0, 200));
 process.env.YT_MOCK = '1';
 const trN = await req('/api/tools/trends', { method: 'POST', token: t1, body: { keywords: ['bedwars', 'geometry dash', 'extra'], categoryId: '20' } });
 check('Tendências do nicho: até 2 termos do canal + categoria do canal', trN.status === 200 && trN.data.result.groups.length === 3 && trN.data.result.nicho.length === 2 && trN.data.result.categoria === 'Jogos', JSON.stringify(trN.data).slice(0, 200));
 const costsNow = (await req('/api/tools/costs')).data.costs;
-check('preços novos: IA do vídeo e capa com IA a 300 créditos', costsNow.find((c) => c.tool === 'video_insights_ai').cost === 300 && costsNow.find((c) => c.tool === 'thumbnail_ai').cost === 300);
+check('preços: IA do vídeo a 300 créditos e capa com IA fora da tabela', costsNow.find((c) => c.tool === 'video_insights_ai').cost === 300 && !costsNow.some((c) => c.tool === 'thumbnail_ai'));
 fake.close(); gem.close();
 
 console.log(`\nRESULTADO: ${pass} passaram, ${fail} falharam.`);

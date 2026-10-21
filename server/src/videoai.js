@@ -1,8 +1,7 @@
 // IA a partir do VÍDEO (sem o usuário digitar nada): a IA assiste ao vídeo público,
 // olha quadros reais dele e os dados atuais (título, descrição, tags) e sugere
-// tudo de uma vez; também cria capas usando os quadros como referência.
-import { geminiJson, geminiImage, youtubePart } from './gemini.js';
-import { HttpError } from './util.js';
+// tudo de uma vez.
+import { geminiJson, youtubePart } from './gemini.js';
 
 const IMG_BASE = () => (process.env.YT_IMG_BASE || 'https://i.ytimg.com/vi/').replace(/\/?$/, '/');
 
@@ -107,40 +106,4 @@ export async function videoSuggestions(db, videoId, meta) {
         ? 'Vídeo privado: a IA não consegue assistir. As sugestões usam o título, a descrição e as tags atuais.'
         : 'A IA não pôde assistir a este vídeo (só vídeos públicos); usou quadros reais e os dados atuais.'
   };
-}
-
-const STYLES = {
-  auto: 'o estilo que mais combina com o vídeo e o nicho',
-  gamer: 'gamer, cores saturadas, brilho neon, energia alta',
-  vibrante: 'vibrante e colorido, alto contraste',
-  dramatico: 'dramático, iluminação forte, emoção intensa',
-  minimalista: 'minimalista e limpo, poucos elementos, fundo simples',
-  vlog: 'vlog/realista, rosto em destaque com expressão marcante'
-};
-
-/** Capa com IA a partir do próprio vídeo: conceito (texto) + imagem com os quadros como referência. */
-export async function videoThumbnail(db, videoId, meta, style = 'auto') {
-  const frames = meta.privacy === 'private' ? [] : await videoFrames(videoId, { thumb: true });
-  if (!frames.length) throw new HttpError(409, 'Não consegui pegar quadros deste vídeo (vídeos privados ou ainda em processamento não têm quadros públicos). Deixe o vídeo público ou não listado e tente de novo. Nenhum crédito foi cobrado.');
-  const framesParts = frames.map(imgPart);
-  const conceptAsk = (watching) =>
-    `Você cria capas (thumbnails) de alto CTR para YouTube no Brasil. ${watching ? 'Assista ao vídeo anexado. ' : ''}` +
-    `As imagens anexadas são quadros reais do vídeo (a última é a capa atual). ` + context(meta) +
-    ` Planeje UMA capa nova. Responda SOMENTE com JSON: {"texto":"até 4 palavras em português, em maiúsculas","cena":"o que mostrar, usando pessoas, personagens e cenário que aparecem nos quadros","emocao":"emoção principal","cores":"2 ou 3 cores dominantes"}.`;
-  let concept;
-  const canWatch = (meta.privacy || 'public') === 'public';
-  if (canWatch) {
-    try { concept = (await geminiJson(db, [youtubePart(videoId, meta.durationSec), ...framesParts, { text: conceptAsk(true) }], { lowRes: true })).json; } catch (e) { if (!e.videoProblem) throw e; }
-  }
-  if (!concept) concept = (await geminiJson(db, [...framesParts, { text: conceptAsk(false) }])).json;
-  const texto = String(concept.texto || '').toUpperCase().split(/\s+/).slice(0, 4).join(' ');
-  const prompt =
-    `Crie uma thumbnail (capa) de vídeo do YouTube em 16:9, para o vídeo "${meta.title || ''}". ` +
-    `Use as imagens anexadas (quadros reais do vídeo) como referência: mantenha os mesmos personagens, pessoas, cenário e jogo, para a capa ser fiel ao conteúdo. ` +
-    `Cena: ${concept.cena || 'o momento mais marcante do vídeo'}. Emoção: ${concept.emocao || 'surpresa'}. Cores: ${concept.cores || 'alto contraste'}. ` +
-    `Estilo: ${STYLES[style] || STYLES.auto}. Um elemento principal grande, fundo que não compete, legível em tamanho pequeno. ` +
-    (texto ? `Escreva o texto "${texto}" em letras grandes, grossas e legíveis, com contorno escuro. ` : 'Sem texto. ') +
-    `Sem marcas d'água, sem logotipos de terceiros, sem bordas.`;
-  const img = await geminiImage(db, [...framesParts, { text: prompt }]);
-  return { ...img, conceito: { ...concept, texto }, quadros: frames.length, aviso: 'Capa criada por IA com base em quadros reais do vídeo. Confira o texto e os detalhes antes de usar.' };
 }

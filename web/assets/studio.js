@@ -127,10 +127,12 @@ export async function mountEditor(el, ctx) {
   const { esc, alertBox, state, go } = ctx;
   const preset = state.editorPreset || {};
   state.editorPreset = null;
+  const cuts = Array.isArray(preset.cuts) ? preset.cuts.filter((c) => c.end > c.start) : [];
   el.innerHTML = `
     <h1>✂️ Editor de vídeo</h1>
     <p class="muted">Corte, transforme em Shorts, acelere, tire o áudio ou comprima. Roda <b>no seu navegador</b>: o vídeo não sai do seu computador e não gasta créditos. Depois, é só postar no seu canal.</p>
     ${preset.title ? alertBox('info', `Corte sugerido pela IA: <b>${esc(preset.title)}</b> (${esc(fmtTime(preset.start))} a ${esc(fmtTime(preset.end))}). Escolha o arquivo original do vídeo para aplicar.`) : ''}
+    ${cuts.length ? alertBox('info', `A IA achou <b>${cuts.length} cortes</b>:<br>${cuts.map((c, i) => `${i + 1}) ${esc(c.title || 'Corte ' + (i + 1))} (${esc(fmtTime(c.start))} a ${esc(fmtTime(c.end))})`).join('<br>')}<br>Escolha abaixo o arquivo ORIGINAL do vídeo e clique em <b>Fazer os ${cuts.length} Shorts</b>.`) : ''}
     <div class="card">
       <label>Arquivo de vídeo (do seu computador)</label>
       <input type="file" id="edFile" accept="video/*">
@@ -146,7 +148,8 @@ export async function mountEditor(el, ctx) {
         <p class="small muted" id="edInfo"></p>
         <label>O que fazer</label>
         <select id="edOp">${OPS.map(([k, l]) => `<option value="${k}" ${preset.shorts && k === 'shorts_blur' ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        <p><button class="btn" id="edRun" type="button">Processar</button>
+        ${cuts.length ? `<p><button class="btn" id="edBatch" type="button">✂️ Fazer os ${cuts.length} Shorts</button> <span class="muted small">usa o formato escolhido acima (Shorts com fundo desfocado ou cortando o centro)</span></p>` : ''}
+        <p><button class="btn${cuts.length ? ' ghost' : ''}" id="edRun" type="button">Processar</button>
            <button class="btn ghost" id="edFrame" type="button">📸 Usar este quadro como capa</button></p>
         <div id="edProg" class="small muted"></div>
       </div>
@@ -200,6 +203,44 @@ export async function mountEditor(el, ctx) {
     drawCover(g, video, video.videoWidth, video.videoHeight, 1280, 720);
     state.thumbSource = c.toDataURL('image/jpeg', 0.92);
     go('#/ferramentas/criar-capa');
+  };
+
+  const batch = $('#edBatch');
+  if (batch) batch.onclick = async () => {
+    if (!file) return;
+    let op = $('#edOp').value;
+    if (!op.startsWith('shorts')) { op = 'shorts_blur'; $('#edOp').value = op; }
+    batch.disabled = true; $('#edRun').disabled = true;
+    $('#edMsg').innerHTML = ''; $('#edOut').innerHTML = '';
+    const prog = $('#edProg');
+    const done = [];
+    try {
+      for (let i = 0; i < cuts.length; i++) {
+        const c = cuts[i];
+        prog.textContent = i === 0 ? 'Carregando o motor do editor (só na primeira vez, ~32 MB)…' : `Corte ${i + 1} de ${cuts.length}…`;
+        const { blob } = await processFile(file, op, {
+          start: c.start, end: c.end, duration: isFinite(video.duration) ? video.duration : null,
+          onProgress: (pct) => (prog.textContent = `Corte ${i + 1} de ${cuts.length}: ${pct}%`)
+        });
+        done.push({ ...c, blob, url: URL.createObjectURL(blob), fname: `${(file.name.replace(/\.[^.]+$/, '') || 'video')}-short-${i + 1}.mp4` });
+      }
+      prog.textContent = '';
+      $('#edOut').innerHTML = alertBox('ok', `Pronto! ${done.length} Shorts feitos.`) + done.map((d, i) => `
+        <div class="card"><b>${i + 1}) ${esc(d.title || 'Short ' + (i + 1))}</b> <span class="muted small">${esc(fmtTime(d.start))} a ${esc(fmtTime(d.end))} · ${(d.blob.size / 1048576).toFixed(1)} MB</span>
+          <video src="${d.url}" controls style="width:100%;max-height:420px;background:#000;border-radius:10px;margin-top:6px"></video>
+          <p><a class="btn sm" href="${d.url}" download="${esc(d.fname)}">⬇️ Baixar</a> <button class="btn sm secondary" type="button" data-postcut="${i}">⬆️ Postar este no meu canal</button></p></div>`).join('');
+      $('#edOut').dataset.count = String(done.length);
+      for (const b of el.querySelectorAll('[data-postcut]')) b.onclick = () => {
+        const d = done[+b.dataset.postcut];
+        state.pendingUpload = new File([d.blob], d.fname, { type: 'video/mp4' });
+        state.prepDraft = { ...(state.prepDraft || {}), title: ((d.title || state.prepDraft?.title || '') + ' #shorts').trim() };
+        go('#/canal/postar');
+      };
+    } catch (e) {
+      prog.textContent = '';
+      $('#edMsg').innerHTML = alertBox('err', esc(e.message || String(e)) + (done.length ? ` (${done.length} corte(s) já tinham ficado prontos)` : ''));
+    }
+    batch.disabled = false; $('#edRun').disabled = false;
   };
 
   $('#edRun').onclick = async () => {

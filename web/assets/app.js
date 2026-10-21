@@ -45,7 +45,6 @@ const TOOL_LINKS = [
   ['#/ferramentas/transformar', '🔁 Transformar vídeo (IA)'],
   ['#/ferramentas/editor', '✂️ Editor de vídeo'],
   ['#/ferramentas/criar-capa', '🎨 Criar capa'],
-  ['#/ferramentas/capa', '🎨 Capa com IA (do vídeo)'],
   ['#/ferramentas/concorrentes', '🏆 Concorrentes'],
   ['#/ferramentas/busca', 'Buscar vídeos']
 ];
@@ -102,7 +101,7 @@ views.home = async () => {
         ['📺 Seu canal, como no Studio', 'Postar vídeo com agendamento, criar live com chave de transmissão, editar título, tags e visibilidade, playlists, analytics, comentários, capas e testes A/B.'],
         ['✂️ Editor de vídeo grátis', 'Corte trechos, transforme em Shorts 9:16, acelere, tire o áudio. Roda no seu navegador, sem gastar créditos.'],
         ['🎨 Capas que chamam clique', 'Crie capas com texto grande a partir de um quadro do vídeo e veja a prévia no feed (claro, escuro e celular).'],
-        ['🤖 IA que assiste o seu vídeo', 'Você só escolhe o vídeo: a IA assiste, sugere título, descrição, tags e capítulos, cria a capa a partir de quadros reais e acha os cortes para Shorts. Você tira o que não quiser e salva.'],
+        ['🤖 IA que assiste o seu vídeo', 'Você só escolhe o vídeo: a IA assiste, sugere título, descrição, tags e capítulos e acha os 3 melhores cortes para Shorts. Você tira o que não quiser e salva.'],
         ['🏆 Concorrentes', 'Acompanhe canais do seu nicho e descubra quais vídeos deles estão performando acima da média.'],
         ['📈 SEO de cada vídeo', 'Nota de SEO com o que falta arrumar em cada vídeo do seu canal.'],
         ['🧩 Extensão Chrome', 'Painel na página do vídeo do YouTube: VPH, engajamento, tags e SEO, com a mesma conta.']
@@ -174,10 +173,10 @@ views.dashboard = async () => {
   const admin = u.role === 'owner' || u.role === 'admin';
   const aiBanner = admin && !state.pub.gemini_configured
     ? `<div class="card" style="border-color:var(--warn)"><h3>🤖 Falta ligar a IA (só você, administrador, vê este aviso)</h3>
-        <p class="muted">Sem a chave do Gemini, a IA do vídeo, a capa com IA, ideias, preparar e sugestões de resposta ficam desligadas (e não cobram nada). A chave é sua e só você pode criar e colar:</p>
+        <p class="muted">Sem a chave do Gemini, a IA do vídeo, os cortes para Shorts, ideias, preparar e sugestões de resposta ficam desligados (e não cobram nada). A chave é sua e só você pode criar e colar:</p>
         <ol class="muted"><li><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Abra o Google AI Studio ↗</a> com a conta lcmatias777@gmail.com e clique em <b>Criar chave de API</b>.</li>
           <li>Copie a chave e cole em <a href="#/admin/config">Admin &gt; Configurações</a>, no campo do Gemini. Salve e clique em <b>Testar a IA</b>.</li></ol>
-        <p class="muted small">Textos e "assistir vídeo" têm uso gratuito com limites. Gerar a IMAGEM da capa exige faturamento ativo na chave (cerca de US$ 0,03 por capa).</p></div>`
+        <p class="muted small">O uso é gratuito, com limites por minuto e por dia do próprio Google.</p></div>`
     : '';
   appEl().innerHTML = `
     <h1>Olá, ${esc(u.name || u.email.split('@')[0])} 👋</h1>
@@ -207,7 +206,7 @@ function toolCostLabel(hash) {
   const map = {
     palavras: 'keyword_research', video: 'video_analysis', canal: 'channel_analysis',
     tendencias: 'trends', titulos: 'title_ai', descricao: 'description_ai', busca: 'video_search',
-    insights: 'video_insights_ai', capa: 'thumbnail_ai', preparar: 'prep_ai', transformar: 'transform_ai', concorrentes: 'competitor_check', ideias: 'ideas_ai'
+    insights: 'video_insights_ai', preparar: 'prep_ai', transformar: 'transform_ai', concorrentes: 'competitor_check', ideias: 'ideas_ai'
   };
   const last = hash.split('/').pop();
   if (last === 'editor' || last === 'criar-capa') return 'Grátis (roda no seu navegador)';
@@ -443,7 +442,7 @@ function renderSuggestions(out, r) {
       <div class="card"><h3>O que a IA entendeu</h3><p>${esc(s.resumo)}</p>
         ${s.melhorias.length ? `<p class="small"><b>Dicas para os próximos vídeos:</b></p><ul class="small">${s.melhorias.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>` : ''}</div>
       <div class="card"><h3>Textos para a capa</h3>${s.capa_textos.map((t) => `<p><span class="pill">${esc(t)}</span> <a href="#/ferramentas/criar-capa" data-capatxt="${esc(t)}" class="small">montar capa com este texto</a></p>`).join('') || '<p class="muted small">Sem sugestões.</p>'}
-        ${r.own ? `<p><a class="btn sm secondary" href="#/ferramentas/capa?video=${esc(v.id)}">🎨 Capa com IA para este vídeo</a></p>` : ''}</div>
+</div>
     </div>
     <div class="card"><h3>Título</h3>
       ${s.titulos.map((t, i) => `<label class="opt"><input type="radio" name="vaT" value="${i}" ${i === 0 ? 'checked' : ''}> ${esc(t)} <span class="muted small">(${t.length})</span></label>`).join('')}
@@ -512,77 +511,7 @@ views['ferramentas/insights'] = videoAIView;
 views['ferramentas/titulos'] = videoAIView; // sugerir título agora parte do próprio vídeo (sem caixa de texto)
 views['ferramentas/descricao'] = videoAIView;
 
-/* ------------------------------ Capa com IA a partir do vídeo ------------------------------ */
-async function toThumbJpeg(src) {
-  const img = new Image();
-  img.src = src;
-  await img.decode();
-  const c = document.createElement('canvas'); c.width = 1280; c.height = 720;
-  const g = c.getContext('2d');
-  const sc = Math.max(1280 / img.naturalWidth, 720 / img.naturalHeight);
-  const w = img.naturalWidth * sc, h = img.naturalHeight * sc;
-  g.drawImage(img, (1280 - w) / 2, (720 - h) / 2, w, h);
-  let q = 0.92, out = c.toDataURL('image/jpeg', q);
-  while (out.length * 0.75 > 1.9e6 && q > 0.5) { q -= 0.1; out = c.toDataURL('image/jpeg', q); }
-  return out;
-}
-
-views['ferramentas/capa'] = async (params) => {
-  if (!state.user) return needLogin();
-  const admin = state.user.role === 'owner' || state.user.role === 'admin';
-  appEl().innerHTML = `
-    <h1>🎨 Capa com IA</h1>
-    <p class="muted">Escolha um vídeo do seu canal: a IA olha quadros reais do vídeo (e assiste, se ele for público), cria a ideia e desenha uma capa nova em 16:9 com as mesmas pessoas, personagens e cenário. Você não escreve nada. <span class="pill">${costLabel('thumbnail_ai')}</span></p>
-    ${aiMissingBanner()}
-    ${admin ? '<p class="muted small">Para o administrador: gerar imagem com o Gemini não tem uso gratuito; a chave precisa de faturamento ativo no Google AI Studio (cerca de US$ 0,03 por capa).</p>' : ''}
-    <div class="card"><div id="vpBox"></div><div id="caSel"></div></div>
-    <div id="msg"></div><div id="out"></div>`;
-  let picked = null;
-  const onPick = (v) => {
-    picked = v;
-    $('#caSel').innerHTML = `<div class="thumbrow" style="margin-top:14px">${v.thumb ? `<img src="${esc(v.thumb)}" alt="">` : ''}
-      <div><b>${esc(v.title || v.id)}</b> <span class="muted small">(capa atual ao lado)</span>
-      <div class="row" style="margin-top:6px"><div class="fit"><label>Estilo (opcional)</label><select id="caStyle">
-        <option value="auto">Automático (a IA decide)</option><option value="gamer">Gamer</option><option value="vibrante">Vibrante</option><option value="dramatico">Dramático</option><option value="minimalista">Minimalista</option><option value="vlog">Vlog / rosto</option></select></div></div>
-      <p><button class="btn" id="caGo" type="button">🎨 Gerar capa</button> <span class="muted small">${costLabel('thumbnail_ai')}</span></p></div></div>`;
-    $('#caGo').onclick = run;
-  };
-  await videoPicker($('#vpBox'), { onPick, allowLink: false, preselect: params?.get('video') });
-
-  async function run() {
-    const btn = $('#caGo'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span> criando a capa…';
-    $('#msg').innerHTML = '';
-    try {
-      const r = await api('/channel/videos/' + picked.id + '/ai-thumbnail', { method: 'POST', body: { style: $('#caStyle').value } });
-      await refreshMe();
-      const jpeg = await toThumbJpeg(`data:${r.result.mime};base64,${r.result.base64}`);
-      state.lastThumb = jpeg;
-      const m = await loadStudio();
-      $('#msg').innerHTML = creditsNote(r.credits) + alertBox('info', esc(r.result.aviso));
-      $('#out').innerHTML = `<div class="grid cols2">
-        <div class="card"><img src="${jpeg}" style="width:100%;border-radius:10px" alt="Capa gerada">
-          <p class="small muted">Ideia da IA: ${esc(r.result.conceito.cena || '')}${r.result.conceito.texto ? ` · texto: <b>${esc(r.result.conceito.texto)}</b>` : ''}</p>
-          <p><button class="btn" type="button" id="caUse">⬆️ Usar no vídeo</button> <span class="muted small">${costOf('thumbnail_upload')}</span>
-            <a class="btn sm ghost" download="capa-${esc(picked.id)}.jpg" href="${jpeg}">⬇️ Baixar</a>
-            <a class="btn sm ghost" href="#/ferramentas/criar-capa" id="caEdit">✏️ Ajustar o texto</a>
-            <button class="btn sm ghost" type="button" id="caAgain">🔁 Gerar outra</button></p><div id="caMsg"></div></div>
-        <div class="card"><h3>Como fica no feed</h3>${m.feedPreviewHtml({ esc, thumb: jpeg, title: picked.title || r.result.title, channel: state.user.youtube?.channel_title || '' })}</div></div>`;
-      $('#caUse').onclick = async () => {
-        $('#caUse').disabled = true;
-        try {
-          const x = await api('/channel/videos/' + picked.id + '/thumbnail', { method: 'POST', body: { image: jpeg } });
-          await refreshMe();
-          $('#caMsg').innerHTML = alertBox('ok', '✅ Capa enviada ao YouTube (pode levar alguns minutos para aparecer). ' + creditsNote(x.credits));
-        } catch (e) { $('#caMsg').innerHTML = alertBox('err', esc(e.message)); $('#caUse').disabled = false; }
-      };
-      $('#caEdit').onclick = () => { state.thumbSource = jpeg; };
-      $('#caAgain').onclick = run;
-    } catch (e) {
-      $('#msg').innerHTML = alertBox(e.status === 409 ? 'warn' : 'err', esc(e.message)) + aiAdminHint(e);
-    }
-    btn.disabled = false; btn.textContent = '🎨 Gerar outra capa';
-  }
-};
+views['ferramentas/capa'] = (p) => views['ferramentas/criar-capa'](p); // capa com IA foi retirada: abre o criador de capas
 
 /* ------------------------------ Tendências do seu nicho ------------------------------ */
 const CATS = { 20: 'Jogos', 24: 'Entretenimento', 22: 'Pessoas e blogs', 23: 'Comédia', 27: 'Educação', 28: 'Ciência e tecnologia', 26: 'Estilo e dicas', 10: 'Música', 17: 'Esportes', 2: 'Carros', 15: 'Animais', 1: 'Filmes e animação', 19: 'Viagens', 25: 'Notícias' };
@@ -713,21 +642,22 @@ views['ferramentas/preparar'] = toolPage({
 
 views['ferramentas/transformar'] = toolPage({
   title: '🔁 Transformar vídeo (IA)', toolKey: 'transform_ai',
-  desc: 'A IA assiste o vídeo e reaproveita: acha os melhores trechos para Shorts (com os tempos), ou transforma em post da Comunidade, artigo de blog ou sequência para redes.',
+  desc: 'A IA assiste o vídeo e acha os 3 melhores trechos para Shorts (com os tempos); no editor você faz os 3 cortes de uma vez. Também transforma em post da Comunidade, artigo de blog ou sequência para redes.',
   onMount: (f) => {
     f.insertAdjacentHTML('afterbegin', '<div id="tfPick"></div>');
     videoPicker($('#tfPick'), { allowLink: false, onPick: (v) => { f.querySelector('[name=video]').value = 'https://www.youtube.com/watch?v=' + v.id; } });
   },
   formHtml: `<label>Link ou ID do vídeo (público)</label><input name="video" required placeholder="https://www.youtube.com/watch?v=...">
-    <label>Transformar em</label><select name="mode"><option value="shorts">✂️ Cortes para Shorts (trechos com tempo)</option><option value="post">📣 Post da Comunidade + enquete</option><option value="artigo">📰 Artigo de blog</option><option value="thread">🧵 Sequência para redes sociais</option></select>`,
+    <label>Transformar em</label><select name="mode"><option value="shorts">✂️ 3 cortes para Shorts (trechos com tempo)</option><option value="post">📣 Post da Comunidade + enquete</option><option value="artigo">📰 Artigo de blog</option><option value="thread">🧵 Sequência para redes sociais</option></select>`,
   getBody: (fd) => ({ video: fd.get('video'), mode: fd.get('mode') }),
   render: (r) => {
     const x = r.resultado || {};
     if (r.mode === 'shorts') {
-      return `<div class="card"><h3>Trechos para Shorts</h3>${(x.cortes || []).map((c, i) => `
+      return `<div class="card"><h3>Os ${(x.cortes || []).length} melhores trechos para Shorts</h3>
+        ${(x.cortes || []).length ? '<p><button class="btn" type="button" id="cutAll">✂️ Fazer os cortes no editor (todos de uma vez)</button></p>' : ''}${(x.cortes || []).map((c, i) => `
         <div style="border-bottom:1px solid var(--line);padding:8px 0"><b>${esc(c.titulo || 'Corte ' + (i + 1))}</b> <span class="pill">${esc(c.inicio)} → ${esc(c.fim)}</span>
           <p class="small">Gancho: ${esc(c.gancho || '')}<br><span class="muted">${esc(c.motivo || '')}</span></p>
-          <button class="btn sm secondary" type="button" data-cut="${i}">✂️ Abrir no editor com estes tempos</button></div>`).join('') || '<p class="muted">Nenhum trecho sugerido.</p>'}
+          <button class="btn sm ghost" type="button" data-cut="${i}">✂️ Só este corte</button></div>`).join('') || '<p class="muted">Nenhum trecho sugerido.</p>'}
         <p class="muted small">O editor corta o arquivo ORIGINAL do seu computador (por direitos autorais, não baixamos vídeos do YouTube).</p></div>`;
     }
     if (r.mode === 'post') return `<div class="card"><h3>Post da Comunidade</h3><textarea style="min-height:160px">${esc(x.post || '')}</textarea><p>${copyBtn(x.post, 'copiar post')}</p>
@@ -737,11 +667,13 @@ views['ferramentas/transformar'] = toolPage({
   },
   after: (r, out) => {
     const toSec = (t) => String(t || '0').split(':').reduce((a, n) => a * 60 + (parseFloat(n) || 0), 0);
+    const cuts = (r.resultado?.cortes || []).map((c) => ({ start: toSec(c.inicio), end: toSec(c.fim), title: c.titulo || '' }));
     for (const b of out.querySelectorAll('[data-cut]')) b.onclick = () => {
-      const c = (r.resultado?.cortes || [])[+b.dataset.cut] || {};
-      state.editorPreset = { start: toSec(c.inicio), end: toSec(c.fim), title: c.titulo || '', shorts: true };
+      state.editorPreset = { ...cuts[+b.dataset.cut], shorts: true };
       location.hash = '#/ferramentas/editor';
     };
+    const all = out.querySelector('#cutAll');
+    if (all) all.onclick = () => { state.editorPreset = { cuts, shorts: true }; location.hash = '#/ferramentas/editor'; };
   }
 });
 
@@ -812,7 +744,7 @@ views.canal = async (params, sub) => {
       <h1>📺 Meu canal</h1>
       <div class="card" style="max-width:680px">
         <h3>Vincule seu canal do YouTube</h3>
-        <p>Com o canal vinculado você tem, aqui dentro: seus vídeos e estatísticas, <b>postar vídeo</b> (com agendamento), <b>criar live</b> (com chave de transmissão), <b>analytics</b>, <b>comentários</b> (ler e responder), <b>capas</b> (inclusive geradas por IA), <b>teste A/B de capas</b> e edição de título/descrição. Só vídeos do canal vinculado podem ser alterados, e tudo é verificado no servidor.</p>
+        <p>Com o canal vinculado você tem, aqui dentro: seus vídeos e estatísticas, <b>postar vídeo</b> (com agendamento), <b>criar live</b> (com chave de transmissão), <b>analytics</b>, <b>comentários</b> (ler e responder), <b>capas</b>, <b>teste A/B de capas</b>, edição de título, descrição e tags e a <b>IA do vídeo</b>. Só vídeos do canal vinculado podem ser alterados, e tudo é verificado no servidor.</p>
         ${googleButton('Vincular meu canal do YouTube', true)}
         <p class="muted small">Você autoriza pelo próprio Google. Pode desvincular quando quiser (em Conta).</p>
       </div>`;
@@ -844,7 +776,7 @@ const canalTabs = {
             <p class="muted small">👁 ${fmt(v.views)} · 👍 ${fmt(v.likes)} · 💬 ${fmt(v.comments)} · ⚡ ${fmt(v.vph)}/h · ${dt(v.publishedAt).split(',')[0]} · ${esc(privLabel(v.privacy))}</p>
             <p class="small"><span class="pill ${v.seoScore >= 80 ? 'ok' : v.seoScore >= 50 ? 'warn' : 'err'}" title="${esc((v.seoTodo || []).join(' · ') || 'Tudo certo')}">SEO ${v.seoScore ?? '—'}/100</span>
               ${(v.seoTodo || []).length ? `<span class="muted">falta: ${esc((v.seoTodo || []).slice(0, 2).join(', '))}${v.seoTodo.length > 2 ? '…' : ''}</span>` : '<span class="muted">checklist completo ✅</span>'}</p>
-            <p class="small"><a href="https://studio.youtube.com/video/${esc(v.id)}/edit" target="_blank" rel="noopener">editar no Studio ↗</a> · <a href="#/ferramentas/insights?video=${esc(v.id)}">✨ IA do vídeo</a> · <a href="#/ferramentas/capa?video=${esc(v.id)}">🎨 capa com IA</a> · <a href="#/ferramentas/transformar" data-transform="${esc(v.id)}">transformar em Shorts</a></p></div></div>
+            <p class="small"><a href="https://studio.youtube.com/video/${esc(v.id)}/edit" target="_blank" rel="noopener">editar no Studio ↗</a> · <a href="#/ferramentas/insights?video=${esc(v.id)}">✨ IA do vídeo</a> · <a href="#/ferramentas/transformar" data-transform="${esc(v.id)}">✂️ 3 cortes para Shorts</a></p></div></div>
           <details><summary class="small">✏️ Editar título, descrição, tags e visibilidade</summary>
             <p><a class="btn sm ghost" href="#/ferramentas/insights?video=${esc(v.id)}">✨ IA assiste e sugere tudo</a> <span class="muted small">${costOf('video_insights_ai')} · você tira o que não quiser e salva</span></p>
             <label>Título <span class="muted small" data-len="${esc(v.id)}">${(v.title || '').length}/100</span></label><input data-f="title" value="${esc(v.title)}" maxlength="100">
@@ -854,7 +786,7 @@ const canalTabs = {
             <p><button class="btn sm" data-save="${esc(v.id)}">Salvar no YouTube</button> <span class="muted small">${costOf('video_update')}</span></p></details>
           <details><summary class="small">🖼️ Enviar capa</summary>
             <label>Imagem (JPG/PNG, até 2 MB, 1280x720)</label><input type="file" accept="image/*" data-file="${esc(v.id)}">
-            ${state.lastThumb ? `<p class="small"><label style="display:inline"><input type="checkbox" data-uselast="${esc(v.id)}" style="width:auto"> usar a última capa gerada</label></p>` : `<p class="small muted">Dica: <a href="#/ferramentas/capa?video=${esc(v.id)}">crie uma capa com IA a partir deste vídeo</a>.</p>`}
+            ${state.lastThumb ? `<p class="small"><label style="display:inline"><input type="checkbox" data-uselast="${esc(v.id)}" style="width:auto"> usar a última capa gerada</label></p>` : '<p class="small muted">Dica: monte uma capa em <a href="#/canal/capa">Criar capa</a> (pode usar um quadro do próprio vídeo no Editor).</p>'}
             <p><button class="btn sm" data-thumb="${esc(v.id)}">Enviar para o YouTube</button> <span class="muted small">${costOf('thumbnail_upload')}</span></p></details>
           <details><summary class="small">🧪 Teste A/B de capas</summary>
             <label>Capa A</label><input type="file" accept="image/*" data-a="${esc(v.id)}">
@@ -1409,10 +1341,10 @@ const adminTabs = {
         <label>Recarga mensal do plano Free (créditos)</label><input id="c_topup" type="number" value="${esc(s.free_monthly_topup)}">
         <label>Chave da YouTube Data API ${s.yt_api_key.set ? `<span class="pill ok">configurada (${esc(s.yt_api_key.masked)})</span>` : '<span class="pill warn">pendente</span>'}</label>
         <input id="c_yt" placeholder="cole a chave para atualizar (vazio mantém a atual)">
-        <label>Chave da API do Gemini (IA que assiste vídeos e gera capas) ${s.gemini_api_key.set ? `<span class="pill ok">configurada (${esc(s.gemini_api_key.masked)})</span>` : '<span class="pill warn">pendente</span>'}</label>
+        <label>Chave da API do Gemini (IA que assiste vídeos, sugere textos e acha cortes) ${s.gemini_api_key.set ? `<span class="pill ok">configurada (${esc(s.gemini_api_key.masked)})</span>` : '<span class="pill warn">pendente</span>'}</label>
         <input id="c_gem" placeholder="cole aqui a chave do Google AI Studio">
         <p class="small"><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Criar chave grátis no Google AI Studio ↗</a> · <button class="btn sm secondary" type="button" id="c_gemTest">Testar a IA</button> <span id="c_gemOut" class="muted"></span></p>
-        <p class="small muted">Textos e "assistir vídeo" têm uso gratuito (com limites por minuto e por dia). Gerar imagem (capa com IA) não tem uso gratuito: ative o faturamento da chave no AI Studio (cerca de US$ 0,03 por capa).</p>
+        <p class="small muted">Uso gratuito, com limites por minuto e por dia do próprio Google. O site usa a IA só para textos e para achar os cortes (não gera imagens).</p>
         <p class="small muted">Login com Google: ${s.google_login_configured ? '<span class="pill ok">ativo</span>' : '<span class="pill warn">pendente</span> (variáveis GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no servidor; URI de redirecionamento: <span class="copybox" style="display:inline-block">' + esc(s.google_redirect_uri) + '</span>)'}
         <br>Banco de dados: <span class="pill ${s.database === 'postgres' ? 'ok' : 'warn'}">${esc(s.database)}</span>${s.database !== 'postgres' ? ' (sem DATABASE_URL os dados não persistem em hospedagem com disco efêmero)' : ''}</p>
         <p><button id="csave" class="btn sm">Salvar</button></p></div>
