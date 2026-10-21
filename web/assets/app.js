@@ -62,6 +62,7 @@ function renderNav() {
         ${u ? link('#/dashboard', 'Painel') + link('#/ferramentas/palavras', 'Ferramentas') + link('#/canal', '📺 Meu canal') + link('#/historico', 'Histórico') : ''}
         ${link('#/planos', 'Planos')}
         ${link('#/extensao', 'Extensão')}
+        ${link('#/avaliacoes', '⭐ Avaliações')}
         ${link('#/ajuda', 'Ajuda')}
         ${isAdmin ? link('#/admin', '🛠 Admin') : ''}
       </div>
@@ -108,9 +109,18 @@ views.home = async () => {
       ].map(([t, d]) => `<div class="card"><h3>${t}</h3><p class="muted">${d}</p></div>`).join('')}
     </section>
     <p class="center" style="margin-top:18px"><a class="btn ghost" href="#/extensao">🧩 Baixar a extensão para Chrome</a></p>
+    <h2 class="center" style="margin-top:34px">Esse site é:</h2>
+    <section class="card" id="rvhome"><p class="center"><span class="spin"></span></p></section>
+    <p class="center"><a class="btn ghost" href="#/avaliacoes">⭐ Ver e escrever avaliações</a></p>
     <h2 class="center" style="margin-top:34px">Planos</h2>
     <p class="center muted small">Créditos renovam todo mês. As comparações de capacidade são metas internas de referência, não números auditados.</p>
     <section class="grid cols3">${plans.map(planCard).join('')}</section>`;
+  // o resumo das avaliações vem do banco; se ainda não houver nenhuma, a própria função avisa
+  try {
+    const r = await api('/reviews/summary');
+    const alvo = $('#rvhome');
+    if (alvo) alvo.innerHTML = rvResumoHtml(r);
+  } catch { const alvo = $('#rvhome'); if (alvo) alvo.innerHTML = '<p class="muted center">Não foi possível carregar as avaliações agora.</p>'; }
 };
 
 function planCard(p) {
@@ -1201,7 +1211,7 @@ views.ajuda = async () => {
 /* ------------------------------ Admin ------------------------------ */
 const ADMIN_TABS = [
   ['geral', 'Visão geral'], ['usuarios', 'Usuários'], ['planos', 'Planos'], ['custos', 'Custos'],
-  ['pagamentos', 'Pagamentos'], ['config', 'Configurações'], ['admins', 'Administradores'], ['auditoria', 'Auditoria']
+  ['pagamentos', 'Pagamentos'], ['avaliacoes', 'Avaliações'], ['config', 'Configurações'], ['admins', 'Administradores'], ['auditoria', 'Auditoria']
 ];
 
 // Mostra a versão atual no botão de baixar, para dar para comparar com a instalada
@@ -1254,6 +1264,43 @@ views.admin = async (params, sub) => {
 };
 
 const adminTabs = {
+  async avaliacoes(el) {
+    const [den, lista] = await Promise.all([api('/admin/reviews/reports'), api('/reviews?sort=recentes&limit=50')]);
+    const acoes = (tipo, id, ativo) => `<button class="btn sm ${ativo ? 'secondary' : ''}" data-mod="${tipo}" data-id="${id}" data-remover="${ativo ? '1' : '0'}">${ativo ? 'Remover' : 'Restaurar'}</button>`;
+    el.innerHTML = `
+      <div class="card"><h3>Denúncias abertas (${den.itens.length})</h3>
+        ${den.itens.length ? den.itens.map((d) => `<div class="rv-item">
+            <div class="rv-cab"><span class="rv-autor">${esc(d.alvo?.autor || '—')}</span>
+              <span class="muted small">${d.tipo === 'review' ? 'avaliação' : 'resposta'} · denunciada por ${esc(d.denunciante || '—')} · ${dt(d.criado_em)}</span></div>
+            <p>${esc(d.alvo?.texto || '(conteúdo apagado)')}</p>
+            <p class="muted small">Motivo: ${esc(d.motivo || '(não informado)')}</p>
+            <div class="rv-acoes">${acoes(d.tipo, d.alvo_id, true)}</div>
+          </div>`).join('') : '<p class="muted">Nenhuma denúncia aberta.</p>'}
+      </div>
+      <div class="card" style="margin-top:14px"><h3>Todas as avaliações (${lista.total})</h3>
+        <p class="muted small">Média ${String(lista.resumo.media.toFixed(1)).replace('.', ',')} · ${fmt(lista.total)} avaliações. Remover tira da média na hora.</p>
+        ${lista.itens.map((i) => `<div class="rv-item">
+            <div class="rv-cab"><span class="rv-autor">${esc(i.autor)}</span><span class="rv-estrelas">${estrelasTxt(i.estrelas)}</span>
+              <span class="muted small">${dt(i.criado_em)} · 👍 ${fmt(i.gostei)} 👎 ${fmt(i.naoGostei)}</span></div>
+            <p>${esc(i.comentario || '(sem comentário)')}</p>
+            <div class="rv-acoes">${acoes('review', i.id, true)}</div>
+          </div>`).join('') || '<p class="muted">Nenhuma avaliação ainda.</p>'}
+      </div>
+      <div id="amodmsg"></div>`;
+    el.onclick = async (ev) => {
+      const b = ev.target.closest('[data-mod]');
+      if (!b) return;
+      const motivo = prompt(b.dataset.remover === '1' ? 'Motivo da remoção (fica na auditoria):' : 'Motivo da restauração:') ?? null;
+      if (motivo === null) return;
+      b.disabled = true;
+      try {
+        const rota = b.dataset.mod === 'review' ? 'reviews' : 'replies';
+        await api(`/admin/${rota}/${b.dataset.id}/moderate`, { method: 'POST', body: { remover: b.dataset.remover === '1', motivo } });
+        await adminTabs.avaliacoes(el);
+      } catch (e) { showErr($('#amodmsg'), e); b.disabled = false; }
+    };
+  },
+
   async geral(el) {
     const o = await api('/admin/overview');
     const cfgPill = (ok, okTxt, noTxt) => `<span class="pill ${ok ? 'ok' : 'warn'}">${ok ? okTxt : noTxt}</span>`;
@@ -1466,6 +1513,184 @@ const adminTabs = {
       ${r.items.map((a) => `<tr><td class="small">${dt(a.created_at)}</td><td class="small">${esc(a.actor_email)}</td>
         <td>${esc(a.action)}</td><td class="small">${esc(a.target || '')}</td><td class="small muted">${esc(a.detail || '')}</td></tr>`).join('')}</table></div>`;
   }
+};
+
+
+/* ------------------------------ Avaliações do site ------------------------------ */
+const estrelasTxt = (n) => '★'.repeat(Math.max(0, Math.min(5, n))) + '☆'.repeat(5 - Math.max(0, Math.min(5, n)));
+const rv = { ordem: 'recentes', pagina: 1, paginas: 1, itens: [], minha: null, nota: 0 };
+
+function rvResumoHtml(r) {
+  if (!r || !r.total) {
+    return `<div class="rv-vazio"><p class="muted">Este site ainda não recebeu avaliações. Seja o primeiro a avaliar!</p></div>`;
+  }
+  return `<div class="rv-topo">
+      <div class="rv-media">
+        <div class="rv-nota">${String(r.media.toFixed(1)).replace('.', ',')}</div>
+        <div class="rv-estrelas big">${estrelasTxt(Math.round(r.media))}</div>
+        <div class="muted small">${fmt(r.total)} ${r.total === 1 ? 'avaliação' : 'avaliações'}</div>
+      </div>
+      <div class="rv-barras">
+        ${[5, 4, 3, 2, 1].map((e) => `<div class="rv-linha"><span>${e}</span>
+            <span class="rv-trilho"><span class="rv-cheio" style="width:${r.percentuais[e]}%"></span></span>
+            <span class="muted">${fmt(r.distribuicao[e])}</span></div>`).join('')}
+      </div>
+    </div>`;
+}
+
+function rvRespostaHtml(a) {
+  return `<div class="rv-resp ${a.doDesenvolvedor ? 'dev' : ''}">
+      <div class="rv-cab"><span class="rv-autor">${esc(a.autor)}</span>
+        ${a.doDesenvolvedor ? '<span class="rv-selo">Resposta do desenvolvedor</span>' : ''}
+        <span class="muted small">${dt(a.criado_em)}</span></div>
+      <div>${esc(a.texto)}</div>
+      <div class="rv-acoes">
+        <button data-voto="reply" data-id="${a.id}" data-valor="1" class="${a.meuVoto === 1 ? 'on' : ''}">👍 ${fmt(a.gostei)}</button>
+        <button data-voto="reply" data-id="${a.id}" data-valor="-1" class="${a.meuVoto === -1 ? 'on' : ''}">👎 ${fmt(a.naoGostei)}</button>
+        ${a.minha ? `<button data-apagar-resp="${a.id}">apagar</button>` : `<button data-denuncia="reply" data-id="${a.id}">denunciar</button>`}
+      </div>
+    </div>`;
+}
+
+function rvItemHtml(it) {
+  return `<article class="rv-item" data-item="${it.id}">
+      <div class="rv-cab">
+        <span class="rv-autor">${esc(it.autor)}</span>
+        <span class="rv-estrelas">${estrelasTxt(it.estrelas)}</span>
+        <span class="muted small">${dt(it.criado_em)}${it.editado_em ? ' · editado' : ''}${it.minha ? ' · sua avaliação' : ''}</span>
+      </div>
+      ${it.comentario ? `<p>${esc(it.comentario)}</p>` : '<p class="muted small">(sem comentário)</p>'}
+      <div class="rv-acoes">
+        <button data-voto="review" data-id="${it.id}" data-valor="1" class="${it.meuVoto === 1 ? 'on' : ''}">👍 ${fmt(it.gostei)}</button>
+        <button data-voto="review" data-id="${it.id}" data-valor="-1" class="${it.meuVoto === -1 ? 'on' : ''}">👎 ${fmt(it.naoGostei)}</button>
+        <button data-responder="${it.id}">💬 Responder</button>
+        ${it.minha ? '' : `<button data-denuncia="review" data-id="${it.id}">denunciar</button>`}
+      </div>
+      <div class="rv-respostas" ${it.respostas.length ? '' : 'hidden'}>${it.respostas.map(rvRespostaHtml).join('')}</div>
+      <div class="rv-caixa" data-caixa="${it.id}" hidden>
+        <textarea placeholder="Escreva sua resposta" maxlength="1000"></textarea>
+        <p><button class="btn sm" data-enviar-resp="${it.id}">Enviar resposta</button></p>
+      </div>
+    </article>`;
+}
+
+function rvFormHtml() {
+  const u = state.user;
+  if (!u) return `<p class="muted">Entre com o Google para avaliar o site. Avaliar não gasta créditos.</p><p><a class="btn sm" href="#/login">Entrar com Google</a></p>`;
+  const nota = rv.nota || rv.minha?.estrelas || 0;
+  return `<div class="rv-pick" id="rvpick">${[1, 2, 3, 4, 5].map((e) =>
+      `<button type="button" data-nota="${e}" class="${e <= nota ? 'on' : ''}" title="${e} estrela${e === 1 ? '' : 's'}">★</button>`).join('')}</div>
+    <textarea id="rvtxt" maxlength="1000" placeholder="Conte como o site te ajudou (opcional)">${esc(rv.minha?.comentario || '')}</textarea>
+    <p class="small muted" id="rvcount"></p>
+    <p><button class="btn sm" id="rvsave">${rv.minha ? 'Atualizar minha avaliação' : 'Enviar avaliação'}</button>
+      ${rv.minha ? '<button class="btn sm secondary" id="rvdel">Apagar</button>' : ''}</p>
+    <div id="rvmsg"></div>`;
+}
+
+async function rvCarregar(reset = true) {
+  if (reset) { rv.pagina = 1; rv.itens = []; }
+  const d = await api(`/reviews?sort=${rv.ordem}&page=${rv.pagina}&limit=10`);
+  rv.paginas = d.paginas;
+  rv.itens = reset ? d.itens : rv.itens.concat(d.itens);
+  const resumoEl = $('#rvresumo'), listaEl = $('#rvlista'), maisEl = $('#rvmais');
+  if (resumoEl) resumoEl.innerHTML = rvResumoHtml(d.resumo);
+  if (listaEl) listaEl.innerHTML = rv.itens.map(rvItemHtml).join('') || '<p class="muted">Nenhum comentário ainda.</p>';
+  if (maisEl) maisEl.innerHTML = rv.pagina < rv.paginas ? '<button class="btn sm secondary" id="rvmaisbtn">Carregar mais comentários</button>' : '';
+}
+
+views.avaliacoes = async () => {
+  if (state.user) {
+    try { rv.minha = (await api('/reviews/mine')).avaliacao; } catch { rv.minha = null; }
+    rv.nota = rv.minha?.estrelas || 0;
+  } else { rv.minha = null; rv.nota = 0; }
+  appEl().innerHTML = `
+    <h1>Avaliações e comentários sobre o site</h1>
+    <div class="card"><h3>Esse site é:</h3><div id="rvresumo"><p class="center"><span class="spin"></span></p></div></div>
+    <div class="card" style="margin-top:14px"><h3>${rv.minha ? 'Sua avaliação' : 'Avaliar o site'}</h3>${rvFormHtml()}</div>
+    <div class="card" style="margin-top:14px">
+      <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0">Comentários</h3>
+        <div><label class="small muted" for="rvordem">Ordenar: </label>
+          <select id="rvordem" style="width:auto;min-width:170px;display:inline-block"><option value="recentes">Mais recentes</option><option value="melhores">Melhor avaliação</option></select></div>
+      </div>
+      <div id="rvlista"><p class="center"><span class="spin"></span></p></div>
+      <p id="rvmais" class="center"></p>
+    </div>`;
+  $('#rvordem').value = rv.ordem;
+  $('#rvordem').onchange = async (ev) => { rv.ordem = ev.target.value; await rvCarregar(true); };
+  await rvCarregar(true);
+
+  const msg = () => $('#rvmsg');
+  const pick = $('#rvpick');
+  if (pick) pick.onclick = (ev) => {
+    const b = ev.target.closest('[data-nota]');
+    if (!b) return;
+    rv.nota = +b.dataset.nota;
+    [...pick.children].forEach((x) => x.classList.toggle('on', +x.dataset.nota <= rv.nota));
+  };
+  const salvar = $('#rvsave');
+  if (salvar) salvar.onclick = async () => {
+    if (!rv.nota) { msg().innerHTML = alertBox('warn', 'Escolha de 1 a 5 estrelas.'); return; }
+    salvar.disabled = true;
+    try {
+      const r = await api('/reviews', { method: 'POST', body: { estrelas: rv.nota, comentario: $('#rvtxt').value } });
+      rv.minha = r.avaliacao;
+      msg().innerHTML = alertBox('ok', `Avaliação salva: <b>${estrelasTxt(r.avaliacao.estrelas)}</b>${r.avaliacao.comentario ? ' — ' + esc(r.avaliacao.comentario) : ''}`);
+      await rvCarregar(true);
+    } catch (e) { showErr(msg(), e); }
+    salvar.disabled = false;
+  };
+  const apagar = $('#rvdel');
+  if (apagar) apagar.onclick = async () => {
+    apagar.disabled = true;
+    try {
+      await api('/reviews/mine', { method: 'DELETE' });
+      rv.minha = null; rv.nota = 0;
+      await views.avaliacoes();
+    } catch (e) { showErr(msg(), e); apagar.disabled = false; }
+  };
+
+  // um só tratador para votos, respostas e denúncias da lista
+  $('#rvlista').onclick = async (ev) => {
+    const alvo = ev.target.closest('button');
+    if (!alvo) return;
+    const precisaConta = () => { if (!state.user) { alert('Entre com o Google para participar dos comentários.'); return true; } return false; };
+    try {
+      if (alvo.dataset.voto) {
+        if (precisaConta()) return;
+        const rota = alvo.dataset.voto === 'review' ? 'reviews' : 'replies';
+        const atual = alvo.classList.contains('on') ? 0 : +alvo.dataset.valor;
+        await api(`/${rota}/${alvo.dataset.id}/vote`, { method: 'POST', body: { valor: atual } });
+        await rvCarregar(true);
+      } else if (alvo.dataset.responder) {
+        if (precisaConta()) return;
+        const caixa = $(`[data-caixa="${alvo.dataset.responder}"]`);
+        caixa.hidden = !caixa.hidden;
+        if (!caixa.hidden) caixa.querySelector('textarea').focus();
+      } else if (alvo.dataset.enviarResp) {
+        const caixa = $(`[data-caixa="${alvo.dataset.enviarResp}"]`);
+        const texto = caixa.querySelector('textarea').value.trim();
+        if (!texto) return;
+        await api(`/reviews/${alvo.dataset.enviarResp}/replies`, { method: 'POST', body: { texto } });
+        await rvCarregar(true);
+      } else if (alvo.dataset.apagarResp) {
+        await api(`/replies/${alvo.dataset.apagarResp}`, { method: 'DELETE' });
+        await rvCarregar(true);
+      } else if (alvo.dataset.denuncia) {
+        if (precisaConta()) return;
+        const motivo = prompt('O que há de errado neste conteúdo? (opcional)') ?? null;
+        if (motivo === null) return;
+        const rota = alvo.dataset.denuncia === 'review' ? 'reviews' : 'replies';
+        const r = await api(`/${rota}/${alvo.dataset.id}/report`, { method: 'POST', body: { motivo } });
+        alert(r.repetida ? 'Você já tinha denunciado este conteúdo.' : 'Denúncia enviada para os administradores. Obrigado.');
+      }
+    } catch (e) { alert(e.message); }
+  };
+  $('#rvmais').onclick = async (ev) => {
+    if (!ev.target.closest('#rvmaisbtn')) return;
+    rv.pagina += 1;
+    await rvCarregar(false);
+  };
 };
 
 /* ------------------------------ Router ------------------------------ */

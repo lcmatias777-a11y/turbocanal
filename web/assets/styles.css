@@ -137,3 +137,35 @@ tr:hover td { background: #ffffff06; }
 .chip button:hover { color: var(--err); background: rgba(255, 107, 122, .12); }
 label.opt { display: flex; gap: 8px; align-items: flex-start; color: var(--text); margin: 6px 0; font-size: 14px; }
 label.opt input { width: auto; margin-top: 3px; }
+
+/* ---------- Avaliações e comentários sobre o site ---------- */
+.rv-topo { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 22px; align-items: center; }
+.rv-media { text-align: center; }
+.rv-nota { font-size: 3.4rem; font-weight: 800; line-height: 1; }
+.rv-estrelas { color: var(--accent2); letter-spacing: 2px; white-space: nowrap; }
+.rv-estrelas.big { font-size: 1.3rem; }
+.rv-barras { display: grid; gap: 6px; }
+.rv-linha { display: grid; grid-template-columns: 14px 1fr auto; gap: 10px; align-items: center; font-size: .86rem; }
+.rv-trilho { background: var(--card2); border-radius: 999px; height: 10px; overflow: hidden; }
+.rv-cheio { background: var(--accent2); height: 100%; border-radius: 999px; }
+.rv-vazio { text-align: center; padding: 18px 0; }
+.rv-pick { display: flex; gap: 4px; }
+.rv-pick button { background: none; border: none; font-size: 1.9rem; line-height: 1; color: var(--line); cursor: pointer; padding: 0 2px; font-family: inherit; }
+.rv-pick button.on, .rv-pick button:hover { color: var(--accent2); }
+.rv-item { border-top: 1px solid var(--line); padding: 14px 0; }
+.rv-item:first-child { border-top: none; }
+.rv-cab { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.rv-autor { font-weight: 700; }
+.rv-acoes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.rv-acoes button { background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 999px;
+  padding: 3px 11px; font-size: .82rem; cursor: pointer; font-family: inherit; }
+.rv-acoes button:hover { border-color: var(--accent2); }
+.rv-acoes button.on { border-color: var(--accent2); color: var(--accent2); font-weight: 700; }
+.rv-respostas { margin: 10px 0 0 16px; border-left: 2px solid var(--line); padding-left: 12px; display: grid; gap: 10px; }
+.rv-resp.dev { background: var(--card2); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; margin-left: -12px; }
+.rv-selo { background: var(--accent); color: #fff; border-radius: 999px; padding: 1px 9px; font-size: .74rem; font-weight: 700; }
+.rv-caixa textarea { width: 100%; min-height: 70px; }
+@media (max-width: 620px) {
+  .rv-topo { grid-template-columns: 1fr; gap: 12px; }
+  .rv-respostas { margin-left: 4px; }
+}

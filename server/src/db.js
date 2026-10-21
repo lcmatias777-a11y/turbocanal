@@ -116,6 +116,51 @@ CREATE TABLE IF NOT EXISTS competitors (
   created_at TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_comp_user_ch ON competitors(user_id, channel_id);
+-- Avaliações do site (uma ativa por conta), com respostas, votos e denúncias
+CREATE TABLE IF NOT EXISTS reviews (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  stars INTEGER NOT NULL,
+  comment TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  moderated_by TEXT,
+  moderated_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_review_user ON reviews(user_id);
+CREATE INDEX IF NOT EXISTS idx_review_status ON reviews(status, created_at);
+CREATE TABLE IF NOT EXISTS review_replies (
+  id TEXT PRIMARY KEY,
+  review_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_dev INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  moderated_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reply_review ON review_replies(review_id, created_at);
+CREATE TABLE IF NOT EXISTS review_votes (
+  id TEXT PRIMARY KEY,
+  target_type TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  value INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vote_unico ON review_votes(target_type, target_id, user_id);
+CREATE TABLE IF NOT EXISTS review_reports (
+  id TEXT PRIMARY KEY,
+  target_type TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_unico ON review_reports(target_type, target_id, user_id);
 `;
 
 const PLAN_SEED = [

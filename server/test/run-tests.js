@@ -430,6 +430,108 @@ const segundoPag = await activatePayment(db, { id: 'pay_teste_1' }, null, 'teste
 const semDobra = await db.get('SELECT credits FROM users WHERE id=?', [maria.id]);
 check('confirmar o mesmo pagamento duas vezes não dá crédito em dobro', semDobra.credits === pagoDepoisDoMes.credits, String(semDobra.credits));
 
+
+// ---------- Avaliações e comentários sobre o site ----------
+console.log('\n— Avaliações do site —');
+const uAna = await req('/api/auth/register', { method: 'POST', body: { email: 'ana@example.com', password: 'senha12345', name: 'Ana Souza' } });
+const tAna = uAna.data.token;
+
+const vazio = await req('/api/reviews');
+check('sem nenhuma avaliação: total 0, média 0 e lista vazia (nada inventado)',
+  vazio.status === 200 && vazio.data.total === 0 && vazio.data.resumo.media === 0 && vazio.data.itens.length === 0, JSON.stringify(vazio.data).slice(0, 160));
+
+const semLogin = await req('/api/reviews', { method: 'POST', body: { estrelas: 5 } });
+check('avaliar exige login', semLogin.status === 401);
+
+const saldoAntesAv = (await req('/api/me', { token: t1 })).data.user.credits;
+const av1 = await req('/api/reviews', { method: 'POST', token: t1, body: { estrelas: 5, comentario: 'Mudou meu canal de patamar.' } });
+check('criar avaliação de 5 estrelas com comentário', av1.status === 200 && av1.data.novo === true && av1.data.resumo.media === 5 && av1.data.resumo.total === 1, JSON.stringify(av1.data).slice(0, 160));
+check('avaliar NÃO cobra créditos', (await req('/api/me', { token: t1 })).data.user.credits === saldoAntesAv);
+
+const av1b = await req('/api/reviews', { method: 'POST', token: t1, body: { estrelas: 4, comentario: 'Editei: muito bom, mas ainda falta app.' } });
+const depoisEdit = await req('/api/reviews');
+check('a mesma conta edita a sua avaliação em vez de criar outra',
+  av1b.status === 200 && av1b.data.novo === false && depoisEdit.data.total === 1 && depoisEdit.data.resumo.media === 4 && depoisEdit.data.itens[0].comentario.startsWith('Editei'), JSON.stringify(depoisEdit.data.resumo));
+
+const av2 = await req('/api/reviews', { method: 'POST', token: tAna, body: { estrelas: 2, comentario: 'Travou na hora de postar.' } });
+const comDuas = await req('/api/reviews');
+check('média e distribuição saem da soma real (4 e 2 = 3,0)',
+  av2.status === 200 && comDuas.data.resumo.media === 3 && comDuas.data.resumo.total === 2 && comDuas.data.resumo.distribuicao['4'] === 1 && comDuas.data.resumo.distribuicao['2'] === 1, JSON.stringify(comDuas.data.resumo));
+check('as barras de distribuição vêm em porcentagem (50% cada)', comDuas.data.resumo.percentuais['4'] === 50 && comDuas.data.resumo.percentuais['2'] === 50, JSON.stringify(comDuas.data.resumo.percentuais));
+
+for (const [nota, nome] of [[0, 'zero'], [6, 'seis'], [3.5, 'quebrada'], ['cinco', 'texto']]) {
+  const r = await req('/api/reviews', { method: 'POST', token: tAna, body: { estrelas: nota } });
+  check(`nota ${nome} é recusada pelo servidor`, r.status === 400, String(r.status));
+}
+const longo = await req('/api/reviews', { method: 'POST', token: tAna, body: { estrelas: 3, comentario: 'x'.repeat(1001) } });
+check('comentário acima de 1.000 caracteres é recusado', longo.status === 400);
+
+const melhores = await req('/api/reviews?sort=melhores');
+const recentes = await req('/api/reviews?sort=recentes');
+check('dá para ordenar por melhor avaliação e por mais recentes',
+  melhores.data.itens[0].estrelas === 4 && recentes.data.itens[0].estrelas === 2, `${melhores.data.itens[0].estrelas} / ${recentes.data.itens[0].estrelas}`);
+
+const pag = await req('/api/reviews?limit=1&page=2');
+check('paginação funciona (1 por página, 2 páginas)', pag.data.paginas === 2 && pag.data.itens.length === 1 && pag.data.pagina === 2, JSON.stringify({ p: pag.data.paginas, n: pag.data.itens.length }));
+
+// respostas: a do desenvolvedor fica em primeiro lugar
+const idAvMaria = melhores.data.itens[0].id;
+const respUser = await req(`/api/reviews/${idAvMaria}/replies`, { method: 'POST', token: tAna, body: { texto: 'Também senti isso!' } });
+const respDev = await req(`/api/reviews/${idAvMaria}/replies`, { method: 'POST', token: tOwn, body: { texto: 'Obrigado! O app está no nosso plano.' } });
+const comResp = await req('/api/reviews?sort=melhores');
+const respostas = comResp.data.itens[0].respostas;
+check('dá para responder a uma avaliação', respUser.status === 200 && respDev.status === 200 && respostas.length === 2);
+check('a resposta do desenvolvedor vem em primeiro lugar e marcada',
+  respostas[0].doDesenvolvedor === true && respostas[0].texto.startsWith('Obrigado') && respostas[1].doDesenvolvedor === false, JSON.stringify(respostas.map((r) => [r.autor, r.doDesenvolvedor])));
+
+// gostei / não gostei
+const votoProprio = await req(`/api/reviews/${idAvMaria}/vote`, { method: 'POST', token: t1, body: { valor: 1 } });
+check('ninguém vota na própria avaliação', votoProprio.status === 400);
+const v1 = await req(`/api/reviews/${idAvMaria}/vote`, { method: 'POST', token: tAna, body: { valor: 1 } });
+check('gostei conta 1', v1.status === 200 && v1.data.gostei === 1 && v1.data.naoGostei === 0, JSON.stringify(v1.data));
+const v2 = await req(`/api/reviews/${idAvMaria}/vote`, { method: 'POST', token: tAna, body: { valor: -1 } });
+check('trocar para não gostei move o voto (não soma os dois)', v2.data.gostei === 0 && v2.data.naoGostei === 1, JSON.stringify(v2.data));
+const v3 = await req(`/api/reviews/${idAvMaria}/vote`, { method: 'POST', token: tAna, body: { valor: 0 } });
+check('votar 0 desfaz o voto', v3.data.gostei === 0 && v3.data.naoGostei === 0, JSON.stringify(v3.data));
+const idRespDev = respostas[0].id;
+const vr = await req(`/api/replies/${idRespDev}/vote`, { method: 'POST', token: tAna, body: { valor: 1 } });
+check('também dá para votar em uma resposta', vr.status === 200 && vr.data.gostei === 1, JSON.stringify(vr.data));
+const comVoto = await req('/api/reviews?sort=melhores', { token: tAna });
+check('o site mostra o voto de quem está logado (para marcar o botão)', comVoto.data.itens[0].respostas[0].meuVoto === 1, JSON.stringify(comVoto.data.itens[0].respostas[0]));
+
+// denúncia e moderação
+const den1 = await req(`/api/reviews/${recentes.data.itens[0].id}/report`, { method: 'POST', token: t1, body: { motivo: 'Comentário ofensivo' } });
+const den2 = await req(`/api/reviews/${recentes.data.itens[0].id}/report`, { method: 'POST', token: t1, body: { motivo: 'de novo' } });
+check('denunciar funciona e não duplica para a mesma pessoa', den1.status === 200 && den2.data.repetida === true);
+const listaDen = await req('/api/admin/reviews/reports', { token: tOwn });
+check('o administrador vê a denúncia com o conteúdo denunciado', listaDen.status === 200 && listaDen.data.itens.length === 1 && listaDen.data.itens[0].alvo.texto.includes('Travou'), JSON.stringify(listaDen.data.itens[0] || {}).slice(0, 160));
+const denComum = await req('/api/admin/reviews/reports', { token: t1 });
+check('usuário comum não vê as denúncias', denComum.status === 403);
+
+const idAvAna = recentes.data.itens[0].id;
+const mod = await req(`/api/admin/reviews/${idAvAna}/moderate`, { method: 'POST', token: tOwn, body: { remover: true, motivo: 'linguagem imprópria' } });
+const depoisMod = await req('/api/reviews');
+check('avaliação removida pela moderação sai da lista e da média',
+  mod.status === 200 && depoisMod.data.total === 1 && depoisMod.data.resumo.media === 4, JSON.stringify(depoisMod.data.resumo));
+const reenvio = await req('/api/reviews', { method: 'POST', token: tAna, body: { estrelas: 5, comentario: 'tentando de novo' } });
+check('quem teve a avaliação removida não reenvia por cima', reenvio.status === 403, String(reenvio.status));
+const restaura = await req(`/api/admin/reviews/${idAvAna}/moderate`, { method: 'POST', token: tOwn, body: { remover: false, motivo: 'revisado' } });
+check('o administrador pode restaurar', restaura.status === 200 && (await req('/api/reviews')).data.total === 2);
+
+// ninguém mexe no que é de outro
+const apagarAlheia = await req(`/api/replies/${respostas[1].id}`, { method: 'DELETE', token: t1 });
+check('ninguém apaga a resposta de outra pessoa', apagarAlheia.status === 403, String(apagarAlheia.status));
+const apagarMinha = await req(`/api/replies/${respostas[1].id}`, { method: 'DELETE', token: tAna });
+check('cada um apaga a própria resposta', apagarMinha.status === 200);
+
+const minha = await req('/api/reviews/mine', { token: t1 });
+check('a conta consegue ver a própria avaliação para editar', minha.status === 200 && minha.data.avaliacao.estrelas === 4);
+const apagar = await req('/api/reviews/mine', { method: 'DELETE', token: t1 });
+const depoisApagar = await req('/api/reviews');
+check('apagar a própria avaliação recalcula a média na hora',
+  apagar.status === 200 && depoisApagar.data.total === 1 && depoisApagar.data.resumo.media === 2, JSON.stringify(depoisApagar.data.resumo));
+check('o site não expõe e-mail de ninguém nos comentários', !JSON.stringify(depoisApagar.data).includes('@example.com'), JSON.stringify(depoisApagar.data).slice(0, 200));
+
 fake.close(); gem.close();
 
 console.log(`\nRESULTADO: ${pass} passaram, ${fail} falharam.`);

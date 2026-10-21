@@ -95,8 +95,23 @@ export function makeAuth(db) {
     next();
   };
 
+  /** Deixa passar sem login, mas preenche req.user quando houver sessão válida.
+   *  Serve para páginas públicas que mostram algo a mais para quem está logado. */
+  const optional = async (req, res, next) => {
+    try {
+      const tk = readToken(req);
+      if (tk) {
+        const payload = jwt.verify(tk, await secret(db));
+        const user = await getUser(db, payload.uid);
+        if (user) req.user = user;
+      }
+    } catch {}
+    next();
+  };
+
   return {
     required,
+    optional,
     admin: [required, requireRole('owner', 'admin')],
     owner: [required, requireRole('owner')]
   };
