@@ -169,3 +169,5 @@ label.opt input { width: auto; margin-top: 3px; }
   .rv-topo { grid-template-columns: 1fr; gap: 12px; }
   .rv-respostas { margin-left: 4px; }
 }
+.rv-resp.equipe { background: var(--card2); border: 1px solid var(--accent2); border-radius: 10px; padding: 10px 12px; margin-left: -12px; }
+.rv-selo.equipe { background: var(--accent2); color: #1a1205; }

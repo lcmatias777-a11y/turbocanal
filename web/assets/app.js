@@ -1277,13 +1277,13 @@ const adminTabs = {
             <div class="rv-acoes">${acoes(d.tipo, d.alvo_id, true)}</div>
           </div>`).join('') : '<p class="muted">Nenhuma denúncia aberta.</p>'}
       </div>
-      <div class="card" style="margin-top:14px"><h3>Todas as avaliações (${lista.total})</h3>
+      <div class="card" style="margin-top:14px"><h3>Tudo o que está publicado (${lista.total})</h3>
         <p class="muted small">Média ${String(lista.resumo.media.toFixed(1)).replace('.', ',')} · ${fmt(lista.total)} avaliações. Remover tira da média na hora.</p>
         ${lista.itens.map((i) => `<div class="rv-item">
-            <div class="rv-cab"><span class="rv-autor">${esc(i.autor)}</span><span class="rv-estrelas">${estrelasTxt(i.estrelas)}</span>
+            <div class="rv-cab"><span class="rv-autor">${esc(i.autor)}</span>${i.tipo === 'avaliacao' ? `<span class="rv-estrelas">${estrelasTxt(i.estrelas)}</span>` : '<span class="pill">comentário</span>'}
               <span class="muted small">${dt(i.criado_em)} · 👍 ${fmt(i.gostei)} 👎 ${fmt(i.naoGostei)}</span></div>
             <p>${esc(i.comentario || '(sem comentário)')}</p>
-            <div class="rv-acoes">${acoes('review', i.id, true)}</div>
+            <div class="rv-acoes">${acoes(i.tipo, i.id, true)}</div>
           </div>`).join('') || '<p class="muted">Nenhuma avaliação ainda.</p>'}
       </div>
       <div id="amodmsg"></div>`;
@@ -1294,8 +1294,7 @@ const adminTabs = {
       if (motivo === null) return;
       b.disabled = true;
       try {
-        const rota = b.dataset.mod === 'review' ? 'reviews' : 'replies';
-        await api(`/admin/${rota}/${b.dataset.id}/moderate`, { method: 'POST', body: { remover: b.dataset.remover === '1', motivo } });
+        await api('/admin/moderate', { method: 'POST', body: { alvo_tipo: b.dataset.mod, alvo_id: b.dataset.id, remover: b.dataset.remover === '1', motivo } });
         await adminTabs.avaliacoes(el);
       } catch (e) { showErr($('#amodmsg'), e); b.disabled = false; }
     };
@@ -1528,7 +1527,7 @@ function rvResumoHtml(r) {
       <div class="rv-media">
         <div class="rv-nota">${String(r.media.toFixed(1)).replace('.', ',')}</div>
         <div class="rv-estrelas big">${estrelasTxt(Math.round(r.media))}</div>
-        <div class="muted small">${fmt(r.total)} ${r.total === 1 ? 'avaliação' : 'avaliações'}</div>
+        <div class="muted small">${fmt(r.total)} ${r.total === 1 ? 'avaliação' : 'avaliações'}${r.comentarios ? ` · ${fmt(r.comentarios)} ${r.comentarios === 1 ? 'comentário' : 'comentários'}` : ''}</div>
       </div>
       <div class="rv-barras">
         ${[5, 4, 3, 2, 1].map((e) => `<div class="rv-linha"><span>${e}</span>
@@ -1538,53 +1537,64 @@ function rvResumoHtml(r) {
     </div>`;
 }
 
+const rvSelo = (a) => (a.doDesenvolvedor ? '<span class="rv-selo">Resposta do desenvolvedor</span>'
+  : a.daEquipe ? '<span class="rv-selo equipe">Resposta da equipe</span>' : '');
+
 function rvRespostaHtml(a) {
-  return `<div class="rv-resp ${a.doDesenvolvedor ? 'dev' : ''}">
-      <div class="rv-cab"><span class="rv-autor">${esc(a.autor)}</span>
-        ${a.doDesenvolvedor ? '<span class="rv-selo">Resposta do desenvolvedor</span>' : ''}
+  return `<div class="rv-resp ${a.doDesenvolvedor ? 'dev' : a.daEquipe ? 'equipe' : ''}">
+      <div class="rv-cab"><span class="rv-autor">${esc(a.autor)}</span>${rvSelo(a)}
         <span class="muted small">${dt(a.criado_em)}</span></div>
       <div>${esc(a.texto)}</div>
       <div class="rv-acoes">
-        <button data-voto="reply" data-id="${a.id}" data-valor="1" class="${a.meuVoto === 1 ? 'on' : ''}">👍 ${fmt(a.gostei)}</button>
-        <button data-voto="reply" data-id="${a.id}" data-valor="-1" class="${a.meuVoto === -1 ? 'on' : ''}">👎 ${fmt(a.naoGostei)}</button>
-        ${a.minha ? `<button data-apagar-resp="${a.id}">apagar</button>` : `<button data-denuncia="reply" data-id="${a.id}">denunciar</button>`}
+        <button data-voto="resposta" data-id="${a.id}" data-valor="1" class="${a.meuVoto === 1 ? 'on' : ''}">👍 ${fmt(a.gostei)}</button>
+        <button data-voto="resposta" data-id="${a.id}" data-valor="-1" class="${a.meuVoto === -1 ? 'on' : ''}">👎 ${fmt(a.naoGostei)}</button>
+        ${a.minha ? `<button data-apagar-resp="${a.id}">apagar</button>` : `<button data-denuncia="resposta" data-id="${a.id}">denunciar</button>`}
       </div>
     </div>`;
 }
 
 function rvItemHtml(it) {
-  return `<article class="rv-item" data-item="${it.id}">
+  const ehAvaliacao = it.tipo === 'avaliacao';
+  return `<article class="rv-item" data-item="${it.id}" data-tipo="${it.tipo}">
       <div class="rv-cab">
         <span class="rv-autor">${esc(it.autor)}</span>
-        <span class="rv-estrelas">${estrelasTxt(it.estrelas)}</span>
-        <span class="muted small">${dt(it.criado_em)}${it.editado_em ? ' · editado' : ''}${it.minha ? ' · sua avaliação' : ''}</span>
+        ${ehAvaliacao ? `<span class="rv-estrelas">${estrelasTxt(it.estrelas)}</span>` : '<span class="pill">comentário</span>'}
+        <span class="muted small">${dt(it.criado_em)}${it.editado_em ? ' · editado' : ''}${it.minha ? ' · seu' : ''}</span>
       </div>
       ${it.comentario ? `<p>${esc(it.comentario)}</p>` : '<p class="muted small">(sem comentário)</p>'}
       <div class="rv-acoes">
-        <button data-voto="review" data-id="${it.id}" data-valor="1" class="${it.meuVoto === 1 ? 'on' : ''}">👍 ${fmt(it.gostei)}</button>
-        <button data-voto="review" data-id="${it.id}" data-valor="-1" class="${it.meuVoto === -1 ? 'on' : ''}">👎 ${fmt(it.naoGostei)}</button>
-        <button data-responder="${it.id}">💬 Responder</button>
-        ${it.minha ? '' : `<button data-denuncia="review" data-id="${it.id}">denunciar</button>`}
+        <button data-voto="${it.tipo}" data-id="${it.id}" data-valor="1" class="${it.meuVoto === 1 ? 'on' : ''}">👍 ${fmt(it.gostei)}</button>
+        <button data-voto="${it.tipo}" data-id="${it.id}" data-valor="-1" class="${it.meuVoto === -1 ? 'on' : ''}">👎 ${fmt(it.naoGostei)}</button>
+        <button data-responder="${it.id}" data-tipo="${it.tipo}">💬 Responder</button>
+        ${it.minha
+          ? (ehAvaliacao ? '' : `<button data-apagar-coment="${it.id}">apagar</button>`)
+          : `<button data-denuncia="${it.tipo}" data-id="${it.id}">denunciar</button>`}
       </div>
       <div class="rv-respostas" ${it.respostas.length ? '' : 'hidden'}>${it.respostas.map(rvRespostaHtml).join('')}</div>
       <div class="rv-caixa" data-caixa="${it.id}" hidden>
         <textarea placeholder="Escreva sua resposta" maxlength="1000"></textarea>
-        <p><button class="btn sm" data-enviar-resp="${it.id}">Enviar resposta</button></p>
+        <p><button class="btn sm" data-enviar-resp="${it.id}" data-tipo="${it.tipo}">Enviar resposta</button></p>
       </div>
     </article>`;
 }
 
 function rvFormHtml() {
-  const u = state.user;
-  if (!u) return `<p class="muted">Entre com o Google para avaliar o site. Avaliar não gasta créditos.</p><p><a class="btn sm" href="#/login">Entrar com Google</a></p>`;
+  if (!state.user) return `<p class="muted">Entre com o Google para avaliar ou comentar. Nada disso gasta créditos.</p><p><a class="btn sm" href="#/login">Entrar com Google</a></p>`;
   const nota = rv.nota || rv.minha?.estrelas || 0;
   return `<div class="rv-pick" id="rvpick">${[1, 2, 3, 4, 5].map((e) =>
       `<button type="button" data-nota="${e}" class="${e <= nota ? 'on' : ''}" title="${e} estrela${e === 1 ? '' : 's'}">★</button>`).join('')}</div>
-    <textarea id="rvtxt" maxlength="1000" placeholder="Conte como o site te ajudou (opcional)">${esc(rv.minha?.comentario || '')}</textarea>
-    <p class="small muted" id="rvcount"></p>
+    <p class="small muted">Clique nas estrelas e, se quiser, escreva junto. Você tem uma avaliação, que pode editar quando quiser.</p>
+    <textarea id="rvtxt" maxlength="1000" placeholder="O que você achou do site? (opcional)">${esc(rv.minha?.comentario || '')}</textarea>
     <p><button class="btn sm" id="rvsave">${rv.minha ? 'Atualizar minha avaliação' : 'Enviar avaliação'}</button>
       ${rv.minha ? '<button class="btn sm secondary" id="rvdel">Apagar</button>' : ''}</p>
     <div id="rvmsg"></div>`;
+}
+
+function rvComentarioFormHtml() {
+  if (!state.user) return '';
+  return `<p class="small muted">Sem nota, só o que você quer dizer. Pode escrever quantos quiser.</p>
+    <textarea id="rvctxt" maxlength="1000" placeholder="Escreva um comentário sobre o site"></textarea>
+    <p><button class="btn sm" id="rvcsave">Comentar</button></p><div id="rvcmsg"></div>`;
 }
 
 async function rvCarregar(reset = true) {
@@ -1595,7 +1605,7 @@ async function rvCarregar(reset = true) {
   const resumoEl = $('#rvresumo'), listaEl = $('#rvlista'), maisEl = $('#rvmais');
   if (resumoEl) resumoEl.innerHTML = rvResumoHtml(d.resumo);
   if (listaEl) listaEl.innerHTML = rv.itens.map(rvItemHtml).join('') || '<p class="muted">Nenhum comentário ainda.</p>';
-  if (maisEl) maisEl.innerHTML = rv.pagina < rv.paginas ? '<button class="btn sm secondary" id="rvmaisbtn">Carregar mais comentários</button>' : '';
+  if (maisEl) maisEl.innerHTML = rv.pagina < rv.paginas ? '<button class="btn sm secondary" id="rvmaisbtn">Carregar mais</button>' : '';
 }
 
 views.avaliacoes = async () => {
@@ -1606,10 +1616,13 @@ views.avaliacoes = async () => {
   appEl().innerHTML = `
     <h1>Avaliações e comentários sobre o site</h1>
     <div class="card"><h3>Esse site é:</h3><div id="rvresumo"><p class="center"><span class="spin"></span></p></div></div>
-    <div class="card" style="margin-top:14px"><h3>${rv.minha ? 'Sua avaliação' : 'Avaliar o site'}</h3>${rvFormHtml()}</div>
+    <div class="grid cols2" style="margin-top:14px">
+      <div class="card"><h3>${rv.minha ? '⭐ Sua avaliação' : '⭐ Avaliar o site'}</h3>${rvFormHtml()}</div>
+      ${state.user ? `<div class="card"><h3>💬 Escrever um comentário</h3>${rvComentarioFormHtml()}</div>` : ''}
+    </div>
     <div class="card" style="margin-top:14px">
       <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-        <h3 style="margin:0">Comentários</h3>
+        <h3 style="margin:0">Avaliações e comentários</h3>
         <div><label class="small muted" for="rvordem">Ordenar: </label>
           <select id="rvordem" style="width:auto;min-width:170px;display:inline-block"><option value="recentes">Mais recentes</option><option value="melhores">Melhor avaliação</option></select></div>
       </div>
@@ -1620,7 +1633,6 @@ views.avaliacoes = async () => {
   $('#rvordem').onchange = async (ev) => { rv.ordem = ev.target.value; await rvCarregar(true); };
   await rvCarregar(true);
 
-  const msg = () => $('#rvmsg');
   const pick = $('#rvpick');
   if (pick) pick.onclick = (ev) => {
     const b = ev.target.closest('[data-nota]');
@@ -1630,40 +1642,48 @@ views.avaliacoes = async () => {
   };
   const salvar = $('#rvsave');
   if (salvar) salvar.onclick = async () => {
-    if (!rv.nota) { msg().innerHTML = alertBox('warn', 'Escolha de 1 a 5 estrelas.'); return; }
+    if (!rv.nota) { $('#rvmsg').innerHTML = alertBox('warn', 'Clique numa estrela para dar a nota. Se não quiser dar nota, use "Escrever um comentário" ao lado.'); return; }
     salvar.disabled = true;
     try {
       const r = await api('/reviews', { method: 'POST', body: { estrelas: rv.nota, comentario: $('#rvtxt').value } });
       rv.minha = r.avaliacao;
-      msg().innerHTML = alertBox('ok', `Avaliação salva: <b>${estrelasTxt(r.avaliacao.estrelas)}</b>${r.avaliacao.comentario ? ' — ' + esc(r.avaliacao.comentario) : ''}`);
+      $('#rvmsg').innerHTML = alertBox('ok', `Avaliação salva: <b>${estrelasTxt(r.avaliacao.estrelas)}</b>${r.avaliacao.comentario ? ' — ' + esc(r.avaliacao.comentario) : ''}`);
       await rvCarregar(true);
-    } catch (e) { showErr(msg(), e); }
+    } catch (e) { showErr($('#rvmsg'), e); }
     salvar.disabled = false;
+  };
+  const comentar = $('#rvcsave');
+  if (comentar) comentar.onclick = async () => {
+    const texto = $('#rvctxt').value.trim();
+    if (!texto) { $('#rvcmsg').innerHTML = alertBox('warn', 'Escreva alguma coisa antes de enviar.'); return; }
+    comentar.disabled = true;
+    try {
+      await api('/comments', { method: 'POST', body: { texto } });
+      $('#rvctxt').value = '';
+      $('#rvcmsg').innerHTML = alertBox('ok', 'Comentário publicado.');
+      rv.ordem = 'recentes';
+      $('#rvordem').value = 'recentes';
+      await rvCarregar(true);
+    } catch (e) { showErr($('#rvcmsg'), e); }
+    comentar.disabled = false;
   };
   const apagar = $('#rvdel');
   if (apagar) apagar.onclick = async () => {
     apagar.disabled = true;
-    try {
-      await api('/reviews/mine', { method: 'DELETE' });
-      rv.minha = null; rv.nota = 0;
-      await views.avaliacoes();
-    } catch (e) { showErr(msg(), e); apagar.disabled = false; }
+    try { await api('/reviews/mine', { method: 'DELETE' }); rv.minha = null; rv.nota = 0; await views.avaliacoes(); }
+    catch (e) { showErr($('#rvmsg'), e); apagar.disabled = false; }
   };
 
-  // um só tratador para votos, respostas e denúncias da lista
   $('#rvlista').onclick = async (ev) => {
     const alvo = ev.target.closest('button');
     if (!alvo) return;
-    const precisaConta = () => { if (!state.user) { alert('Entre com o Google para participar dos comentários.'); return true; } return false; };
+    if (!state.user) { alert('Entre com o Google para participar.'); return; }
     try {
       if (alvo.dataset.voto) {
-        if (precisaConta()) return;
-        const rota = alvo.dataset.voto === 'review' ? 'reviews' : 'replies';
-        const atual = alvo.classList.contains('on') ? 0 : +alvo.dataset.valor;
-        await api(`/${rota}/${alvo.dataset.id}/vote`, { method: 'POST', body: { valor: atual } });
+        const valor = alvo.classList.contains('on') ? 0 : +alvo.dataset.valor;
+        await api('/votes', { method: 'POST', body: { alvo_tipo: alvo.dataset.voto, alvo_id: alvo.dataset.id, valor } });
         await rvCarregar(true);
       } else if (alvo.dataset.responder) {
-        if (precisaConta()) return;
         const caixa = $(`[data-caixa="${alvo.dataset.responder}"]`);
         caixa.hidden = !caixa.hidden;
         if (!caixa.hidden) caixa.querySelector('textarea').focus();
@@ -1671,17 +1691,18 @@ views.avaliacoes = async () => {
         const caixa = $(`[data-caixa="${alvo.dataset.enviarResp}"]`);
         const texto = caixa.querySelector('textarea').value.trim();
         if (!texto) return;
-        await api(`/reviews/${alvo.dataset.enviarResp}/replies`, { method: 'POST', body: { texto } });
+        await api('/replies', { method: 'POST', body: { alvo_tipo: alvo.dataset.tipo, alvo_id: alvo.dataset.enviarResp, texto } });
         await rvCarregar(true);
       } else if (alvo.dataset.apagarResp) {
         await api(`/replies/${alvo.dataset.apagarResp}`, { method: 'DELETE' });
         await rvCarregar(true);
+      } else if (alvo.dataset.apagarComent) {
+        await api(`/comments/${alvo.dataset.apagarComent}`, { method: 'DELETE' });
+        await rvCarregar(true);
       } else if (alvo.dataset.denuncia) {
-        if (precisaConta()) return;
         const motivo = prompt('O que há de errado neste conteúdo? (opcional)') ?? null;
         if (motivo === null) return;
-        const rota = alvo.dataset.denuncia === 'review' ? 'reviews' : 'replies';
-        const r = await api(`/${rota}/${alvo.dataset.id}/report`, { method: 'POST', body: { motivo } });
+        const r = await api('/reports', { method: 'POST', body: { alvo_tipo: alvo.dataset.denuncia, alvo_id: alvo.dataset.id, motivo } });
         alert(r.repetida ? 'Você já tinha denunciado este conteúdo.' : 'Denúncia enviada para os administradores. Obrigado.');
       }
     } catch (e) { alert(e.message); }

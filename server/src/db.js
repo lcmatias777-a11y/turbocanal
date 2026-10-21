@@ -130,18 +130,32 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_review_user ON reviews(user_id);
 CREATE INDEX IF NOT EXISTS idx_review_status ON reviews(status, created_at);
-CREATE TABLE IF NOT EXISTS review_replies (
+-- Comentários soltos sobre o site (sem nota, e quantos a pessoa quiser)
+CREATE TABLE IF NOT EXISTS site_comments (
   id TEXT PRIMARY KEY,
-  review_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   body TEXT NOT NULL,
-  is_dev INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active',
   moderated_by TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_reply_review ON review_replies(review_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_coment_status ON site_comments(status, created_at);
+-- Respostas: servem para avaliação E para comentário. 'papel' guarda quem respondeu
+-- na hora (owner = desenvolvedor, admin = equipe), para destacar na tela.
+CREATE TABLE IF NOT EXISTS respostas (
+  id TEXT PRIMARY KEY,
+  alvo_tipo TEXT NOT NULL,
+  alvo_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  papel TEXT NOT NULL DEFAULT 'user',
+  status TEXT NOT NULL DEFAULT 'active',
+  moderated_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_resp_alvo ON respostas(alvo_tipo, alvo_id, created_at);
 CREATE TABLE IF NOT EXISTS review_votes (
   id TEXT PRIMARY KEY,
   target_type TEXT NOT NULL,
@@ -330,6 +344,11 @@ async function seed(db) {
     ['video_insights_ai', 40, 300, 'IA assiste o vídeo (insights)', 'IA do vídeo: assiste e sugere título, descrição e tags']
   ];
   await db.run("DELETE FROM tool_costs WHERE tool='thumbnail_ai'"); // capa com IA foi retirada do site
+  // review_replies virou 'respostas' (que serve também para comentários); só sai se estiver vazia
+  try {
+    const r = await db.get('SELECT COUNT(*) AS n FROM review_replies');
+    if (Number(r?.n || 0) === 0) await db.run('DROP TABLE review_replies');
+  } catch {}
   await db.run("UPDATE tool_costs SET label='Transformar vídeo (IA): 3 cortes para Shorts, post, artigo' WHERE tool='transform_ai' AND label='Transformar vídeo (IA)'");
   for (const [tool, oldCost, newCost, oldLabel, newLabel] of MIGRATE) {
     await db.run('UPDATE tool_costs SET cost=? WHERE tool=? AND cost=?', [newCost, tool, oldCost]);

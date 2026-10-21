@@ -71,10 +71,10 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
 
   // 6) gostei na avaliação do outro (a lista se refaz, então buscamos o item pelo id)
   const cxId = await b.p.$eval('#rvlista .rv-item:has-text("Editado: virou essencial")', (e) => e.dataset.item);
-  await b.p.click(`[data-item="${cxId}"] button[data-voto="review"][data-valor="1"]`);
+  await b.p.click(`[data-item="${cxId}"] button[data-voto="avaliacao"][data-valor="1"]`);
   await b.p.waitForFunction(() => /👍 1/.test(document.querySelector('#rvlista')?.textContent || ''), null, { timeout: 15000 });
   check('gostei na avaliação de outra pessoa conta 1', /👍 1/.test(await b.p.textContent('#rvlista')));
-  check('o botão de gostei fica marcado para quem votou', await b.p.$eval(`[data-item="${cxId}"] button[data-voto="review"][data-valor="1"]`, (e) => e.classList.contains('on')));
+  check('o botão de gostei fica marcado para quem votou', await b.p.$eval(`[data-item="${cxId}"] button[data-voto="avaliacao"][data-valor="1"]`, (e) => e.classList.contains('on')));
 
   // 7) responder
   await b.p.click(`[data-item="${cxId}"] button[data-responder]`);
@@ -84,7 +84,7 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
   check('dá para responder a uma avaliação e a resposta aparece', /Também achei o painel/.test(await b.p.textContent('#rvlista')));
 
   // 8) resposta do desenvolvedor em destaque e em primeiro lugar
-  const dev = await novaConta('admin@example.com', 'Admin do Site');
+  const dev = await novaConta('admin@example.com', 'Admin do Site');  // papel 'owner' no banco de teste
   await dev.p.goto(LOCAL + '/#/avaliacoes');
   await dev.p.waitForSelector('#rvlista .rv-item', { timeout: 20000 });
   await dev.p.click(`[data-item="${cxId}"] button[data-responder]`);
@@ -94,6 +94,24 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
   const primeira = await dev.p.textContent(`[data-item="${cxId}"] .rv-respostas .rv-resp:first-child`);
   check('a resposta do desenvolvedor fica em destaque e em primeiro lugar',
     /Resposta do desenvolvedor/.test(primeira) && /Obrigado! Estamos cuidando/.test(primeira), primeira.replace(/\s+/g, ' ').slice(0, 120));
+
+  // 8b) comentário solto, sem nota nenhuma
+  await b.p.fill('#rvctxt', 'Comentário sem nota: vai ter app de celular?');
+  await b.p.click('#rvcsave');
+  await b.p.waitForFunction(() => /vai ter app de celular/.test(document.querySelector('#rvlista')?.textContent || ''), null, { timeout: 15000 });
+  check('dá para escrever um comentário sem dar nota', /vai ter app de celular/.test(await b.p.textContent('#rvlista')));
+  check('o comentário aparece marcado como comentário, sem estrelas',
+    await b.p.$eval('#rvlista .rv-item[data-tipo="comentario"]', (e) => /comentário/.test(e.textContent) && !e.querySelector('.rv-estrelas')));
+  check('o comentário NÃO muda a média do site', (await b.p.textContent('#rvresumo .rv-nota')) === '3,0', await b.p.textContent('#rvresumo .rv-nota'));
+  const idComent = await b.p.$eval('#rvlista .rv-item[data-tipo="comentario"]', (e) => e.dataset.item);
+  await dev.p.reload();  // já está em #/avaliacoes: recarrega para pegar o comentário novo
+  await dev.p.waitForSelector(`[data-item="${idComent}"]`, { timeout: 20000 });
+  await dev.p.click(`[data-item="${idComent}"] button[data-responder]`);
+  await dev.p.fill(`[data-caixa="${idComent}"] textarea`, 'Ainda não, mas o site abre bem no celular.');
+  await dev.p.click(`[data-enviar-resp="${idComent}"]`);
+  await dev.p.waitForFunction((id) => /Ainda não, mas o site/.test(document.querySelector(`[data-item="${id}"]`)?.textContent || ''), idComent, { timeout: 15000 });
+  check('dá para responder um comentário solto, com o selo do desenvolvedor',
+    /Resposta do desenvolvedor/.test(await dev.p.textContent(`[data-item="${idComent}"] .rv-respostas`)));
 
   // 9) ordenação
   await dev.p.selectOption('#rvordem', 'melhores');
@@ -110,11 +128,16 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
   await dev.p.goto(LOCAL + '/#/admin/avaliacoes');
   await dev.p.waitForSelector('#atab .rv-item', { timeout: 20000 });
   check('o painel administrativo lista as avaliações para moderar', (await dev.p.$$('#atab .rv-item')).length >= 2);
+  const pApi = await anon.newPage();
+  const antesMod = await pApi.goto(LOCAL + '/api/reviews').then((r) => r.json());
   dev.p.once('dialog', (d) => d.accept('teste de moderação'));
   await dev.p.locator('#atab [data-mod]').first().click();
   await dev.p.waitForTimeout(2500);
-  const depoisMod = await (await anon.newPage()).goto(LOCAL + '/api/reviews').then((r) => r.json());
-  check('remover pela moderação tira da lista pública e recalcula a média', depoisMod.total === 1, JSON.stringify(depoisMod.resumo));
+  const depoisMod = await pApi.goto(LOCAL + '/api/reviews').then((r) => r.json());
+  check('remover pela moderação tira o conteúdo da lista pública',
+    depoisMod.total === antesMod.total - 1, `antes ${antesMod.total}, depois ${depoisMod.total}`);
+  check('e os números do site são recalculados na hora',
+    depoisMod.resumo.total + depoisMod.resumo.comentarios === depoisMod.total, JSON.stringify(depoisMod.resumo));
 
   // 12) celular
   const cel = await browser.newContext({ viewport: { width: 390, height: 844 }, baseURL: LOCAL });
