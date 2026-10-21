@@ -1,4 +1,4 @@
-import { baseUrl, getToken, setCfg, esc } from './common.js';
+import { baseUrl, getToken, setCfg, esc, limparUrl } from './common.js';
 
 const VERSION = chrome.runtime.getManifest().version;
 const bu = document.getElementById('bu');
@@ -7,12 +7,15 @@ document.getElementById('ver').textContent = 'v' + VERSION;
 baseUrl().then((b) => (bu.value = b));
 
 document.getElementById('save').onclick = async () => {
-  let v = bu.value.trim().replace(/\/$/, '');
+  let v = bu.value.trim();
   if (!v) { msg.innerHTML = '<span class="err">Escreva o endereço do site.</span>'; return; }
   if (!/^https?:\/\//.test(v)) v = 'https://' + v;
-  await setCfg({ baseUrl: v });
-  bu.value = v;
-  msg.innerHTML = '<span class="ok">Salvo ✓</span>';
+  const limpo = limparUrl(v);
+  await setCfg({ baseUrl: limpo });
+  bu.value = limpo;
+  msg.innerHTML = limpo === v.replace(/\/$/, '')
+    ? '<span class="ok">Salvo ✓</span>'
+    : `<span class="ok">Salvo ✓</span> <span class="muted">(guardei só o endereço do site: ${esc(limpo)})</span>`;
 };
 
 document.getElementById('test').onclick = async () => {

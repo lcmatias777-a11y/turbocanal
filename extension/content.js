@@ -48,26 +48,42 @@
     Promise.resolve(promessa).catch(() => padrao),
     new Promise((ok) => setTimeout(() => ok(padrao), ms))
   ]);
+  const PADRAO_URL = 'https://turbocanal.onrender.com';
+  /** Endereço do site sem caminho nem "#": com "#" toda chamada cai na página inicial. */
+  const limparUrl = (u) => {
+    try {
+      const x = new URL(String(u || '').trim());
+      return /^https?:$/.test(x.protocol) ? x.origin : PADRAO_URL;
+    } catch { return PADRAO_URL; }
+  };
   async function loadCfg() {
     let c = {};
     try { c = (await comPrazo(chrome.storage.sync.get(['baseUrl', 'tc_badges', 'tc_autopanel']), 1500, {})) || {}; } catch {}
-    S.baseUrl = (c.baseUrl || 'https://turbocanal.onrender.com').replace(/\/$/, '');
+    S.baseUrl = limparUrl(c.baseUrl || PADRAO_URL);
+    if (c.baseUrl && c.baseUrl !== S.baseUrl) { try { chrome.storage.sync.set({ baseUrl: S.baseUrl }); } catch {} }
     S.badges = c.tc_badges !== false;
     S.painel = c.tc_autopanel !== false;
     // fica visível na página para dar para diagnosticar sem abrir o Chrome por dentro
     try { document.documentElement.dataset.tcCfg = JSON.stringify(S); } catch {}
+    if (typeof anotar === 'function') anotar();
   }
   const site = (hash) => S.baseUrl + '/#/' + hash;
   /** A sessão vem do armazenamento da extensão, que o próprio site preenche quando você
    *  entra nele (site-token.js). Assim o painel não depende do service worker do Chrome,
    *  que às vezes dorme e não acorda. O service worker fica só como reserva. */
+  const diag = { versao: chrome.runtime?.getManifest?.()?.version || '?', sessao: 'ainda nao olhei', conta: '-' };
+  const anotar = () => { try { document.documentElement.dataset.tcCfg = JSON.stringify({ ...S, ...diag }); } catch {} };
   async function token() {
     try {
       const c = await comPrazo(chrome.storage.local.get(['tc_token']), 1500, null);
-      if (c && c.tc_token) return c.tc_token;
-    } catch {}
+      if (c && c.tc_token) { diag.sessao = 'guardada pelo site'; anotar(); return c.tc_token; }
+      diag.sessao = c ? 'armazenamento vazio' : 'armazenamento nao respondeu';
+    } catch (e) { diag.sessao = 'erro no armazenamento: ' + (e?.message || e); }
     const r = await comPrazo(chrome.runtime.sendMessage({ type: 'getToken' }), 2500, null);
-    return r && typeof r.token === 'string' ? r.token : '';
+    if (r && r.token) { diag.sessao = 'veio do service worker'; anotar(); return r.token; }
+    diag.sessao += r ? ' / service worker sem sessao' : ' / service worker nao respondeu';
+    anotar();
+    return '';
   }
   async function esqueceToken() {
     ME = null; MEtried = false;
@@ -99,8 +115,10 @@
   async function me() {
     if (MEtried) return ME;
     MEtried = true;
-    if (!(await token())) return (ME = null);
-    try { ME = (await api('/me', { timeout: 20000 })).user; } catch { ME = null; }
+    if (!(await token())) { diag.conta = 'sem sessao'; anotar(); return (ME = null); }
+    try { ME = (await api('/me', { timeout: 20000 })).user; diag.conta = 'ok: ' + (ME?.email || '?'); }
+    catch (e) { ME = null; diag.conta = 'falhou (' + (e.status ?? '?') + '): ' + e.message; }
+    anotar();
     return ME;
   }
   let COSTS = null;

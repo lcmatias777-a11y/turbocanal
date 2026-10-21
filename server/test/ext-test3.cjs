@@ -366,7 +366,28 @@ const PAGES = {
   check('religar mostra de novo', (await home.$$('.tc-badge')).length === 5);
   await pop.close();
 
-  /* ================= 9. opções ================= */
+  /* ============ 9. endereço torto no armazenamento: conserta sozinho ============ */
+  console.log('\n— Endereço corrompido —');
+  const fix = watch(await ctx.newPage());
+  await fix.goto(`chrome-extension://${extId}/popup.html`);
+  // exatamente o lixo que apareceu na máquina do usuário: com "#" no meio
+  await fix.evaluate(() => chrome.storage.sync.set({ baseUrl: 'https://turbocanal.onrender.com/#/dashboard/api/auth/google' }));
+  const quebrado = watch(await ctx.newPage());
+  await quebrado.goto('https://www.youtube.com/watch?v=' + VID);
+  await quebrado.waitForSelector('#tc-panel .tc-grid', { timeout: 20000 });
+  await quebrado.waitForFunction(() => {
+    try { return JSON.parse(document.documentElement.dataset.tcCfg || '{}').baseUrl === 'https://turbocanal.onrender.com'; } catch { return false; }
+  }, null, { timeout: 15000 }).catch(() => {});
+  const cfg = JSON.parse(await quebrado.getAttribute('html', 'data-tc-cfg') || '{}');
+  check('endereço com "#" guardado por engano é limpo sozinho', cfg.baseUrl === PUBLIC, cfg.baseUrl);
+  await quebrado.waitForFunction(() => /💎/.test(document.querySelector('#tc-panel .tc-credits')?.textContent || ''), null, { timeout: 20000 }).catch(() => {});
+  check('e a conta volta a ser reconhecida depois do conserto', /💎/.test(await quebrado.textContent('#tc-panel .tc-credits')), await quebrado.textContent('#tc-panel .tc-credits'));
+  const guardado = await fix.evaluate(() => chrome.storage.sync.get(['baseUrl']).then((x) => x.baseUrl));
+  check('o endereço consertado fica guardado (não volta a quebrar)', guardado === PUBLIC, String(guardado));
+  await quebrado.close();
+  await fix.close();
+
+  /* ================= 10. opções ================= */
   const opt = watch(await ctx.newPage());
   await opt.goto(`chrome-extension://${extId}/options.html`);
   await opt.waitForSelector('#bu', { timeout: 15000 });

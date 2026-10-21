@@ -1,10 +1,21 @@
 // Usado pelo popup e pelas opções (páginas da extensão, com acesso direto às APIs do Chrome).
 const DEFAULT_URL = 'https://turbocanal.onrender.com';
 
+/** Só o endereço do site (https://host). Qualquer caminho, "#" ou "?" grudado é lixo e sai:
+ *  um endereço com "#" faz TODA chamada da API cair na página inicial, sem erro aparente. */
+export function limparUrl(u) {
+  try {
+    const x = new URL(String(u || '').trim());
+    return /^https?:$/.test(x.protocol) ? x.origin : DEFAULT_URL;
+  } catch { return DEFAULT_URL; }
+}
 export async function baseUrl() {
   try {
-    const { baseUrl } = await chrome.storage.sync.get(['baseUrl']);
-    return (baseUrl || DEFAULT_URL).replace(/\/$/, '');
+    const guardado = (await chrome.storage.sync.get(['baseUrl'])).baseUrl;
+    const limpo = limparUrl(guardado || DEFAULT_URL);
+    // conserta sozinho o que estiver torto, para não voltar a acontecer
+    if (guardado && guardado !== limpo) { try { await chrome.storage.sync.set({ baseUrl: limpo }); } catch {} }
+    return limpo;
   } catch { return DEFAULT_URL; }
 }
 export async function getToken() {

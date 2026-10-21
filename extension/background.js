@@ -12,7 +12,7 @@ async function getToken() {
   let base = DEFAULT_URL, saved = '';
   try {
     const c = await chrome.storage.sync.get(['baseUrl', 'token']);
-    base = (c.baseUrl || DEFAULT_URL).replace(/\/$/, '');
+    try { base = new URL(c.baseUrl || DEFAULT_URL).origin; } catch { base = DEFAULT_URL; }
     saved = c.token || '';
   } catch {}
   try {
