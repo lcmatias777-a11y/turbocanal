@@ -6,7 +6,10 @@ import { spend, refund } from './credits.js';
 import { HttpError, audit, must, now, uid } from './util.js';
 import { seoChecklist, vph, engagement, countUnits, quotaError } from './youtube.js';
 
-const API = 'https://www.googleapis.com/youtube/v3/';
+// Endereços da API (podem ser trocados por um YouTube simulado nos testes automáticos)
+const API = process.env.YT_API_BASE || 'https://www.googleapis.com/youtube/v3/';
+const UPLOAD = process.env.YT_UPLOAD_BASE || 'https://www.googleapis.com/upload/youtube/v3/';
+const ANALYTICS = process.env.YT_ANALYTICS_BASE || 'https://youtubeanalytics.googleapis.com/v2/';
 let DB = null; // definido em channelRoutes (para contar a cota usada)
 
 function unitsFor(path, method) {
@@ -101,7 +104,7 @@ function decodeImage(input) {
 }
 
 async function setThumbnail(token, videoId, img) {
-  return yt(token, `https://www.googleapis.com/upload/youtube/v3/thumbnails/set`, {
+  return yt(token, UPLOAD + 'thumbnails/set', {
     method: 'POST',
     params: { videoId, uploadType: 'media' },
     raw: { mime: img.mime, buffer: img.buffer }
@@ -179,9 +182,78 @@ export function channelRoutes(app, db, auth) {
     if (Array.isArray(req.body?.tags)) snippet.tags = req.body.tags.map(String).slice(0, 60);
     const body = { id: videoId, snippet: { title: snippet.title, description: snippet.description, tags: snippet.tags || [], categoryId: snippet.categoryId, defaultLanguage: snippet.defaultLanguage } };
     if (!body.snippet.defaultLanguage) delete body.snippet.defaultLanguage;
-    const r = await yt(token, 'videos', { method: 'PUT', params: { part: 'snippet' }, body });
-    await audit(db, req.user, 'youtube.video_update', videoId, body.snippet.title);
-    return mapVideo({ ...r, statistics: video.statistics });
+    const status = statusForPrivacy(video.status, req.body?.privacy);
+    if (status) body.status = status;
+    const r = await yt(token, 'videos', { method: 'PUT', params: { part: status ? 'snippet,status' : 'snippet' }, body });
+    await audit(db, req.user, 'youtube.video_update', videoId, body.snippet.title + (status ? ` (visibilidade: ${status.privacyStatus})` : ''));
+    return mapVideo({ ...r, status: r.status || video.status, statistics: video.statistics });
+  }));
+
+  // ---------- Playlists do MEU canal ----------
+  const myPlaylist = async (token, channel, playlistId) => {
+    const r = await yt(token, 'playlists', { params: { part: 'snippet', id: playlistId } });
+    const p = r.items?.[0];
+    if (!p) throw new HttpError(404, 'Playlist não encontrada.');
+    if (p.snippet?.channelId !== channel.id) throw new HttpError(403, 'Esta playlist não é do seu canal.');
+    return p;
+  };
+
+  app.get('/api/channel/playlists', auth.required, async (req, res, next) => {
+    try {
+      const { token } = await myChannel(db, req.user);
+      const r = await yt(token, 'playlists', { params: { part: 'snippet,contentDetails,status', mine: 'true', maxResults: 50 } });
+      res.json({
+        items: (r.items || []).map((p) => ({
+          id: p.id, title: p.snippet?.title, description: p.snippet?.description || '', count: p.contentDetails?.itemCount || 0,
+          privacy: p.status?.privacyStatus, thumb: p.snippet?.thumbnails?.medium?.url || p.snippet?.thumbnails?.default?.url || null
+        }))
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/channel/playlists', auth.required, charged('playlist_create', async (req) => {
+    const title = must(req.body?.title, 'nome da playlist', { max: 150 });
+    const description = String(req.body?.description || '').slice(0, 5000);
+    const privacy = ['public', 'unlisted', 'private'].includes(req.body?.privacy) ? req.body.privacy : 'public';
+    const { token } = await myChannel(db, req.user);
+    const r = await yt(token, 'playlists', { method: 'POST', params: { part: 'snippet,status' }, body: { snippet: { title, description }, status: { privacyStatus: privacy } } });
+    await audit(db, req.user, 'youtube.playlist_create', r.id, title);
+    return { id: r.id, title, privacy };
+  }));
+
+  app.get('/api/channel/playlists/:id/items', auth.required, async (req, res, next) => {
+    try {
+      const { token, channel } = await myChannel(db, req.user);
+      await myPlaylist(token, channel, must(req.params.id, 'playlist', { max: 64 }));
+      const r = await yt(token, 'playlistItems', { params: { part: 'snippet,contentDetails', playlistId: req.params.id, maxResults: 50 } });
+      res.json({ items: (r.items || []).map((i) => ({ itemId: i.id, videoId: i.contentDetails?.videoId, title: i.snippet?.title, position: i.snippet?.position })) });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/channel/playlists/:id/items', auth.required, charged('playlist_add', async (req) => {
+    const playlistId = must(req.params.id, 'playlist', { max: 64 });
+    const videoId = must(req.body?.video_id, 'vídeo', { max: 20 });
+    const { token, channel } = await myChannel(db, req.user);
+    const p = await myPlaylist(token, channel, playlistId);
+    const r = await yt(token, 'playlistItems', { method: 'POST', params: { part: 'snippet' }, body: { snippet: { playlistId, resourceId: { kind: 'youtube#video', videoId } } } });
+    await audit(db, req.user, 'youtube.playlist_add', playlistId, videoId);
+    return { itemId: r.id, playlist: p.snippet?.title, videoId };
+  }));
+
+  app.delete('/api/channel/playlists/:id/items/:itemId', auth.required, charged('playlist_add', async (req) => {
+    const playlistId = must(req.params.id, 'playlist', { max: 64 });
+    const itemId = must(req.params.itemId, 'item', { max: 120 });
+    const { token, channel } = await myChannel(db, req.user);
+    await myPlaylist(token, channel, playlistId);
+    const it = await yt(token, 'playlistItems', { params: { part: 'snippet', id: itemId } });
+    if (it.items?.[0]?.snippet?.playlistId !== playlistId) throw new HttpError(404, 'Este vídeo não está nesta playlist.');
+    await yt(token, 'playlistItems', { method: 'DELETE', params: { id: itemId } });
+    await audit(db, req.user, 'youtube.playlist_remove', playlistId, itemId);
+    return { removed: itemId };
   }));
 
   // ---------- Teste A/B de capas (alternância agendada) ----------
@@ -255,7 +327,7 @@ export function studioRoutes(app, db, auth, charged) {
     const metadata = { snippet: { title, description, tags, categoryId, defaultLanguage: 'pt' }, status };
     let resp;
     try {
-      resp = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
+      resp = await fetch(UPLOAD + 'videos?uploadType=resumable&part=snippet,status', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -334,8 +406,8 @@ export function studioRoutes(app, db, auth, charged) {
       const start = new Date(end); start.setUTCDate(start.getUTCDate() - days + 1);
       const fmt = (d) => d.toISOString().slice(0, 10);
       const base = { ids: 'channel==MINE', startDate: fmt(start), endDate: fmt(end) };
-      const daily = await yt(token, 'https://youtubeanalytics.googleapis.com/v2/reports', { params: { ...base, metrics: 'views,estimatedMinutesWatched,subscribersGained,subscribersLost,likes', dimensions: 'day', sort: 'day' } });
-      const top = await yt(token, 'https://youtubeanalytics.googleapis.com/v2/reports', { params: { ...base, metrics: 'views,estimatedMinutesWatched,averageViewDuration', dimensions: 'video', sort: '-views', maxResults: 10 } });
+      const daily = await yt(token, ANALYTICS + 'reports', { params: { ...base, metrics: 'views,estimatedMinutesWatched,subscribersGained,subscribersLost,likes', dimensions: 'day', sort: 'day' } });
+      const top = await yt(token, ANALYTICS + 'reports', { params: { ...base, metrics: 'views,estimatedMinutesWatched,averageViewDuration', dimensions: 'video', sort: '-views', maxResults: 10 } });
       const rows = daily.rows || [];
       const tot = rows.reduce((a, r) => ({ views: a.views + r[1], minutes: a.minutes + r[2], subs: a.subs + r[3] - r[4], likes: a.likes + r[5] }), { views: 0, minutes: 0, subs: 0, likes: 0 });
       let topVideos = (top.rows || []).map((r) => ({ id: r[0], views: r[1], minutes: r[2], avgSec: r[3] }));
@@ -377,6 +449,23 @@ export function studioRoutes(app, db, auth, charged) {
 
 function safeJson(s) {
   try { return JSON.parse(s || '[]'); } catch { return []; }
+}
+
+/**
+ * Monta o bloco "status" para mudar a visibilidade de um vídeo. O YouTube apaga os campos
+ * de status que não forem reenviados num update, então todos os valores atuais são copiados.
+ * Devolve null quando não há mudança de visibilidade.
+ */
+export function statusForPrivacy(current = {}, privacy) {
+  const st = current || {};
+  if (!['public', 'unlisted', 'private'].includes(privacy) || privacy === st.privacyStatus) return null;
+  const out = { privacyStatus: privacy };
+  for (const k of ['embeddable', 'license', 'publicStatsViewable', 'containsSyntheticMedia']) if (st[k] !== undefined) out[k] = st[k];
+  const kids = st.selfDeclaredMadeForKids ?? st.madeForKids;
+  if (kids !== undefined) out.selfDeclaredMadeForKids = kids;
+  // agendamento só existe em vídeo privado; publicar agora (ou deixar não listado) cancela o agendamento
+  if (privacy === 'private' && st.publishAt) out.publishAt = st.publishAt;
+  return out;
 }
 function user(req) {
   return req.user;

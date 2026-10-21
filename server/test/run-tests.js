@@ -8,6 +8,13 @@ delete process.env.DATABASE_URL; // testes rodam no PGlite em memória (Postgres
 process.env.YT_MOCK = '1';
 process.env.OWNER_EMAIL = process.env.OWNER_EMAIL || 'lcmatias777@gmail.com';
 
+// YouTube simulado (só para os testes de "Meu canal"); precisa subir antes de carregar o app
+const { startFakeYouTube } = await import('./fake-youtube.js');
+const fake = await startFakeYouTube();
+process.env.YT_API_BASE = fake.base + '/youtube/v3/';
+process.env.YT_UPLOAD_BASE = fake.base + '/upload/youtube/v3/';
+process.env.YT_ANALYTICS_BASE = fake.base + '/youtubeanalytics/v2/';
+
 const { buildApp } = await import('../src/app.js');
 const { getSetting } = await import('../src/db.js');
 const { app, db } = await buildApp({ databaseUrl: undefined, dataDir: ':memory:', scheduler: false });
@@ -213,6 +220,82 @@ delete process.env.GOOGLE_CLIENT_SECRET;
 console.log('\n== Admin enxerga a cota do YouTube ==');
 const ov = await req('/api/admin/overview', { token: tOwn });
 check('visão geral mostra unidades de cota usadas hoje', ov.status === 200 && typeof ov.data.youtubeQuota?.usedToday === 'number');
+
+console.log('\n== Ideias de vídeos (IA ou gerador local) ==');
+const meI = (await req('/api/me', { token: t1 })).data.user.credits;
+const idBad = await req('/api/tools/ideas_ai', { method: 'POST', token: t1, body: {} });
+const meI2 = (await req('/api/me', { token: t1 })).data.user.credits;
+check('sem tema e sem canal: recusa (400) sem cobrar nada', idBad.status === 400 && meI2 === meI, `(status=${idBad.status}, ${meI} -> ${meI2})`);
+const idOk = await req('/api/tools/ideas_ai', { method: 'POST', token: t1, body: { titles: ['Como vencer no bedwars', 'Bedwars sem gastar nada', 'Melhores dicas de bedwars'] } });
+check('com os títulos do canal: 10 ideias com formato, porquê e palavra-chave (10 créditos)', idOk.status === 200 && idOk.data.result?.ideias?.length === 10 && idOk.data.result.ideias.every((x) => x.titulo && x.formato && x.porque) && idOk.data.credits?.charged === 10, JSON.stringify(idOk.data).slice(0, 200));
+
+console.log('\n== Meu canal com o YouTube simulado: só mexe no que é seu ==');
+const mariaId = (await db.get('SELECT id FROM users WHERE email=?', ['maria@example.com'])).id;
+await db.run('INSERT INTO yt_tokens(user_id,access_token,refresh_token,expires_at,channel_id,channel_title,scopes,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+  [mariaId, fake.token, null, Date.now() + 3600e3, null, null, 'https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.force-ssl https://www.googleapis.com/auth/yt-analytics.readonly', new Date().toISOString()]);
+const meC = await req('/api/me', { token: t1 });
+check('conta aparece com o canal vinculado', meC.data.user?.youtube?.connected === true);
+const bal = async () => (await req('/api/me', { token: t1 })).data.user.credits;
+const vids = await req('/api/channel/videos', { token: t1 });
+check('lista só os vídeos do próprio canal, com SEO e VPH', vids.status === 200 && vids.data.videos?.length === 2 && vids.data.videos.every((v) => v.id.startsWith('vidMeu')) && typeof vids.data.videos[0].seoScore === 'number' && vids.data.videos[0].vph > 0, JSON.stringify(vids.data).slice(0, 200));
+check('canal vinculado fica salvo com o nome', (await db.get('SELECT channel_title FROM yt_tokens WHERE user_id=?', [mariaId])).channel_title === 'Canal do Teste');
+
+let b0 = await bal();
+const alheio = await req('/api/channel/videos/vidAlheio01', { method: 'PUT', token: t1, body: { title: 'tentando mudar o vídeo dos outros' } });
+check('vídeo de OUTRO canal: bloqueado (403) e crédito devolvido', alheio.status === 403 && (await bal()) === b0, `(status=${alheio.status})`);
+check('nenhum pedido de alteração chegou ao YouTube para o vídeo alheio', !fake.log.some((l) => l.op === 'videos.update' && l.body.id === 'vidAlheio01'));
+
+b0 = await bal();
+const up1 = await req('/api/channel/videos/vidMeu00001', { method: 'PUT', token: t1, body: { title: 'Como vencer no bedwars (2026)', description: 'Nova descrição', tags: ['bedwars', 'minecraft'], privacy: 'unlisted' } });
+const lastUp = fake.log.filter((l) => l.op === 'videos.update').pop();
+check('editar título, tags e visibilidade do MEU vídeo (10 créditos)', up1.status === 200 && up1.data.result?.title === 'Como vencer no bedwars (2026)' && up1.data.result?.privacy === 'unlisted' && (await bal()) === b0 - 10, JSON.stringify(up1.data).slice(0, 200));
+check('mudar a visibilidade reenvia todos os campos de status (nada é apagado)', lastUp.part === 'snippet,status' && lastUp.body.status.privacyStatus === 'unlisted' && lastUp.body.status.embeddable === true && lastUp.body.status.license === 'youtube' && lastUp.body.status.publicStatsViewable === true && lastUp.body.status.selfDeclaredMadeForKids === false, JSON.stringify(lastUp));
+await req('/api/channel/videos/vidMeu00001', { method: 'PUT', token: t1, body: { title: 'Só o título', privacy: 'unlisted' } });
+check('sem mudar a visibilidade, o status não é enviado', fake.log.filter((l) => l.op === 'videos.update').pop().part === 'snippet');
+await req('/api/channel/videos/vidMeu00002', { method: 'PUT', token: t1, body: { title: 'Vídeo agendado', privacy: 'public' } });
+const pubUp = fake.log.filter((l) => l.op === 'videos.update').pop();
+check('publicar um vídeo agendado tira o agendamento e mantém o resto', pubUp.body.status.privacyStatus === 'public' && !('publishAt' in pubUp.body.status) && pubUp.body.status.license === 'creativeCommon', JSON.stringify(pubUp.body.status));
+
+const png = 'data:image/png;base64,' + Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').toString('base64');
+const th = await req('/api/channel/videos/vidMeu00001/thumbnail', { method: 'POST', token: t1, body: { image: png } });
+check('enviar capa para o MEU vídeo chega ao YouTube como imagem', th.status === 200 && fake.log.some((l) => l.op === 'thumbnails.set' && l.videoId === 'vidMeu00001' && l.type === 'image/png' && l.bytes > 0));
+b0 = await bal();
+const th2 = await req('/api/channel/videos/vidAlheio01/thumbnail', { method: 'POST', token: t1, body: { image: png } });
+check('capa em vídeo alheio: bloqueada e sem cobrança', th2.status === 403 && (await bal()) === b0);
+
+const pls = await req('/api/channel/playlists', { token: t1 });
+check('playlists: lista só as do meu canal', pls.status === 200 && pls.data.items.length === 1 && pls.data.items[0].id === 'PL_MEU1' && pls.data.items[0].count === 1);
+b0 = await bal();
+const plNew = await req('/api/channel/playlists', { method: 'POST', token: t1, body: { title: 'Tutoriais', privacy: 'unlisted' } });
+check('criar playlist (10 créditos)', plNew.status === 200 && plNew.data.result?.id?.startsWith('PL_NOVA') && (await bal()) === b0 - 10);
+const plAdd = await req('/api/channel/playlists/' + plNew.data.result.id + '/items', { method: 'POST', token: t1, body: { video_id: 'vidMeu00002' } });
+check('adicionar vídeo à playlist', plAdd.status === 200 && fake.items[plNew.data.result.id].includes('vidMeu00002'));
+b0 = await bal();
+const plBad = await req('/api/channel/playlists/PL_ALHEIA/items', { method: 'POST', token: t1, body: { video_id: 'vidMeu00001' } });
+check('playlist de outro canal: bloqueada (403) e crédito devolvido', plBad.status === 403 && (await bal()) === b0, `(status=${plBad.status})`);
+const plItems = await req('/api/channel/playlists/' + plNew.data.result.id + '/items', { token: t1 });
+check('ver os vídeos da playlist', plItems.status === 200 && plItems.data.items.length === 1 && plItems.data.items[0].videoId === 'vidMeu00002');
+const plDel = await req('/api/channel/playlists/' + plNew.data.result.id + '/items/' + plItems.data.items[0].itemId, { method: 'DELETE', token: t1 });
+check('tirar vídeo da playlist', plDel.status === 200 && fake.items[plNew.data.result.id].length === 0);
+
+const ovBefore = (await req('/api/admin/overview', { token: tOwn })).data.youtubeQuota.usedToday;
+const upS = await req('/api/channel/upload/start', { method: 'POST', token: t1, body: { title: 'Meu vídeo novo', description: 'x', tags: ['a'], privacy: 'private', size: 1000, mime: 'video/mp4' } });
+const ovAfter = (await req('/api/admin/overview', { token: tOwn })).data.youtubeQuota.usedToday;
+check('postar vídeo: abre a sessão de envio direto para o Google', upS.status === 200 && upS.data.result?.uploadUrl?.startsWith('https://upload.example.test/') && fake.log.some((l) => l.op === 'videos.insert(resumable)' && l.body.snippet.title === 'Meu vídeo novo' && l.size === '1000'));
+check('envio conta 1.600 unidades na cota do dia', ovAfter - ovBefore >= 1600, `(${ovBefore} -> ${ovAfter})`);
+const sched = await req('/api/channel/upload/start', { method: 'POST', token: t1, body: { title: 'Agendado', privacy: 'public', publishAt: new Date(Date.now() + 86400e3).toISOString(), size: 10 } });
+check('agendar publicação envia como privado com data', sched.status === 200 && sched.data.result.scheduled === true && fake.log.filter((l) => l.op === 'videos.insert(resumable)').pop().body.status.privacyStatus === 'private');
+
+const live = await req('/api/channel/live', { method: 'POST', token: t1, body: { title: 'Live de teste', privacy: 'unlisted' } });
+check('criar live devolve RTMP e chave de transmissão', live.status === 200 && live.data.result?.rtmpUrl?.startsWith('rtmp://') && live.data.result?.streamKey === 'abcd-efgh-ijkl' && live.data.result.watchUrl.includes('live12345ab'));
+const anC = await req('/api/channel/analytics?days=28', { token: t1 });
+check('analytics soma views, minutos e inscritos líquidos', anC.status === 200 && anC.data.totals.views === 150 && anC.data.totals.minutes === 420 && anC.data.totals.subs === 6 && anC.data.topVideos[0]?.title === fake.videos.vidMeu00001.snippet.title, JSON.stringify(anC.data.totals));
+const cms = await req('/api/channel/comments', { token: t1 });
+const repC = await req('/api/channel/comments/cm1/reply', { method: 'POST', token: t1, body: { text: 'Valeu!' } });
+check('comentários: lista e responde', cms.status === 200 && cms.data.items[0]?.text === 'Que vídeo top!' && repC.status === 200 && fake.log.some((l) => l.op === 'comments.insert' && l.body.snippet.parentId === 'cm1'));
+const ownC = await req('/api/channel/videos', { token: tOwn });
+check('quem não vinculou canal recebe aviso para vincular (409)', ownC.status === 409);
+fake.close();
 
 console.log(`\nRESULTADO: ${pass} passaram, ${fail} falharam.`);
 server.close();

@@ -42,6 +42,7 @@ const TOOL_LINKS = [
   ['#/ferramentas/titulos', 'Títulos (IA)'],
   ['#/ferramentas/descricao', 'Descrição (IA)'],
   ['#/ferramentas/insights', 'IA assiste o vídeo'],
+  ['#/ferramentas/ideias', '💡 Ideias de vídeos'],
   ['#/ferramentas/preparar', '📝 Preparar publicação'],
   ['#/ferramentas/transformar', '🔁 Transformar vídeo (IA)'],
   ['#/ferramentas/editor', '✂️ Editor de vídeo'],
@@ -100,16 +101,16 @@ views.home = async () => {
     <section class="grid cols3">
       ${[
         ['🔎 Palavras-chave e tendências', 'Termos com demanda real a partir da API oficial do YouTube, com views por hora (VPH) e vídeos que estão estourando (outliers).'],
-        ['📺 Seu canal, como no Studio', 'Postar vídeo com agendamento, criar live com chave de transmissão, analytics, comentários, capas e testes A/B, tudo daqui.'],
+        ['📺 Seu canal, como no Studio', 'Postar vídeo com agendamento, criar live com chave de transmissão, editar título, tags e visibilidade, playlists, analytics, comentários, capas e testes A/B.'],
         ['✂️ Editor de vídeo grátis', 'Corte trechos, transforme em Shorts 9:16, acelere, tire o áudio. Roda no seu navegador, sem gastar créditos.'],
         ['🎨 Capas que chamam clique', 'Crie capas com texto grande a partir de um quadro do vídeo e veja a prévia no feed (claro, escuro e celular).'],
-        ['🤖 IA para criadores', 'Prepara título, descrição, tags e roteiro; assiste o vídeo e acha os melhores cortes para Shorts.'],
+        ['🤖 IA para criadores', 'Ideias de próximos vídeos a partir dos seus melhores, título, descrição, tags e roteiro; assiste o vídeo e acha os cortes para Shorts.'],
         ['🏆 Concorrentes', 'Acompanhe canais do seu nicho e descubra quais vídeos deles estão performando acima da média.'],
         ['📈 SEO de cada vídeo', 'Nota de SEO com o que falta arrumar em cada vídeo do seu canal.'],
         ['🧩 Extensão Chrome', 'Painel na página do vídeo do YouTube: VPH, engajamento, tags e SEO, com a mesma conta.']
       ].map(([t, d]) => `<div class="card"><h3>${t}</h3><p class="muted">${d}</p></div>`).join('')}
     </section>
-    <p class="center" style="margin-top:18px"><a class="btn ghost" href="#/ajuda">🧩 Baixar a extensão para Chrome</a></p>
+    <p class="center" style="margin-top:18px"><a class="btn ghost" href="#/extensao">🧩 Baixar a extensão para Chrome</a></p>
     <h2 class="center" style="margin-top:34px">Planos</h2>
     <p class="center muted small">Créditos renovam todo mês. As comparações de capacidade são metas internas de referência, não números auditados.</p>
     <section class="grid cols3">${plans.map(planCard).join('')}</section>`;
@@ -166,8 +167,15 @@ views.dashboard = async () => {
   if (!state.user) return needLogin();
   const u = state.user;
   const hist = (await api('/history')).items.slice(0, 8);
+  const ytBanner = u.youtube?.connected ? ''
+    : !u.youtube?.readonly
+      ? `<div class="card" style="border-color:var(--warn)"><h3>⚠️ Falta 1 passo: autorizar o YouTube</h3>
+          <p class="muted">Sem essa autorização as ferramentas de pesquisa, o painel da extensão e o "Meu canal" não conseguem falar com o YouTube. Clique abaixo, escolha a sua conta e aceite as permissões. Leva 10 segundos e só precisa ser feito uma vez.</p>
+          ${googleButton('Vincular meu canal do YouTube', true)}</div>`
+      : `<div class="card"><p class="small">✅ Pesquisas liberadas. Para <b>postar, editar, criar lives, responder comentários e testar capas</b>, <a href="/api/auth/google?connect=1">vincule também o seu canal</a>.</p></div>`;
   appEl().innerHTML = `
     <h1>Olá, ${esc(u.name || u.email.split('@')[0])} 👋</h1>
+    ${ytBanner}
     <section class="grid cols3">
       <div class="card"><h3>Créditos</h3><div class="kpi">💎 ${u.unlimited ? 'Ilimitado' : fmt(u.credits)}</div>
         <p class="muted small">${u.unlimited ? 'Conta do administrador principal: uso ilimitado e isento de cobrança.' : 'Plano Free recarrega todo mês. Cada ferramenta mostra o custo antes de usar.'}</p></div>
@@ -192,7 +200,7 @@ function toolCostLabel(hash) {
   const map = {
     palavras: 'keyword_research', video: 'video_analysis', canal: 'channel_analysis',
     tendencias: 'trends', titulos: 'title_ai', descricao: 'description_ai', busca: 'video_search',
-    insights: 'video_insights_ai', capa: 'thumbnail_ai', preparar: 'prep_ai', transformar: 'transform_ai', concorrentes: 'competitor_check'
+    insights: 'video_insights_ai', capa: 'thumbnail_ai', preparar: 'prep_ai', transformar: 'transform_ai', concorrentes: 'competitor_check', ideias: 'ideas_ai'
   };
   const last = hash.split('/').pop();
   if (last === 'editor' || last === 'criar-capa') return 'Grátis (roda no seu navegador)';
@@ -261,7 +269,9 @@ function toolPage({ title, desc, toolKey, formHtml, getBody, render, after, onMo
         $('#out').innerHTML = render(r.result);
         if (after) after(r.result, $('#out'));
       } catch (e) {
-        $('#msg').innerHTML = alertBox('err', esc(e.message) + (e.status === 402 ? ' <a href="#/planos">Ver planos</a>' : '') + (e.status === 409 ? ' <span class="muted small">(configuração pendente, nenhum crédito foi cobrado)</span>' : ''));
+        const needsGoogle = e.status === 409 && /Entre com o Google/i.test(e.message);
+        $('#msg').innerHTML = alertBox(needsGoogle ? 'warn' : 'err', esc(e.message) + (e.status === 402 ? ' <a href="#/planos">Ver planos</a>' : '') + (e.status === 409 ? ' <span class="muted small">(nenhum crédito foi cobrado)</span>' : ''))
+          + (needsGoogle ? googleButton('Autorizar o YouTube agora (1 clique)', true) : '');
       }
       $('#sp').innerHTML = '';
     };
@@ -411,6 +421,36 @@ function copyBtn(text, label = 'copiar') {
   return `<button class="btn sm ghost" type="button" onclick="navigator.clipboard.writeText(${esc(JSON.stringify(String(text || '')))});this.textContent='copiado ✓'">${label}</button>`;
 }
 
+// Ideias de próximos vídeos: com o canal vinculado, usa os títulos mais vistos (leitura sem custo)
+const ideasCtx = { titles: [], channel: '' };
+views['ferramentas/ideias'] = toolPage({
+  title: '💡 Ideias de vídeos para o seu canal', toolKey: 'ideas_ai',
+  desc: 'Dez ideias de próximos vídeos (Shorts e longos), com o porquê e a palavra-chave de cada uma. Com o canal vinculado, partem dos seus vídeos que mais deram views.',
+  formHtml: `<div id="idCanal" class="muted small">Verificando o seu canal…</div>
+    <label>Tema ou nicho do canal (opcional com o canal vinculado)</label><input name="niche" maxlength="200" placeholder="ex.: minecraft, receitas fitness, finanças pessoais">`,
+  onMount: async () => {
+    ideasCtx.titles = []; ideasCtx.channel = '';
+    const box = $('#idCanal');
+    if (!state.user?.youtube?.connected) { if (box) box.innerHTML = 'Canal não vinculado: escreva o tema do canal abaixo. <a href="/api/auth/google?connect=1">Vincular meu canal</a> deixa as ideias baseadas nos seus vídeos.'; return; }
+    try {
+      const d = await api('/channel/videos');
+      const vids = [...d.videos].sort((a, b) => b.views - a.views);
+      ideasCtx.titles = vids.slice(0, 15).map((v) => v.title);
+      ideasCtx.channel = d.channel.title || '';
+      if (box) box.innerHTML = `✅ Vou usar os ${ideasCtx.titles.length} vídeos mais vistos de <b>${esc(ideasCtx.channel)}</b>.`;
+    } catch (e) { if (box) box.innerHTML = 'Não consegui ler seus vídeos agora (' + esc(e.message) + '). Escreva o tema do canal.'; }
+  },
+  getBody: (fd) => ({ niche: fd.get('niche'), titles: ideasCtx.titles, channel: ideasCtx.channel }),
+  render: (r) => `<div class="card scroll"><h3>Ideias <span class="pill">${r.metodo === 'ia' ? 'IA' : 'gerador local'}</span></h3>
+    <table><tr><th>Ideia</th><th>Formato</th><th>Por quê</th><th></th></tr>
+    ${(r.ideias || []).map((x, i) => `<tr><td><b>${esc(x.titulo)}</b><br><span class="muted small">🔑 ${esc(x.palavra_chave || '')}</span></td><td><span class="pill">${esc(x.formato || '')}</span></td><td class="small">${esc(x.porque || '')}</td>
+      <td class="small"><a href="#/ferramentas/preparar" data-prep="${i}">📝 preparar</a><br><a href="#/ferramentas/palavras" data-kw="${i}">🔑 pesquisar</a></td></tr>`).join('')}</table></div>`,
+  after: (r, out) => {
+    for (const a of out.querySelectorAll('[data-prep]')) a.onclick = () => { state.toolPrefill = { topic: r.ideias[+a.dataset.prep].titulo }; };
+    for (const a of out.querySelectorAll('[data-kw]')) a.onclick = () => { state.toolPrefill = { q: r.ideias[+a.dataset.kw].palavra_chave || r.ideias[+a.dataset.kw].titulo }; };
+  }
+});
+
 views['ferramentas/preparar'] = toolPage({
   title: '📝 Preparar publicação', toolKey: 'prep_ai',
   desc: 'Antes de gravar ou postar: títulos, descrição, tags, hashtags, roteiro com gancho, textos para a capa e ideias dos próximos vídeos. Depois é um clique para levar tudo ao "Postar vídeo".',
@@ -529,7 +569,8 @@ function fileToDataUrl(file) {
   });
 }
 
-const CANAL_TABS = [['videos', '🎬 Meus vídeos'], ['postar', '⬆️ Postar vídeo'], ['editar', '✂️ Editar vídeo'], ['capa', '🎨 Criar capa'], ['live', '🔴 Live'], ['analytics', '📊 Analytics'], ['comentarios', '💬 Comentários'], ['ab', '🧪 Testes A/B']];
+const privLabel = (p, fem = false) => ({ public: fem ? 'pública' : 'público', unlisted: fem ? 'não listada' : 'não listado', private: fem ? 'privada' : 'privado' }[p] || p || '');
+const CANAL_TABS = [['videos', '🎬 Meus vídeos'], ['playlists', '📚 Playlists'], ['postar', '⬆️ Postar vídeo'], ['editar', '✂️ Editar vídeo'], ['capa', '🎨 Criar capa'], ['live', '🔴 Live'], ['analytics', '📊 Analytics'], ['comentarios', '💬 Comentários'], ['ab', '🧪 Testes A/B']];
 
 views.canal = async (params, sub) => {
   if (!state.user) return needLogin();
@@ -566,15 +607,19 @@ const canalTabs = {
         <div><h3>${esc(c.title)}</h3><p>👥 ${c.subs == null ? 'inscritos ocultos' : fmt(c.subs) + ' inscritos'} · 👁 ${fmt(c.views)} views · 🎬 ${fmt(c.videos)} vídeos</p>
         <p><a class="btn sm ghost" href="https://studio.youtube.com" target="_blank" rel="noopener">Abrir YouTube Studio</a> <button class="btn sm ghost" id="ytoff">Desvincular canal</button></p></div></div></div>
       <div class="grid cols2">${data.videos.map((v) => `
-        <div class="card" id="v-${esc(v.id)}">
+        <div class="card" id="v-${esc(v.id)}" data-privacy="${esc(v.privacy || '')}">
           <div class="thumbrow">${v.thumb ? `<img src="${esc(v.thumb)}">` : ''}<div><b>${esc(v.title)}</b>
-            <p class="muted small">👁 ${fmt(v.views)} · 👍 ${fmt(v.likes)} · 💬 ${fmt(v.comments)} · ⚡ ${fmt(v.vph)}/h · ${dt(v.publishedAt).split(',')[0]} · ${esc(v.privacy || '')}</p>
+            <p class="muted small">👁 ${fmt(v.views)} · 👍 ${fmt(v.likes)} · 💬 ${fmt(v.comments)} · ⚡ ${fmt(v.vph)}/h · ${dt(v.publishedAt).split(',')[0]} · ${esc(privLabel(v.privacy))}</p>
             <p class="small"><span class="pill ${v.seoScore >= 80 ? 'ok' : v.seoScore >= 50 ? 'warn' : 'err'}" title="${esc((v.seoTodo || []).join(' · ') || 'Tudo certo')}">SEO ${v.seoScore ?? '—'}/100</span>
               ${(v.seoTodo || []).length ? `<span class="muted">falta: ${esc((v.seoTodo || []).slice(0, 2).join(', '))}${v.seoTodo.length > 2 ? '…' : ''}</span>` : '<span class="muted">checklist completo ✅</span>'}</p>
             <p class="small"><a href="https://studio.youtube.com/video/${esc(v.id)}/edit" target="_blank" rel="noopener">editar no Studio ↗</a> · <a href="#/ferramentas/insights" data-insight="${esc(v.id)}">IA assiste este vídeo</a> · <a href="#/ferramentas/transformar" data-transform="${esc(v.id)}">transformar em Shorts</a></p></div></div>
-          <details><summary class="small">✏️ Editar título e descrição</summary>
-            <label>Título</label><input data-f="title" value="${esc(v.title)}" maxlength="100">
+          <details><summary class="small">✏️ Editar título, descrição, tags e visibilidade</summary>
+            <p><button class="btn sm ghost" type="button" data-opt="${esc(v.id)}">✨ Otimizar com IA</button> <span class="muted small">${costOf('prep_ai')} · sugere, você escolhe e salva</span></p>
+            <div class="small" data-sug="${esc(v.id)}"></div>
+            <label>Título <span class="muted small" data-len="${esc(v.id)}">${(v.title || '').length}/100</span></label><input data-f="title" value="${esc(v.title)}" maxlength="100">
             <label>Descrição</label><textarea data-f="description">${esc(v.description)}</textarea>
+            <label>Tags (separadas por vírgula)</label><input data-f="tags" value="${esc((v.tags || []).join(', '))}">
+            <label>Visibilidade</label><select data-f="privacy">${[['public', 'Público'], ['unlisted', 'Não listado'], ['private', 'Privado']].map(([k, l]) => `<option value="${k}" ${v.privacy === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
             <p><button class="btn sm" data-save="${esc(v.id)}">Salvar no YouTube</button> <span class="muted small">${costOf('video_update')}</span></p></details>
           <details><summary class="small">🖼️ Enviar capa</summary>
             <label>Imagem (JPG/PNG, até 2 MB, 1280x720)</label><input type="file" accept="image/*" data-file="${esc(v.id)}">
@@ -601,9 +646,32 @@ const canalTabs = {
     for (const b of el.querySelectorAll('[data-save]')) b.onclick = async () => {
       const id = b.dataset.save, card = $('#v-' + id);
       try {
-        const r = await api('/channel/videos/' + id, { method: 'PUT', body: { title: card.querySelector('[data-f=title]').value, description: card.querySelector('[data-f=description]').value } });
+        const priv = card.querySelector('[data-f=privacy]').value;
+        if (priv === 'public' && card.dataset.privacy !== 'public' && !confirm('Deixar este vídeo PÚBLICO agora? Se ele estava agendado, o agendamento é cancelado e ele aparece para todos.')) return;
+        const tags = card.querySelector('[data-f=tags]').value.split(',').map((t) => t.trim()).filter(Boolean);
+        const r = await api('/channel/videos/' + id, { method: 'PUT', body: { title: card.querySelector('[data-f=title]').value, description: card.querySelector('[data-f=description]').value, tags, privacy: priv } });
+        card.dataset.privacy = r.result?.privacy || priv;
         await refreshMe(); msg(id, 'ok', 'Salvo no YouTube. ' + creditsNote(r.credits));
       } catch (e) { msg(id, 'err', esc(e.message)); }
+    };
+    for (const inp of el.querySelectorAll('[data-f=title]')) inp.oninput = () => { const c = inp.closest('.card'); const l = c.querySelector('[data-len]'); if (l) l.textContent = inp.value.length + '/100'; };
+    // Otimizar com IA: usa o "Preparar" com o título e a descrição atuais e oferece as sugestões
+    for (const b of el.querySelectorAll('[data-opt]')) b.onclick = async () => {
+      const id = b.dataset.opt, card = $('#v-' + id), box = card.querySelector('[data-sug]');
+      const title = card.querySelector('[data-f=title]'), desc = card.querySelector('[data-f=description]'), tagsIn = card.querySelector('[data-f=tags]');
+      box.innerHTML = '<span class="spin"></span> pensando…';
+      try {
+        const r = await api('/tools/prep_ai', { method: 'POST', body: { topic: title.value.slice(0, 200), notes: desc.value.slice(0, 1800) } });
+        await refreshMe();
+        const s = r.result;
+        box.innerHTML = `${s.metodo === 'ia' ? '' : alertBox('warn', 'Sugestões do gerador local (sem IA configurada no servidor). Revise antes de usar.')}
+          <p><b>Títulos sugeridos</b> (clique para usar):</p>${(s.titulos || []).slice(0, 6).map((t) => `<a href="#" data-ut="${esc(t)}">↳ ${esc(t)}</a>`).join('<br>')}
+          <p><a href="#" data-ud="1">↳ usar a descrição sugerida</a> · <a href="#" data-ug="1">↳ usar as ${(s.tags || []).length} tags sugeridas</a></p>
+          <p class="muted">${creditsNote(r.credits).replace(/<[^>]+>/g, '')} Nada muda no YouTube até você clicar em "Salvar no YouTube".</p>`;
+        for (const a of box.querySelectorAll('[data-ut]')) a.onclick = (e) => { e.preventDefault(); title.value = a.dataset.ut.slice(0, 100); title.oninput?.(); };
+        box.querySelector('[data-ud]').onclick = (e) => { e.preventDefault(); desc.value = String(s.descricao || '').slice(0, 5000); };
+        box.querySelector('[data-ug]').onclick = (e) => { e.preventDefault(); tagsIn.value = (s.tags || []).join(', '); };
+      } catch (e) { box.innerHTML = alertBox('err', esc(e.message)); }
     };
     for (const b of el.querySelectorAll('[data-thumb]')) b.onclick = async () => {
       const id = b.dataset.thumb, card = $('#v-' + id);
@@ -624,6 +692,56 @@ const canalTabs = {
         const r = await api('/channel/ab', { method: 'POST', body: { video_id: id, thumb_a, thumb_b, hours: parseInt(card.querySelector('[data-h]').value, 10) || 24 } });
         await refreshMe(); msg(id, 'ok', 'Teste iniciado com a capa A. ' + esc(r.result.aviso) + ' ' + creditsNote(r.credits));
       } catch (e) { msg(id, 'err', esc(e.message)); }
+    };
+  },
+
+  async playlists(el) {
+    const [pl, vids] = await Promise.all([api('/channel/playlists'), api('/channel/videos').catch(() => ({ videos: [] }))]);
+    const opts = vids.videos.map((v) => `<option value="${esc(v.id)}">${esc(v.title)}</option>`).join('');
+    el.innerHTML = `
+      <div class="card" style="max-width:720px"><h3>Nova playlist</h3>
+        <div class="row"><div><label>Nome</label><input id="plT" maxlength="150" placeholder="ex.: Melhores momentos"></div>
+          <div class="fit"><label>Visibilidade</label><select id="plP"><option value="public">Pública</option><option value="unlisted">Não listada</option><option value="private">Privada</option></select></div></div>
+        <label>Descrição (opcional)</label><textarea id="plD" maxlength="5000" style="min-height:70px"></textarea>
+        <p><button class="btn sm" id="plNew" type="button">Criar playlist</button> <span class="muted small">${costOf('playlist_create')}</span></p><div id="plMsg"></div></div>
+      <div class="grid cols2">${pl.items.map((p) => `<div class="card">
+        <div class="thumbrow">${p.thumb ? `<img src="${esc(p.thumb)}">` : ''}<div><b>${esc(p.title)}</b>
+          <p class="muted small">${fmt(p.count)} ${p.count === 1 ? 'vídeo' : 'vídeos'} · ${esc(privLabel(p.privacy, true))} · <a href="https://www.youtube.com/playlist?list=${esc(p.id)}" target="_blank" rel="noopener">abrir ↗</a></p></div></div>
+        ${opts ? `<div class="row"><div><select data-addv="${esc(p.id)}">${opts}</select></div><div class="fit"><button class="btn sm secondary" type="button" data-add="${esc(p.id)}">Adicionar ${costOf('playlist_add')}</button></div></div>` : '<p class="muted small">Você ainda não tem vídeos para adicionar.</p>'}
+        <details data-items="${esc(p.id)}"><summary class="small">ver vídeos desta playlist</summary><div class="small">carregando…</div></details>
+        <div class="small" data-plm="${esc(p.id)}"></div></div>`).join('')}</div>
+      ${pl.items.length ? '' : '<p class="muted">Nenhuma playlist ainda. Crie a primeira acima.</p>'}`;
+    $('#plNew').onclick = async () => {
+      try {
+        const title = $('#plT').value.trim();
+        if (!title) throw new Error('Dê um nome para a playlist.');
+        const r = await api('/channel/playlists', { method: 'POST', body: { title, description: $('#plD').value, privacy: $('#plP').value } });
+        await refreshMe();
+        await canalTabs.playlists(el);
+        $('#plMsg').innerHTML = alertBox('ok', `Playlist "${esc(r.result.title)}" criada. ` + creditsNote(r.credits));
+      } catch (e) { $('#plMsg').innerHTML = alertBox('err', esc(e.message)); }
+    };
+    const loadItems = async (d) => {
+      const id = d.dataset.items, box = d.querySelector('div');
+      try {
+        const r = await api('/channel/playlists/' + id + '/items');
+        box.innerHTML = r.items.length ? r.items.map((i) => `<div>${i.position + 1}. ${esc(i.title)} <a href="#" data-rm="${esc(i.itemId)}" class="muted">remover</a></div>`).join('') : '<span class="muted">Playlist vazia.</span>';
+        for (const a of box.querySelectorAll('[data-rm]')) a.onclick = async (e) => {
+          e.preventDefault();
+          if (!confirm('Tirar este vídeo da playlist? (o vídeo continua no canal)')) return;
+          try { await api('/channel/playlists/' + id + '/items/' + a.dataset.rm, { method: 'DELETE' }); await refreshMe(); loadItems(d); }
+          catch (err) { box.insertAdjacentHTML('beforeend', alertBox('err', esc(err.message))); }
+        };
+      } catch (e) { box.innerHTML = alertBox('err', esc(e.message)); }
+    };
+    for (const d of el.querySelectorAll('[data-items]')) d.ontoggle = () => { if (d.open) loadItems(d); };
+    for (const b of el.querySelectorAll('[data-add]')) b.onclick = async () => {
+      const id = b.dataset.add, m = el.querySelector(`[data-plm="${id}"]`);
+      try {
+        const r = await api('/channel/playlists/' + id + '/items', { method: 'POST', body: { video_id: el.querySelector(`[data-addv="${id}"]`).value } });
+        await refreshMe(); m.innerHTML = alertBox('ok', 'Vídeo adicionado. ' + creditsNote(r.credits));
+        const d = el.querySelector(`[data-items="${id}"]`); if (d.open) loadItems(d);
+      } catch (e) { m.innerHTML = alertBox('err', esc(e.message)); }
     };
   },
 
@@ -903,20 +1021,22 @@ views.ajuda = async () => {
         <li>No Chrome, digite <b>chrome://extensions</b> na barra de endereço e aperte Enter.</li>
         <li>Ative o <b>Modo do desenvolvedor</b> (chavinha no canto superior direito).</li>
         <li>Clique em <b>Carregar sem compactação</b> e escolha a pasta descompactada (a que contém o arquivo manifest.json).</li>
-        <li>Clique no 🚀 na barra do Chrome e entre com a mesma conta do site.</li></ol>
+        <li>Clique no ícone laranja do TurboCanal (fica no quebra-cabeça 🧩 da barra do Chrome; use o alfinete para fixar) e entre com o Google, a mesma conta do site.</li>
+        <li>Abra qualquer vídeo do YouTube: o painel do TurboCanal aparece ao lado do vídeo.</li></ol>
+        <p class="small muted"><b>Para atualizar:</b> baixe o .zip de novo, troque a pasta antiga pela nova e, em chrome://extensions, clique no botão de recarregar (↻) do TurboCanal.</p>
         <p class="small muted">A extensão ainda não está publicada na Chrome Web Store, por isso a instalação é manual (modo do desenvolvedor). Quando for publicada na loja, bastará um clique.</p></div>
       <div class="card"><h3>De onde vêm os dados?</h3>
         <p class="muted">Das APIs oficiais e públicas do YouTube (YouTube Data API v3). Quando mostramos uma estimativa ou pontuação própria, isso vem identificado. Não inventamos métricas que a API não fornece.</p></div>
       <div class="card"><h3>Pagamentos</h3>
         <p class="muted">Aceitamos Pix por meio de provedor de pagamentos. Seu plano só é ativado depois que o provedor confirma o pagamento; não existe liberação por "já paguei". Problemas com uma cobrança? Fale com o administrador pela conta de contato do site.</p></div>
       <div class="card"><h3>Sou novo no YouTube, por onde começo?</h3>
-        <p class="muted">1) Pesquise palavras-chave do seu nicho; 2) analise 3 canais concorrentes e veja a média de views deles; 3) use as sugestões de título antes de gravar; 4) rode a análise de SEO no vídeo publicado e aplique as dicas.</p></div>
+        <p class="muted">1) Vincule seu canal e gere <a href="#/ferramentas/ideias">ideias de vídeos</a>; 2) pesquise as palavras-chave do seu nicho; 3) acompanhe 3 canais concorrentes; 4) use o Preparar publicação antes de gravar; 5) depois de postar, abra "Meu canal" e use "Otimizar com IA" nos vídeos com SEO baixo.</p></div>
       <div class="card"><h3>O editor de vídeo envia meu vídeo para algum lugar?</h3>
         <p class="muted">Não. O editor roda dentro do seu navegador: o arquivo não sai do seu computador e não gasta créditos. Só quando você clica em "Postar no meu canal" ele vai direto para o YouTube.</p></div>
       <div class="card"><h3>Por que preciso vincular o canal?</h3>
         <p class="muted">Para postar vídeos, criar lives, ver o analytics, responder comentários e trocar capas, o Google exige a sua autorização. Você vincula uma vez em "Meu canal" e pode desvincular quando quiser.</p></div>
       <div class="card"><h3>Privacidade e segurança</h3>
-        <p class="muted">Senhas são armazenadas com hash (bcrypt). Permissões, saldos e pagamentos são validados sempre no servidor. O token da extensão equivale a uma senha: não compartilhe.</p></div>
+        <p class="muted">Você entra só com o Google: o TurboCanal não pede nem guarda a sua senha. Permissões, saldos e pagamentos são validados sempre no servidor, e só vídeos e playlists do seu próprio canal podem ser alterados. Detalhes na <a href="/privacidade">Política de Privacidade</a>.</p></div>
     </div>`;
 };
 

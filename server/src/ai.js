@@ -36,20 +36,41 @@ async function callAny(db, prompt, maxTokens) {
   return null;
 }
 
+// Núcleo do tema: tira complementos de um título existente ("X: guia...", "X (2026)", "X | canal")
+function topicCore(topic) {
+  let t = String(topic || '').trim().replace(/\s+/g, ' ');
+  t = t.split(/\s*(?::|\||\s-\s|\s–\s|\(|\[)\s*/)[0].trim() || t;
+  return t.replace(/[.!?,;]+$/, '').trim();
+}
+const fitTitle = (s) => (s.length <= 100 ? s : s.slice(0, 100).replace(/\s+\S*$/, ''));
+
 function heurTitles(topic, keywords = []) {
-  const t = topic.trim();
+  const t = topicCore(topic);
   const kw = keywords.filter(Boolean).slice(0, 3);
-  const extra = kw.length ? ` (${kw[0]})` : '';
-  return [
-    `${t}: o guia completo para iniciantes`,
-    `7 erros em ${t} que travam seu canal`,
-    `Como fazer ${t} do ZERO em 2026${extra}`,
-    `${t} em 10 minutos: o essencial`,
-    `A verdade sobre ${t} que ninguém te conta`,
-    `Testei ${t} por 30 dias: o resultado`,
-    `${t} explicado de um jeito simples`,
-    `Antes de tentar ${t}, assista isso`
-  ];
+  const extra = kw.length && !t.toLowerCase().includes(String(kw[0]).toLowerCase()) ? ` (${kw[0]})` : '';
+  const m = t.match(/^como\s+(.+)$/i);
+  const list = m
+    ? [
+        `${t}: o guia completo para iniciantes`,
+        `7 erros que te impedem de ${m[1]}`,
+        `${t} do ZERO em 2026${extra}`,
+        `${t} em 10 minutos (o essencial)`,
+        `O segredo para ${m[1]} que ninguém te conta`,
+        `Tentei ${m[1]} por 30 dias: o resultado`,
+        `${t}? Explicado de um jeito simples`,
+        `Antes de tentar ${m[1]}, assista isso`
+      ]
+    : [
+        `${t}: o guia completo para iniciantes`,
+        `7 erros em ${t} que travam seu canal`,
+        `Como fazer ${t} do ZERO em 2026${extra}`,
+        `${t} em 10 minutos: o essencial`,
+        `A verdade sobre ${t} que ninguém te conta`,
+        `Testei ${t} por 30 dias: o resultado`,
+        `${t} explicado de um jeito simples`,
+        `Antes de tentar ${t}, assista isso`
+      ];
+  return [...new Set(list.map((x) => fitTitle(x.charAt(0).toUpperCase() + x.slice(1))))];
 }
 
 export async function titleSuggestions(db, { topic, keywords = [] }) {
@@ -115,9 +136,10 @@ function words(topic) {
 }
 
 function heurPrep({ topic, notes = '', mode }) {
-  const t = topic.trim();
+  const t = topicCore(topic);
   const ws = words(t);
-  const tags = [...new Set([t.toLowerCase(), ...ws, `${t} tutorial`, `${t} dicas`, `como ${t}`, `${t} para iniciantes`, `${t} 2026`, `melhor ${ws[0] || t}`])].slice(0, 15);
+  const lt = t.toLowerCase();
+  const tags = [...new Set([lt, ...ws.filter((w) => w !== 'como'), `${lt} tutorial`, `${lt} dicas`, ...(lt.startsWith('como ') ? [] : [`como ${lt}`]), `${lt} para iniciantes`, `${lt} 2026`, `melhor ${ws[ws.length - 1] || lt}`])].slice(0, 15);
   const base = {
     titulos: heurTitles(t, ws),
     descricao: heurDescription({ topic: t, draft: notes, keywords: ws.slice(0, 5) }),
@@ -155,6 +177,46 @@ export async function prepPack(db, { topic, notes = '', audience = '', mode = 'p
   const parsed = ai ? parseJsonLoose(ai.text) : null;
   if (parsed && Array.isArray(parsed.titulos)) return { ...parsed, metodo: 'ia', modelo: ai.modelo, mode };
   return heurPrep({ topic, notes, mode });
+}
+
+// ---------------- Ideias de próximos vídeos para o canal ----------------
+export async function channelIdeas(db, { niche = '', titles = [], channel = '' }) {
+  const list = titles.filter(Boolean).slice(0, 20);
+  const prompt =
+    `Você é um estrategista de YouTube brasileiro. ` +
+    (channel ? `Canal: "${channel}". ` : '') +
+    (niche ? `Nicho/tema do canal: ${niche}. ` : '') +
+    (list.length ? `Vídeos do canal com mais views (do mais para o menos visto): ${list.map((t) => `"${t}"`).join('; ')}. ` : '') +
+    `Sugira 10 ideias de PRÓXIMOS vídeos com boa chance de performar e coerentes com o canal (misture Shorts e vídeos longos). ` +
+    `Responda SOMENTE com JSON válido, sem markdown: {"ideias":[{"titulo":"até 70 caracteres","formato":"Shorts ou Longo","porque":"1 frase curta","palavra_chave":"termo de busca principal"}]}`;
+  const ai = await callAny(db, prompt, 1800);
+  const parsed = ai ? parseJsonLoose(ai.text) : null;
+  if (parsed && Array.isArray(parsed.ideias) && parsed.ideias.length) return { ideias: parsed.ideias.slice(0, 10), metodo: 'ia', modelo: ai.modelo, base: list.length };
+  return heurIdeas({ niche, titles: list });
+}
+
+function heurIdeas({ niche, titles }) {
+  const freq = {};
+  const stop = new Set(['como', 'para', 'com', 'que', 'uma', 'meu', 'minha', 'você', 'voce', 'mais', 'muito', 'isso', 'esse', 'essa', 'dos', 'das', 'por', 'sem', 'the', 'and']);
+  for (const t of titles) for (const w of words(t)) if (!stop.has(w)) freq[w] = (freq[w] || 0) + 1;
+  const top = Object.entries(freq).sort((a, b) => b[1] - a[1]).map(([w]) => w);
+  const base = (niche || top.slice(0, 2).join(' ') || 'seu tema').trim();
+  const best = titles[0];
+  const ideias = [
+    best
+      ? { titulo: `${best.slice(0, 58)} (parte 2)`, formato: 'Longo', porque: 'Continuar o vídeo que mais performou aproveita quem já gostou do tema.', palavra_chave: base }
+      : { titulo: `${base}: guia completo do zero`, formato: 'Longo', porque: 'Guias completos têm busca constante.', palavra_chave: base },
+    { titulo: `7 erros de ${base} que todo iniciante comete`, formato: 'Longo', porque: 'Listas de erros despertam curiosidade e retêm até o fim.', palavra_chave: `${base} erros` },
+    { titulo: `${base} em 60 segundos`, formato: 'Shorts', porque: 'Shorts trazem público novo para os vídeos longos.', palavra_chave: base },
+    { titulo: `Testei ${base} por 7 dias`, formato: 'Longo', porque: 'Desafios com prazo criam expectativa pelo resultado.', palavra_chave: base },
+    { titulo: `${base}: do pior ao melhor (ranking)`, formato: 'Longo', porque: 'Rankings geram discussão nos comentários.', palavra_chave: `melhor ${base}` },
+    { titulo: `O que ninguém te conta sobre ${base}`, formato: 'Shorts', porque: 'Promessa de segredo aumenta o clique.', palavra_chave: base },
+    { titulo: `${top[2] || base} vs ${top[3] || 'o mais popular'}: qual é melhor?`, formato: 'Longo', porque: 'Comparações respondem uma dúvida real de quem pesquisa.', palavra_chave: `${top[2] || base} vs` },
+    { titulo: `Respondendo as perguntas sobre ${base}`, formato: 'Longo', porque: 'Usa as dúvidas do seu público como pauta.', palavra_chave: `${base} dúvidas` },
+    { titulo: `${base} para iniciantes (passo a passo)`, formato: 'Longo', porque: 'Termo de busca com muita procura e intenção clara.', palavra_chave: `${base} iniciante` },
+    { titulo: `Fiz ${base} do jeito ERRADO de propósito`, formato: 'Shorts', porque: 'Humor e quebra de expectativa viralizam bem em Shorts.', palavra_chave: base }
+  ];
+  return { ideias, metodo: 'heuristica', base: titles.length, aviso: 'Gerado por regras locais a partir dos seus títulos (nenhuma IA configurada). Com a chave do Gemini no Admin, as ideias ficam personalizadas de verdade.' };
 }
 
 // ---------------- Sugestões de resposta a comentários ----------------

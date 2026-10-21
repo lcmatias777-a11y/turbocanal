@@ -92,6 +92,16 @@ export function toolRoutes(app, db, auth) {
     return gemini.transformVideo(db, id, mode);
   }));
 
+  // Ideias de próximos vídeos (usa os títulos mais vistos do canal, enviados pelo site)
+  const ideasInput = (req) => ({
+    niche: String(req.body?.niche || '').trim().slice(0, 200),
+    titles: Array.isArray(req.body?.titles) ? req.body.titles.map((t) => String(t).slice(0, 120)).filter(Boolean).slice(0, 20) : [],
+    channel: String(req.body?.channel || '').slice(0, 100)
+  });
+  app.post('/api/tools/ideas_ai', auth.required,
+    (req, res, next) => { const i = ideasInput(req); next(i.niche || i.titles.length ? undefined : new HttpError(400, 'Diga o tema do canal (ou vincule seu canal para eu usar os seus vídeos).')); },
+    run('ideas_ai', (req) => ai.channelIdeas(db, ideasInput(req))));
+
   // Sugestões de resposta a um comentário
   app.post('/api/tools/reply_ai', auth.required, run('reply_ai', (req) => {
     const comment = must(req.body?.comment, 'comentário', { max: 2000 });
