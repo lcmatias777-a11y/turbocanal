@@ -11,7 +11,12 @@ export async function getToken() {
   const base = await baseUrl();
   try {
     const c = await chrome.cookies.get({ url: base + '/', name: 'tc_token' });
-    if (c?.value) return c.value;
+    // guarda para o painel do YouTube, que não tem acesso aos cookies
+    if (c?.value) { try { await chrome.storage.local.set({ tc_token: c.value, tc_token_em: Date.now() }); } catch {} return c.value; }
+  } catch {}
+  try {
+    const l = await chrome.storage.local.get(['tc_token']);
+    if (l?.tc_token) return l.tc_token;
   } catch {}
   try { return (await chrome.storage.sync.get(['token'])).token || ''; } catch { return ''; }
 }

@@ -168,7 +168,7 @@ const PAGES = {
   await page.waitForSelector('#tc-panel .tc-need', { timeout: 5000 });
   check('aba Canal sem conta: caixinha dentro do painel, com o painel inteiro ainda à vista',
     /precisa da sua conta/.test(await page.textContent('#tc-panel .tc-need')) && (await page.$$('#tc-panel .tc-tab')).length === 4);
-  check('a caixinha avisa que o resto funciona sem conta', /O resto do painel funciona sem conta/.test(await page.textContent('#tc-panel .tc-need')));
+  check('a caixinha avisa que o resto funciona sem conta', /O resto funciona sem conta/.test(await page.textContent('#tc-panel .tc-need')));
   await page.click('#tc-panel .tc-tab:nth-child(4)');
   await page.waitForSelector('#tc-panel .tc-need', { timeout: 5000 });
   check('aba IA sem conta: explica o que a IA faz e oferece entrar', /A IA assiste a este vídeo/.test(await page.textContent('#tc-panel .tc-pane')) && !!(await page.$('#tc-panel .tc-need')));
@@ -263,7 +263,26 @@ const PAGES = {
   check('Studio: botão flutuante com atalhos do TurboCanal', /SEO deste vídeo|IA do vídeo/.test(await sd.textContent('#tc-studio')));
   await sd.close();
 
-  /* ================= 6. COM CONTA: Canal e IA de verdade ================= */
+  /* ================= 6. a sessão chega pelo site, sem service worker ================= */
+  console.log('\n— Entrar pelo site e o painel reconhecer sozinho —');
+  await login();
+  const siteTab = watch(await ctx.newPage());
+  await siteTab.goto(PUBLIC + '/#/dashboard');
+  await siteTab.waitForTimeout(2500); // site-token.js guarda a sessão
+  await siteTab.close();
+  await ctx.clearCookies(); // tira o cookie: agora SÓ o que o site guardou pode servir
+  const semCookie = watch(await ctx.newPage());
+  await semCookie.goto('https://www.youtube.com/watch?v=' + VID);
+  await semCookie.waitForSelector('#tc-panel .tc-grid', { timeout: 20000 });
+  await semCookie.waitForFunction(() => /💎/.test(document.querySelector('#tc-panel .tc-credits')?.textContent || ''), null, { timeout: 20000 }).catch(() => {});
+  check('entrou no site uma vez: o painel do YouTube reconhece a conta mesmo sem o cookie',
+    /💎/.test(await semCookie.textContent('#tc-panel .tc-credits')), await semCookie.textContent('#tc-panel .tc-credits'));
+  await semCookie.click('#tc-panel .tc-tab:nth-child(3)');
+  await semCookie.waitForSelector('#tc-panel .tc-chan, #tc-panel .tc-need', { timeout: 20000 });
+  check('e a aba Canal abre de verdade, sem pedir login de novo', !(await semCookie.$('#tc-panel .tc-need')));
+  await semCookie.close();
+
+  /* ================= 7. COM CONTA: Canal e IA de verdade ================= */
   console.log('\n— Com a conta ligada —');
   await login();
   const c1 = await credits();
@@ -286,7 +305,7 @@ const PAGES = {
     /Resumo/.test(ai) && /Gancho: \d+\/10/.test(ai) && /Desempenho/.test(ai) && /3 ideias/.test(ai) && /inscritos/i.test(ai) && c2 - (await credits()) === 300, ai.replace(/\s+/g, ' ').slice(0, 260));
   await p2.close();
 
-  /* ================= 7. popup (sem tela de login) ================= */
+  /* ================= 8. popup (sem tela de login) ================= */
   console.log('\n— Popup —');
   await ctx.clearCookies();
   const anon = watch(await ctx.newPage());
@@ -302,6 +321,9 @@ const PAGES = {
     }, 5);
   });
   await anon.goto(`chrome-extension://${extId}/popup.html`);
+  // sair de verdade: sem cookie E sem a sessão guardada pela extensão
+  await anon.evaluate(() => chrome.storage.local.remove(['tc_token', 'tc_token_em']));
+  await anon.reload();
   await anon.waitForSelector('#canal', { timeout: 15000 });
   const pt0 = await anon.textContent('body');
   check('popup SEM conta já mostra as ferramentas (nenhuma tela de login)', !!(await anon.$('#tend')) && !!(await anon.$('#ideias')) && !!(await anon.$('#kw')));
@@ -344,7 +366,7 @@ const PAGES = {
   check('religar mostra de novo', (await home.$$('.tc-badge')).length === 5);
   await pop.close();
 
-  /* ================= 8. opções ================= */
+  /* ================= 9. opções ================= */
   const opt = watch(await ctx.newPage());
   await opt.goto(`chrome-extension://${extId}/options.html`);
   await opt.waitForSelector('#bu', { timeout: 15000 });

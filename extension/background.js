@@ -16,8 +16,12 @@ async function getToken() {
     saved = c.token || '';
   } catch {}
   try {
+    const l = await chrome.storage.local.get(['tc_token']);
+    if (l?.tc_token) return l.tc_token;
+  } catch {}
+  try {
     const c = await chrome.cookies.get({ url: base + '/', name: 'tc_token' });
-    if (c?.value) return c.value;
+    if (c?.value) { try { await chrome.storage.local.set({ tc_token: c.value }); } catch {} return c.value; }
   } catch {}
   return saved;
 }

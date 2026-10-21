@@ -110,6 +110,7 @@ async function mostrarConta() {
       <span class="muted">plano ${esc(me.plan?.name || me.plan_id)}</span> · <a href="#" id="cSair">sair</a>`;
     on('#cSair', async () => {
       await setCfg({ token: '' });
+      try { await chrome.storage.local.remove(['tc_token', 'tc_token_em']); } catch {}
       try { await chrome.cookies.remove({ url: BASE + '/', name: 'tc_token' }); } catch {}
       mostrarConta();
     });

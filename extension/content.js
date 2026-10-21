@@ -58,13 +58,20 @@
     try { document.documentElement.dataset.tcCfg = JSON.stringify(S); } catch {}
   }
   const site = (hash) => S.baseUrl + '/#/' + hash;
+  /** A sessão vem do armazenamento da extensão, que o próprio site preenche quando você
+   *  entra nele (site-token.js). Assim o painel não depende do service worker do Chrome,
+   *  que às vezes dorme e não acorda. O service worker fica só como reserva. */
   async function token() {
-    for (let i = 0; i < 2; i++) {
-      const r = await comPrazo(chrome.runtime.sendMessage({ type: 'getToken' }), 2500, null);
-      if (r && typeof r.token === 'string') return r.token;
-      await new Promise((ok) => setTimeout(ok, 250));
-    }
-    return '';
+    try {
+      const c = await comPrazo(chrome.storage.local.get(['tc_token']), 1500, null);
+      if (c && c.tc_token) return c.tc_token;
+    } catch {}
+    const r = await comPrazo(chrome.runtime.sendMessage({ type: 'getToken' }), 2500, null);
+    return r && typeof r.token === 'string' ? r.token : '';
+  }
+  async function esqueceToken() {
+    ME = null; MEtried = false;
+    try { await chrome.storage.local.remove(['tc_token']); } catch {}
   }
   async function api(path, { method = 'GET', body, timeout = 120000 } = {}) {
     const t = await token();
@@ -84,6 +91,7 @@
       throw err;
     } finally { clearTimeout(to); }
     const data = await r.json().catch(() => ({}));
+    if (r.status === 401) esqueceToken();
     if (!r.ok) { const e = new Error(data.error || 'Erro ' + r.status); e.status = r.status; throw e; }
     return data;
   }
@@ -124,7 +132,7 @@
       h('div', { class: 'tc-actions' },
         linkCru(S.baseUrl + '/api/auth/google', '🔵 Entrar com Google'),
         h('button', { class: 'tc-btn tc-sec2', type: 'button', onclick: () => { MEtried = false; ME = null; refreshPanel(); } }, '🔄 Já entrei')),
-      h('div', { class: 'tc-muted' }, 'O resto do painel funciona sem conta.'));
+      h('div', { class: 'tc-muted' }, 'Depois de entrar no site, o painel reconhece sozinho (pode fechar a aba). O resto funciona sem conta.'));
   }
   const errBox = (e) => h('div', { class: 'tc-err' }, e.message,
     e.status === 401 ? h('div', { class: 'tc-muted' }, 'Sessão expirada: entre de novo no site.') : null,
@@ -685,6 +693,12 @@
     document.addEventListener('tc-video-data', () => route());
     window.addEventListener('yt-navigate-finish', () => setTimeout(route, 500));
     setInterval(route, 2000);
-    chrome.storage.onChanged.addListener(async () => { await loadCfg(); if (!S.badges) removeBadges(); MEtried = false; route(); });
+    chrome.storage.onChanged.addListener(async (mudou, area) => {
+      await loadCfg();
+      if (!S.badges) removeBadges();
+      ME = null; MEtried = false;
+      // entrou (ou saiu) da conta no site: refaz o painel na hora, sem precisar clicar em nada
+      if (area === 'local' && mudou && mudou.tc_token) refreshPanel(); else route();
+    });
   })();
 })();
