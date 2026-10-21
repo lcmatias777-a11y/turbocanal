@@ -1373,6 +1373,17 @@ const adminTabs = {
         <br>Banco de dados: <span class="pill ${s.database === 'postgres' ? 'ok' : 'warn'}">${esc(s.database)}</span>${s.database !== 'postgres' ? ' (sem DATABASE_URL os dados não persistem em hospedagem com disco efêmero)' : ''}</p>
         <p><button id="csave" class="btn sm">Salvar</button></p></div>
       <div class="card"><h3>Pagamentos (Pix)</h3><div id="pmsg2"></div>
+        <details class="small" ${s.payments_enabled === '1' ? '' : 'open'}><summary><b>Como ligar os pagamentos (passo a passo)</b></summary>
+        <ol class="muted">
+          <li><b>Chave Pix:</b> abra o app do seu banco e veja qual chave vai receber. Escreva ela aqui embaixo, escolha o tipo e marque a confirmação. O número do cadastro (54984398807) só vale se ele estiver mesmo cadastrado como chave Pix no banco.</li>
+          <li><b>Conta no Mercado Pago:</b> entre em <a href="https://www.mercadopago.com.br/" target="_blank" rel="noopener">mercadopago.com.br</a> com o CPF/CNPJ que vai receber e cadastre a mesma chave Pix lá.</li>
+          <li><b>Access Token:</b> vá em <a href="https://www.mercadopago.com.br/developers/panel/app" target="_blank" rel="noopener">Seus negócios &gt; Configurações &gt; Gestão e administração &gt; Credenciais</a>, crie uma aplicação e copie o <b>Access Token de produção</b> (começa com APP_USR-). Cole no campo abaixo. O de teste não recebe dinheiro de verdade.</li>
+          <li><b>Webhook:</b> na mesma aplicação, em <b>Webhooks / Notificações</b>, cadastre o endereço que aparece abaixo e marque o evento <b>Pagamentos (payment)</b>. É assim que o site fica sabendo que você recebeu; sem isso o crédito não entra sozinho.</li>
+          <li><b>Ativar:</b> marque "Pagamentos ativados" e salve. O site só deixa ativar depois que o token existe e a chave Pix está confirmada.</li>
+          <li><b>Testar:</b> saia da conta de administrador (ela é isenta), entre com outra conta, escolha um plano e pague R$ 10 de verdade para você mesmo. Os créditos entram quando o Mercado Pago confirmar. Não existe botão de "já paguei".</li>
+        </ol>
+        <p class="muted">Custo: o Mercado Pago cobra uma taxa por Pix recebido (hoje em torno de 0,99%, confira na sua conta). O TurboCanal não cobra nada por fora.</p>
+        </details>
         <label>Chave Pix de recebimento</label><input id="c_pix" value="${esc(s.pix_key_value)}">
         <label>Tipo da chave</label>
         <select id="c_pixt">${['phone|Telefone', 'cpf|CPF', 'cnpj|CNPJ', 'email|E-mail', 'random|Aleatória'].map((o) => { const [v, l] = o.split('|'); return `<option value="${v}" ${s.pix_key_type === v ? 'selected' : ''}>${l}</option>`; }).join('')}</select>

@@ -374,6 +374,62 @@ const trN = await req('/api/tools/trends', { method: 'POST', token: t1, body: { 
 check('Tendências do nicho: até 2 termos do canal + categoria do canal', trN.status === 200 && trN.data.result.groups.length === 3 && trN.data.result.nicho.length === 2 && trN.data.result.categoria === 'Jogos', JSON.stringify(trN.data).slice(0, 200));
 const costsNow = (await req('/api/tools/costs')).data.costs;
 check('preços: IA do vídeo a 300 créditos e capa com IA fora da tabela', costsNow.find((c) => c.tool === 'video_insights_ai').cost === 300 && !costsNow.some((c) => c.tool === 'thumbnail_ai'));
+
+// ---------- Créditos mensais do plano Free ----------
+console.log('\n— Créditos mensais —');
+const maria = await db.get('SELECT * FROM users WHERE email=?', ['maria@example.com']);
+const mesAtual = new Date().toISOString().slice(0, 7);
+const mesPassado = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15)).toISOString().slice(0, 7);
+
+// gastou quase tudo e o mês virou
+await db.run('UPDATE users SET credits=?, last_refill=? WHERE id=?', [12, mesPassado, maria.id]);
+await req('/api/me', { token: t1 });
+let depois = await db.get('SELECT credits,last_refill FROM users WHERE id=?', [maria.id]);
+check('virou o mês: o saldo do Free é completado até 5.000 no primeiro uso', depois.credits === 5000 && depois.last_refill === mesAtual, JSON.stringify(depois));
+
+const txRec = await db.get("SELECT * FROM transactions WHERE user_id=? AND note LIKE 'Recarga mensal%' ORDER BY created_at DESC", [maria.id]);
+check('a recarga fica registrada no histórico do usuário', !!txRec && txRec.delta === 4988, JSON.stringify(txRec).slice(0, 120));
+
+// no mesmo mês não recarrega de novo
+await db.run('UPDATE users SET credits=? WHERE id=?', [40, maria.id]);
+await req('/api/me', { token: t1 });
+depois = await db.get('SELECT credits FROM users WHERE id=?', [maria.id]);
+check('no mesmo mês não recarrega de novo (não dá para repetir o mês)', depois.credits === 40, String(depois.credits));
+
+// completa até, não soma: quem tem mais que o teto não perde nem ganha
+await db.run('UPDATE users SET credits=?, last_refill=? WHERE id=?', [7000, mesPassado, maria.id]);
+await req('/api/me', { token: t1 });
+depois = await db.get('SELECT credits FROM users WHERE id=?', [maria.id]);
+check('quem tem mais que o teto não perde o saldo nem ganha de novo', depois.credits === 7000, String(depois.credits));
+
+// o administrador pode AUMENTAR a recarga mensal
+const setTop = await req('/api/admin/settings', { method: 'PUT', token: tOwn, body: { updates: { free_monthly_topup: '9000' } } });
+await db.run('UPDATE users SET credits=?, last_refill=? WHERE id=?', [100, mesPassado, maria.id]);
+await req('/api/me', { token: t1 });
+depois = await db.get('SELECT credits FROM users WHERE id=?', [maria.id]);
+check('o administrador pode aumentar a recarga mensal (9.000 no mês seguinte)', setTop.status === 200 && depois.credits === 9000, String(depois.credits));
+await req('/api/admin/settings', { method: 'PUT', token: tOwn, body: { updates: { free_monthly_topup: '5000' } } });
+
+// plano pago: os créditos entram quando o pagamento é confirmado, e NÃO caem para o teto do Free
+const planoPago = await db.get("SELECT * FROM plans WHERE id<>'free' AND active=1 ORDER BY price_cents LIMIT 1");
+const { activatePayment } = await import('../src/payments.js');
+await db.run('INSERT INTO payments(id,user_id,plan_id,amount_cents,status,provider,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+  ['pay_teste_1', maria.id, planoPago.id, planoPago.price_cents, 'pending', 'teste', new Date().toISOString(), new Date().toISOString()]);
+const antesPago = (await db.get('SELECT credits FROM users WHERE id=?', [maria.id])).credits;
+await activatePayment(db, { id: 'pay_teste_1' }, null, 'teste');
+const depoisPago = await db.get('SELECT credits,plan_id FROM users WHERE id=?', [maria.id]);
+check(`pagamento confirmado: entra o plano ${planoPago.id} e soma ${planoPago.monthly_credits} créditos`,
+  depoisPago.plan_id === planoPago.id && depoisPago.credits === antesPago + planoPago.monthly_credits, JSON.stringify(depoisPago));
+
+await db.run('UPDATE users SET last_refill=? WHERE id=?', [mesPassado, maria.id]);
+await req('/api/me', { token: t1 });
+const pagoDepoisDoMes = await db.get('SELECT credits FROM users WHERE id=?', [maria.id]);
+check('plano pago não é rebaixado para o teto do Free quando o mês vira', pagoDepoisDoMes.credits === depoisPago.credits, String(pagoDepoisDoMes.credits));
+
+const segundoPag = await activatePayment(db, { id: 'pay_teste_1' }, null, 'teste');
+const semDobra = await db.get('SELECT credits FROM users WHERE id=?', [maria.id]);
+check('confirmar o mesmo pagamento duas vezes não dá crédito em dobro', semDobra.credits === pagoDepoisDoMes.credits, String(semDobra.credits));
+
 fake.close(); gem.close();
 
 console.log(`\nRESULTADO: ${pass} passaram, ${fail} falharam.`);
