@@ -84,10 +84,16 @@ async function diagnose() {
     const d = await r.json();
     lines.push(`✅ Site no ar (${Date.now() - t0} ms, banco ${esc(d.db || '?')})`);
   } catch { lines.push('❌ Não consegui falar com o site. Se ele estava parado, espere 1 minuto e tente de novo.'); }
+  if (token) {
+    try {
+      const me = (await api('/me')).user;
+      lines.push(me ? `✅ Conta: ${esc(me.email)}` : '⚠️ A sessão não vale mais: entre de novo com o Google');
+    } catch (e) { lines.push(e.status === 401 ? '⚠️ A sessão não vale mais: entre de novo com o Google' : '❌ ' + esc(e.message)); }
+  }
   try {
-    const me = (await api('/me')).user;
-    lines.push(me ? `✅ Conta: ${esc(me.email)}` : '⚠️ Sem conta');
-  } catch (e) { lines.push(e.status === 401 ? '⚠️ Sessão expirada: entre de novo' : '❌ ' + esc(e.message)); }
+    const r = await (await fetch(base + '/api/extension/version', { cache: 'no-store' })).json();
+    lines.push(r.version === VERSION ? `✅ Extensão atualizada (v${esc(VERSION)})` : `🆕 O site tem a v${esc(r.version)} e você está na v${esc(VERSION)}: baixe de novo, troque os arquivos da MESMA pasta e clique em ↻ em chrome://extensions`);
+  } catch {}
   showMsg('out', lines.map((l) => `<div>${l}</div>`).join(''));
 }
 
