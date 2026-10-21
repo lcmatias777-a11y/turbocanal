@@ -4,7 +4,9 @@
 // A regra que está sendo testada: NUNCA aparece tela de login; sem conta o painel funciona.
 const { chromium } = require('/opt/npm-tools/node_modules/playwright');
 const fs = require('fs'), os = require('os'), path = require('path');
+
 const EXT = process.argv[2], LOCAL = process.argv[3];
+const VER = JSON.parse(fs.readFileSync(path.join(EXT, 'manifest.json'), 'utf8')).version;
 const PUBLIC = 'https://turbocanal.onrender.com';
 let pass = 0, fail = 0;
 const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); } else { fail++; console.log('  FALHOU ', n, x); } };
@@ -26,28 +28,64 @@ const PLAYER = {
 const item = (id, title, line, tag = 'yt-lockup-view-model') => `<ytd-rich-item-renderer><${tag}><a href="/watch?v=${id}"><img src="${IMG}" width="320" height="180"></a><div><h3>${title}</h3><div>Canal X</div><div>${line}</div></div></${tag}></ytd-rich-item-renderer>`;
 const PAGES = {
   home: `<!doctype html><html><body><div id="contents">
-    ${item('aaaaaaaaaa1', 'Vídeo estourado', '1,2 mi de visualizações • há 3 dias')}
-    ${item('aaaaaaaaaa2', 'Vídeo normal', '20 mil visualizações • há 2 semanas')}
+    ${item('aaaaaaaaaa1', 'Vídeo estourado', '1,2 mi há 3 dias')}
+    ${item('aaaaaaaaaa2', 'Vídeo normal', '20 mil há 2 sem')}
     ${item('aaaaaaaaaa3', 'Vídeo em inglês', '345K views • 2 weeks ago')}
     ${item('aaaaaaaaaa4', 'Outro', '15 mil visualizações • há 1 mês')}
-    ${item('aaaaaaaaaa5', 'Mais um', '9,8 mil visualizações • há 5 dias')}
-    ${item('aaaaaaaaaa6', 'Ao vivo', '1,2 mil assistindo agora')}
+    ${item('aaaaaaaaaa5', 'Mais um', '9,8 mil há 5 h')}
+    ${item('aaaaaaaaaa6', 'Ao vivo', '273 assistindo')}
   </div></body></html>`,
   watch: `<!doctype html><html><body>
     <script>window.ytInitialPlayerResponse = ${JSON.stringify(PLAYER)};</script>
-    <div id="columns"><div id="primary">
-      <like-button-view-model><button aria-label="Marcar como gostei, junto com outras 4800 pessoas">4,8 mil</button></like-button-view-model>
-      <ytd-comments-header-renderer><span id="count">1.234 Comentários</span></ytd-comments-header-renderer>
-    </div><div id="secondary"><div id="secondary-inner">
-      ${item('bbbbbbbbbb1', 'Relacionado 1', '50 mil visualizações • há 2 dias')}
-      ${item('bbbbbbbbbb2', 'Relacionado 2', '3 mil visualizações • há 1 ano')}
-    </div></div></div></body></html>`,
+    <div id="columns"><div id="primary">player</div></div>
+    <script>
+      // o YouTube só monta estes pedaços depois; a extensão tem que se virar com isso
+      setTimeout(() => {
+        const lb = document.createElement('like-button-view-model');
+        const b = document.createElement('button');
+        b.setAttribute('aria-label', 'marcar este vídeo como "Gostei" com mais 4.800 pessoas');
+        b.append(document.createTextNode('4,8 mil'));
+        lb.append(b);
+        const ch = document.createElement('ytd-comments-header-renderer');
+        const c = document.createElement('h2');
+        c.id = 'count';
+        c.append(document.createTextNode('1.234 Comentários'));
+        ch.append(c);
+        document.getElementById('primary').append(lb, ch);
+      }, 2200);
+      setTimeout(() => {
+        // sem innerHTML: a regra de Trusted Types do YouTube proíbe, igual à página real
+        const criar = (id, titulo, linha) => {
+          const item = document.createElement('ytd-rich-item-renderer');
+          const lock = document.createElement('yt-lockup-view-model');
+          const a = document.createElement('a');
+          a.href = '/watch?v=' + id;
+          const img = document.createElement('img');
+          img.src = ${JSON.stringify(IMG)}; img.width = 320; img.height = 180;
+          a.append(img);
+          const box = document.createElement('div');
+          const h3 = document.createElement('h3'); h3.append(document.createTextNode(titulo));
+          const can = document.createElement('div'); can.append(document.createTextNode('Canal X'));
+          const meta = document.createElement('ytd-video-meta-block'); meta.append(document.createTextNode(linha));
+          box.append(h3, can, meta);
+          lock.append(a, box);
+          item.append(lock);
+          return item;
+        };
+        const sec = document.createElement('div'); sec.id = 'secondary';
+        const inner = document.createElement('div'); inner.id = 'secondary-inner';
+        inner.append(criar('bbbbbbbbbb1', 'Relacionado 1', '50 mil há 2 dias'), criar('bbbbbbbbbb2', 'Relacionado 2', '3 mil há 1 ano'));
+        sec.append(inner);
+        document.getElementById('columns').append(sec);
+      }, 3200);
+    </script>
+  </body></html>`,
   shorts: `<!doctype html><html><body>
     <script>window.ytInitialPlayerResponse = ${JSON.stringify({ ...PLAYER, videoDetails: { ...PLAYER.videoDetails, videoId: 'shortsAAAA1', lengthSeconds: '45' } })};</script>
     <div id="shorts-player">short</div></body></html>`,
   search: `<!doctype html><html><body><ytd-search><ytd-section-list-renderer><div id="contents"><ytd-item-section-renderer>
-    ${[['250 mil visualizações • há 3 dias'], ['1,1 mi de visualizações • há 2 meses'], ['80 mil visualizações • há 1 semana'], ['12 mil visualizações • há 4 dias'], ['300 mil visualizações • há 1 ano'], ['45 mil visualizações • há 20 dias']]
-      .map(([l], i) => `<ytd-video-renderer><a id="thumbnail" href="/watch?v=cccccccccc${i}"><img src="${IMG}"></a><div><h3>Bedwars ${i}</h3><ytd-channel-name>Canal ${i % 4}</ytd-channel-name><div>${l}</div></div></ytd-video-renderer>`).join('')}
+    ${[['250 mil há 3 dias'], ['1,1 mi há 2 meses'], ['80 mil há 1 sem'], ['12 mil há 4 dias'], ['300 mil há 1 ano'], ['45 mil há 20 dias']]
+      .map(([l], i) => `<ytd-video-renderer><a id="thumbnail" href="/watch?v=cccccccccc${i}"><img src="${IMG}"></a><div><h3>Bedwars ${i}</h3><ytd-channel-name>Canal ${i % 4}</ytd-channel-name><ytd-video-meta-block>${l}</ytd-video-meta-block></div></ytd-video-renderer>`).join('')}
   </ytd-item-section-renderer></div></ytd-section-list-renderer></ytd-search></body></html>`,
   channel: `<!doctype html><html><body><div id="contents">
     ${item('dddddddddd1', 'Do canal 1', '10 mil visualizações • há 3 dias')}${item('dddddddddd2', 'Do canal 2', '12 mil visualizações • há 1 semana')}
@@ -92,12 +130,19 @@ const PAGES = {
   await page.waitForSelector('#tc-panel .tc-grid', { timeout: 20000 });
   const corpo = await page.textContent('#tc-panel');
   check('sem conta o painel abre preenchido (sem tela de login)', /Views/.test(corpo) && !/^\s*Entrar com Google\s*$/.test(corpo.trim()));
-  check('a extensão carregada é a 1.0.0', (await page.getAttribute('html', 'data-tc-on')) === '1.0.0', await page.getAttribute('html', 'data-tc-on'));
+  check('a extensão carregada é a ' + VER, (await page.getAttribute('html', 'data-tc-on')) === VER, await page.getAttribute('html', 'data-tc-on'));
   const abas = await page.$$eval('#tc-panel .tc-tab', (b) => b.map((x) => x.textContent));
   check('painel com as abas Vídeo, SEO, Canal e IA', abas.join(',') === 'Vídeo,SEO,Canal,IA', abas.join(','));
+  const inicio = await page.textContent('#tc-panel .tc-pane');
+  check('não espera a página terminar de montar: já abre com views e VPH', /120\.000/.test(inicio) && /2,5 mil\/h/.test(inicio), inicio.replace(/\s+/g, ' ').slice(0, 160));
+  await page.waitForFunction(() => /4\.800/.test(document.querySelector('#tc-panel .tc-pane')?.textContent || ''), null, { timeout: 25000 });
   const vt = await page.textContent('#tc-panel .tc-pane');
-  check('aba Vídeo: views, VPH, likes, comentários, engajamento, duração, idade e canal',
-    /120\.000/.test(vt) && /2,5 mil\/h/.test(vt) && /4\.800/.test(vt) && /1\.234/.test(vt) && /5,03%/.test(vt) && /10:00/.test(vt) && /há 2 dias/.test(vt) && /Canal do Teste/.test(vt), vt.replace(/\s+/g, ' ').slice(0, 320));
+  check('quando o YouTube monta os likes e comentários, o painel se atualiza sozinho',
+    /4\.800/.test(vt) && /1\.234/.test(vt) && /5,03%/.test(vt), vt.replace(/\s+/g, ' ').slice(0, 200));
+  check('aba Vídeo: views, VPH, duração, idade e canal',
+    /120\.000/.test(vt) && /2,5 mil\/h/.test(vt) && /10:00/.test(vt) && /há 2 dias/.test(vt) && /Canal do Teste/.test(vt), vt.replace(/\s+/g, ' ').slice(0, 320));
+  await page.waitForFunction(() => !!document.querySelector('#secondary-inner #tc-panel'), null, { timeout: 25000 });
+  check('o painel se encaixa na coluna dos relacionados assim que ela aparece', (await page.$eval('#tc-panel', (e) => e.className)).includes('tc-inline'));
   check('aba Vídeo diz que não gasta créditos', /Não gasta créditos/i.test(vt));
   const dl = await page.getAttribute('#tc-panel a[download]', 'href');
   check('"Baixar a capa" aponta para a capa do vídeo', dl === `https://i.ytimg.com/vi/${VID}/maxresdefault.jpg`, dl);
@@ -130,7 +175,11 @@ const PAGES = {
   const badges = await home.$$eval('.tc-badge', (b) => b.map((x) => ({ t: x.textContent, hot: x.classList.contains('hot') })));
   check('VPH em todas as miniaturas com views e data (5), sem a live', badges.length === 5, JSON.stringify(badges));
   check('1,2 mi em 3 dias = 16,7 mil/h e marcado como outlier 🔥', badges[0]?.t.startsWith('⚡ 16,7 mil/h') && badges[0].hot, badges[0]?.t);
+  check('entende o formato curto do YouTube de hoje, sem a palavra "visualizações"', badges[0]?.t.includes('16,7 mil'), badges[0]?.t);
+  check('entende a idade abreviada ("há 2 sem")', badges[1]?.t.startsWith('⚡ 60/h'), badges[1]?.t);
+  check('entende a idade abreviada ("há 5 h")', badges[4]?.t.startsWith('⚡ 2 mil/h'), badges[4]?.t);
   check('lê também o formato em inglês (345K views, 2 weeks ago)', badges[2]?.t.startsWith('⚡ 1 mil/h'), badges[2]?.t);
+  check('não põe etiqueta em transmissão ao vivo ("273 assistindo")', badges.length === 5);
   check('botão de ideia na miniatura abre o Preparar com o título', (await home.$$eval('.tc-remix', (a) => a.length)) >= 5);
 
   /* ================= 3. busca ================= */
@@ -217,7 +266,7 @@ const PAGES = {
   await anon.waitForSelector('#canal', { timeout: 15000 });
   const pt0 = await anon.textContent('body');
   check('popup SEM conta já mostra as ferramentas (nenhuma tela de login)', !!(await anon.$('#tend')) && !!(await anon.$('#ideias')) && !!(await anon.$('#kw')));
-  check('popup mostra a versão instalada', /v1\.0\.0/.test(pt0));
+  check('popup mostra a versão instalada', pt0.includes('v' + VER), pt0.slice(0, 60));
   await anon.waitForSelector('#conta .conta', { timeout: 15000 });
   check('a conta aparece como uma caixinha, não como tela', /precisam da sua conta/.test(await anon.textContent('#conta')) && /sem conta/.test(await anon.textContent('#conta')));
   await anon.click('#cEntrar');
@@ -259,7 +308,7 @@ const PAGES = {
   const opt = watch(await ctx.newPage());
   await opt.goto(`chrome-extension://${extId}/options.html`);
   await opt.waitForSelector('#bu', { timeout: 15000 });
-  check('opções: mostra o endereço do site e a versão', (await opt.inputValue('#bu')) === PUBLIC && /v1\.0\.0/.test(await opt.textContent('#ver')));
+  check('opções: mostra o endereço do site e a versão', (await opt.inputValue('#bu')) === PUBLIC && (await opt.textContent('#ver')) === 'v' + VER);
   await opt.click('#test');
   await opt.waitForFunction(() => /Site no ar|Não consegui falar/.test(document.querySelector('#msg')?.textContent || ''), null, { timeout: 25000 });
   check('opções: "testar conexão" responde', /Site no ar/.test(await opt.textContent('#msg')), (await opt.textContent('#msg')).slice(0, 120));

@@ -144,16 +144,19 @@
     const n = parseInt(m[0].replace(/[^\d]/g, ''), 10);
     return Number.isFinite(n) ? n : null;
   };
-  /** Likes e comentários: o YouTube só mostra no DOM, então lemos de lá (sem rede). */
+  /** Likes e comentários: o YouTube só mostra no DOM, então lemos de lá (sem rede).
+   *  Esses botões aparecem depois do resto da página, por isso o painel relê mais tarde. */
   function pageEngagement() {
     let likes = null, comments = null;
-    for (const sel of ['like-button-view-model button', 'ytd-menu-renderer like-button-view-model button', '#top-level-buttons-computed button']) {
+    for (const sel of ['like-button-view-model button', 'segmented-like-dislike-button-view-model button', 'ytd-menu-renderer like-button-view-model button', '#top-level-buttons-computed button']) {
       const el = document.querySelector(sel);
       const n = digits(el?.getAttribute('aria-label')) ?? digits(el?.textContent);
       if (n != null) { likes = n; break; }
     }
-    for (const sel of ['ytd-comments-header-renderer #count', '#comments #count', 'ytd-comments #count']) {
-      const n = digits(document.querySelector(sel)?.textContent);
+    for (const el of document.querySelectorAll('ytd-comments-header-renderer #count, ytd-comments-header-renderer h2, #comments #count')) {
+      const t = (el.innerText || el.textContent || '');
+      if (!/coment/i.test(t)) continue;
+      const n = digits(t);
       if (n != null) { comments = n; break; }
     }
     return { likes, comments };
@@ -176,7 +179,7 @@
   }
 
   /* ---------------------------- painel do vídeo ---------------------------- */
-  let painelVid = null, painelAba = 'Vídeo';
+  let painelVid = null, painelAba = 'Vídeo', engTimer = null;
   function shell(floating) {
     let p = document.getElementById('tc-panel');
     if (p) return p;
@@ -225,6 +228,31 @@
     };
     for (const nome of Object.keys(abas)) tabsBar.append(h('button', { class: 'tc-tab', type: 'button', onclick: () => show(nome) }, nome));
     show(abas[painelAba] ? painelAba : 'Vídeo');
+
+    // Likes e comentários entram na página depois do resto: quando chegarem, refaz a aba.
+    clearInterval(engTimer);
+    let antes = JSON.stringify(eng), voltas = 0;
+    engTimer = setInterval(() => {
+      if (!p.isConnected || ++voltas > 20) { clearInterval(engTimer); return; }
+      const agora = pageEngagement();
+      if (JSON.stringify(agora) === antes) return;
+      antes = JSON.stringify(agora);
+      eng.likes = agora.likes;
+      eng.comments = agora.comments;
+      if (painelAba === 'Vídeo' || painelAba === 'SEO') show(painelAba);
+    }, 1500);
+  }
+
+  /** No vídeo, o lugar certo é em cima dos vídeos relacionados. Essa coluna às vezes
+   *  só existe depois que o painel já abriu, então trazemos o painel para lá quando ela chega. */
+  function ajustarLugar() {
+    const p = document.getElementById('tc-panel');
+    if (!p || !p.classList.contains('tc-floating') || location.pathname !== '/watch') return;
+    const col = document.querySelector('#secondary-inner') || document.querySelector('#secondary');
+    if (!col || col.contains(p)) return;
+    col.prepend(p);
+    p.classList.remove('tc-floating');
+    p.classList.add('tc-inline');
   }
 
   const stat = (label, valor, title) => h('div', { class: 'tc-stat', title: title || null }, h('span', { class: 'tc-stat-l' }, label), h('b', null, valor));
@@ -355,25 +383,38 @@
   /* ---------------------------- VPH e outlier nas miniaturas ---------------------------- */
   const CONTAINERS = 'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, yt-lockup-view-model, ytd-playlist-video-renderer';
   const reg = new Map(); // elemento -> { views, hours, badge, titulo, ordem }
-  function parseViews(txt) {
-    const t = String(txt).replace(/ /g, ' ');
-    const m = t.match(/([\d.,]+)\s*(mil|mi|bi|k|m|b)?\s*(?:de\s+)?(visualizaç(?:ão|ões)|views?)\b/i);
-    if (!m) return null;
-    const u = (m[2] || '').toLowerCase();
-    let num = m[1];
+  const UNI = { mil: 1e3, k: 1e3, mi: 1e6, m: 1e6, bi: 1e9, b: 1e9 };
+  function numero(num, u) {
+    u = (u || '').toLowerCase();
     num = u ? num.replace(',', '.') : num.replace(/[.,](?=\d{3}\b)/g, '').replace(',', '.');
-    let v = parseFloat(num);
-    if (!isFinite(v)) return null;
-    v *= { mil: 1e3, k: 1e3, mi: 1e6, m: 1e6, bi: 1e9, b: 1e9 }[u] || 1;
-    return Math.round(v);
+    const v = parseFloat(num);
+    return isFinite(v) ? Math.round(v * (UNI[u] || 1)) : null;
+  }
+  /** Lê as views da miniatura. O YouTube hoje usa dois formatos:
+   *  "1,2 mi de visualizações" (com rótulo) e "4,5 mil há 2 h" (feed e busca, sem rótulo). */
+  function parseViews(txt) {
+    const t = String(txt).replace(/\u00a0/g, ' ');
+    let m = t.match(/([\d][\d.,]*)\s*(mil|mi|bi|k|m|b)?\s*(?:de\s+)?(?:visualizaç(?:ão|ões)|views?)\b/i);
+    if (m) return numero(m[1], m[2]);
+    m = t.match(/([\d][\d.,]*)\s*(mil|mi|bi|k|m|b)?\s*[·•]?\s*(?:há|faz)\s+\d/i);
+    if (m) return numero(m[1], m[2]);
+    m = t.match(/([\d][\d.,]*)\s*(mil|mi|bi|k|m|b)?\s*[·•]?\s*(?=\d+\s*(?:minute|hour|day|week|month|year)s?\s+ago)/i);
+    if (m) return numero(m[1], m[2]);
+    return null;
   }
   function parseAgeHours(txt) {
-    const t = String(txt).toLowerCase();
-    if (/assistindo agora|watching now|ao vivo|live now|programad|scheduled|estreia|premieres/.test(t)) return null;
-    const m = t.match(/há\s+(\d+)\s*(minuto|hora|dia|semana|m[eê]s|meses|ano)/) || t.match(/(\d+)\s*(minute|hour|day|week|month|year)s?\s+ago/);
+    const t = String(txt).replace(/\u00a0/g, ' ').toLowerCase();
+    if (/assistindo|watching now|ao vivo|live now|programad|scheduled|estreia|premieres/.test(t)) return null;
+    const m = t.match(/h[áa]\s+(\d+)\s*(minutos?|min|horas?|h|dias?|d|semanas?|sem|m[eê]s(?:es)?|meses|anos?)\b/)
+      || t.match(/(\d+)\s*(minutes?|hours?|days?|weeks?|months?|years?)\s+ago/);
     if (!m) return null;
     const n = parseInt(m[1], 10), u = m[2];
-    const f = /^min/.test(u) ? 1 / 60 : /^hora|^hour/.test(u) ? 1 : /^dia|^day/.test(u) ? 24 : /^semana|^week/.test(u) ? 168 : /^m[eê]s|^meses|^month/.test(u) ? 730 : 8760;
+    const f = /^min/.test(u) ? 1 / 60
+      : /^h/.test(u) ? 1
+      : /^d/.test(u) ? 24
+      : /^sem|^week/.test(u) ? 168
+      : /^m[eê]s|^meses|^month/.test(u) ? 730
+      : 8760;
     return Math.max(1, n * f);
   }
   function thumbAnchor(el) {
@@ -386,7 +427,8 @@
     if (!S.badges) return;
     for (const el of document.querySelectorAll(CONTAINERS)) {
       if (reg.has(el) || el.querySelector(CONTAINERS) || el.closest('#tc-panel')) continue;
-      const txt = el.innerText || el.textContent || '';
+      const meta = el.querySelector('ytd-video-meta-block, yt-content-metadata-view-model, .yt-content-metadata-view-model-wiz');
+      const txt = (meta && meta.innerText) || el.innerText || el.textContent || '';
       const views = parseViews(txt), hours = parseAgeHours(txt);
       if (views == null || hours == null) continue;
       const a = thumbAnchor(el);
@@ -585,7 +627,7 @@
   /* ---------------------------- roteamento ---------------------------- */
   function route() {
     const p = location.pathname;
-    if (p === '/watch' || p.startsWith('/shorts/')) watchPanel({ floating: p.startsWith('/shorts/') });
+    if (p === '/watch' || p.startsWith('/shorts/')) { watchPanel({ floating: p.startsWith('/shorts/') }); ajustarLugar(); }
     else { document.getElementById('tc-panel')?.remove(); painelVid = null; }
     if (p === '/results') searchPanel(); else { document.getElementById('tc-search')?.remove(); buscaQ = null; }
     channelCard();
