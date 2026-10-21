@@ -95,7 +95,15 @@ export function toolRoutes(app, db, auth) {
   }));
 
   // Painel automático da extensão (mesma análise, custo mínimo)
-  app.post('/api/tools/video_panel', auth.required, run('video_panel', (req) => ytb.videoAnalysis(db, must(req.body?.video, 'vídeo'), req.user)));
+  app.post('/api/tools/video_panel', auth.required, run('video_panel', (req) => ytb.videoPanel(db, must(req.body?.video, 'vídeo'), req.user)));
+
+  // Análise da IA na extensão (como um "coach"): resumo, gancho, por que foi bem ou mal,
+  // 3 ideias parecidas e dicas para ganhar inscritos, numa chamada só.
+  app.post('/api/tools/coach_ai', auth.required, GEM, videoInput, run('coach_ai', async (req) => {
+    const p = await ytb.videoPanel(db, req.videoId, req.user);
+    const r = await videoai.videoCoach(db, req.videoId, p);
+    return { videoId: req.videoId, ...r };
+  }));
 
   // Preparar: pacote de publicação / ideias / roteiro
   app.post('/api/tools/prep_ai', auth.required, AI, run('prep_ai', (req) => {

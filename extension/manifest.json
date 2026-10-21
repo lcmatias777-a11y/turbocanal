@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TurboCanal para YouTube",
-  "version": "0.4.1",
-  "description": "Painel do TurboCanal direto no YouTube: SEO do vídeo, tags, estatísticas, atalhos para o seu canal. Mesma conta do site (login com Google).",
+  "version": "0.5.0",
+  "description": "VPH e outlier nas miniaturas, painel do vídeo (vídeo, canal, SEO e IA), análise da busca e do canal, atalhos no Studio.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -33,6 +33,18 @@
       ],
       "js": [
         "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://studio.youtube.com/*"
+      ],
+      "js": [
+        "studio-content.js"
       ],
       "css": [
         "content.css"

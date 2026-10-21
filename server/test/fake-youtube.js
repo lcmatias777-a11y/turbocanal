@@ -34,7 +34,7 @@ export async function startFakeYouTube() {
     PL_MEU1: { id: 'PL_MEU1', snippet: { channelId: ME, title: 'Melhores momentos', description: '', thumbnails: thumb('vidMeu00001') }, status: { privacyStatus: 'public' } },
     PL_ALHEIA: { id: 'PL_ALHEIA', snippet: { channelId: OTHER, title: 'Playlist de outro canal' }, status: { privacyStatus: 'public' } }
   };
-  const items = { UU_MEU: ['vidMeu00001', 'vidMeu00002'], PL_MEU1: ['vidMeu00001'], PL_ALHEIA: [] };
+  const items = { UU_MEU: ['vidMeu00001', 'vidMeu00002'], UU_OUTRO: ['vidAlheio01'], PL_MEU1: ['vidMeu00001'], PL_ALHEIA: [] };
   let seq = 1;
   const itemId = (pl, vid) => `${pl}__${vid}`;
   const pick = (res, parts) => {
@@ -60,6 +60,10 @@ export async function startFakeYouTube() {
   const y = express.Router();
 
   y.get('/channels', (req, res) => {
+    if (req.query.id === ME || req.query.id === OTHER) {
+      const mine = req.query.id === ME;
+      return res.json({ items: [{ id: req.query.id, snippet: { title: mine ? 'Canal do Teste' : 'Outro Canal', customUrl: mine ? '@canaldoteste' : '@outrocanal', publishedAt: '2020-01-01T00:00:00Z', thumbnails: thumb('canal') }, statistics: { subscriberCount: mine ? '1234' : '50000', viewCount: '56789', videoCount: '2', hiddenSubscriberCount: false }, brandingSettings: { channel: { keywords: 'minecraft "geometry dash" bedwars' } }, contentDetails: { relatedPlaylists: { uploads: mine ? 'UU_MEU' : 'UU_OUTRO' } } }] });
+    }
     if (req.query.mine !== 'true') return res.json({ items: [] });
     res.json({ items: [{ id: ME, snippet: { title: 'Canal do Teste', thumbnails: thumb('canal') }, statistics: { subscriberCount: '1234', viewCount: '56789', videoCount: '2', hiddenSubscriberCount: false }, contentDetails: { relatedPlaylists: { uploads: 'UU_MEU' } } }] });
   });

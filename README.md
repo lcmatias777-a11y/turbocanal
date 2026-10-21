@@ -29,7 +29,7 @@ Decisões técnicas: Postgres via `pg` em produção (DATABASE_URL) e PGlite (Po
 3. Meu canal (como no YouTube Studio, via OAuth): meus vídeos com nota de SEO, editar título, descrição, tags e visibilidade, "Otimizar com IA", enviar capa, teste A/B de capas (alternância automática), playlists (criar, adicionar e remover vídeos), postar vídeo (upload direto do navegador para o Google, com agendamento), criar live (RTMP e chave), analytics (28 dias) e comentários (ler, responder, sugerir resposta). Só vídeos e playlists do canal vinculado podem ser alterados (verificado no servidor).
 4. Editor de vídeo e criador de capas no navegador (ffmpeg.wasm servido pelo próprio site): cortar, Shorts 9:16 (corte ou fundo desfocado), tirar som, MP3, acelerar, comprimir; quadro do vídeo vira capa 1280x720 com prévia no feed. O arquivo não sai do computador.
 5. Concorrentes: acompanhe até 20 canais e veja os vídeos recentes deles.
-6. Extensão Chrome: painel na página do vídeo (SEO, VPH, engajamento, tags com "copiar todas", checklist) e atalhos que já abrem o site com o vídeo preenchido.
+6. Extensão Chrome (v0.5): VPH e outlier em cima das miniaturas (início, busca, relacionados, aba Vídeos dos canais; grátis, calculado com os números da própria página); painel do vídeo com abas Vídeo, Canal (inscritos, idade, tags do canal, adicionar aos concorrentes), SEO e IA (resumo, gancho, desempenho, 3 ideias, dicas; 300 créditos); resumo da busca e pesquisa de palavras-chave; cartão na página de canal; botão nos Shorts e no YouTube Studio; popup com interruptores e aviso de versão nova. Montada sem innerHTML (compatível com o Trusted Types do YouTube).
 
 ## Rodar localmente
 
@@ -37,7 +37,7 @@ Decisões técnicas: Postgres via `pg` em produção (DATABASE_URL) e PGlite (Po
 cd server
 npm install
 npm start          # http://localhost:8787
-npm test           # 104 verificações automáticas
+npm test           # 110 verificações automáticas
 ```
 
 Sem DATABASE_URL, o banco embutido é criado sozinho em `server/data/pglite`. Sem Google configurado (só no ambiente local), o cadastro por senha fica disponível para testes.
@@ -62,5 +62,5 @@ Free R$ 0 (saldo completado até 5.000 por mês), Starter R$ 10 (60.000), Creato
 
 ## Testes
 
-1. `npm test`: 104 verificações (créditos, owner, admins, isolamento, pagamentos sem confirmação falsa, login só com Google, ferramentas, IA contra um Gemini simulado (troca de modelo, chave recusada, vídeo privado, 3 cortes) e "Meu canal" contra um YouTube simulado: só altera o que é seu, estorna em falha, envia todos os campos de status ao mudar visibilidade, playlists, upload, live, analytics, comentários).
+1. `npm test`: 110 verificações (créditos, owner, admins, isolamento, pagamentos sem confirmação falsa, login só com Google, ferramentas, IA contra um Gemini simulado (troca de modelo, chave recusada, vídeo privado, 3 cortes) e "Meu canal" contra um YouTube simulado: só altera o que é seu, estorna em falha, envia todos os campos de status ao mudar visibilidade, playlists, upload, live, analytics, comentários).
 2. Testes de navegador (Playwright): interface completa, editor de vídeo com arquivos reais, extensão carregada no Chromium e telas do "Meu canal".

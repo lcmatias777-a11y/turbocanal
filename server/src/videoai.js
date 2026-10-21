@@ -107,3 +107,42 @@ export async function videoSuggestions(db, videoId, meta) {
         : 'A IA não pôde assistir a este vídeo (só vídeos públicos); usou quadros reais e os dados atuais.'
   };
 }
+
+/** "Coach" da extensão: a IA assiste (se público) e analisa o vídeo com os números dele e do canal. */
+export async function videoCoach(db, videoId, panel) {
+  const v = panel.video || {};
+  const ch = panel.channel || {};
+  const meta = { title: v.title, description: v.description, tags: v.tags, durationSec: v.durationSec, views: v.views, channel: v.channel || ch.title, privacy: v.privacy };
+  const canWatch = (v.privacy || 'public') === 'public' && !v.mock;
+  const frames = v.privacy === 'private' || v.mock ? [] : await videoFrames(videoId, { thumb: false });
+  const numbers = `Números: ${v.views || 0} views, ${v.vph ?? '?'} views por hora desde a publicação, engajamento ${v.engagement ?? '?'}%, publicado em ${String(v.publishedAt || '').slice(0, 10)}` +
+    (ch.medianRecentViews ? `; os vídeos recentes do canal têm mediana de ${ch.medianRecentViews} views (este vídeo está em ${panel.outlierCanal}x essa mediana)` : '') +
+    (ch.subs != null ? `; o canal tem ${ch.subs} inscritos` : '') + '.';
+  const ask = (watching) =>
+    `Você é um coach de YouTube no Brasil. ${watching ? 'Assista ao vídeo anexado. ' : 'Você não consegue assistir a este vídeo; use os dados e os quadros anexados. '}` +
+    context(meta) + ' ' + numbers +
+    ` Responda SOMENTE com JSON válido em português do Brasil com as chaves: ` +
+    `resumo (3 frases sobre o que acontece no vídeo), ` +
+    `gancho ({"nota": 0 a 10, "analise": "como são os primeiros 10 a 30 segundos", "sugestao": "como melhorar a abertura"}), ` +
+    `desempenho ({"veredito": "acima da média", "na média" ou "abaixo da média", "porque": "2 ou 3 motivos concretos, usando os números"}), ` +
+    `ideias (3 objetos {"titulo": "até 70 caracteres", "porque": "1 frase"} de vídeos parecidos que o criador deste canal poderia fazer), ` +
+    `inscritos (3 dicas práticas para este canal ganhar mais inscritos).`;
+  let watched = false, res;
+  if (canWatch) {
+    try { res = await geminiJson(db, [youtubePart(videoId, v.durationSec), ...frames.map(imgPart), { text: ask(true) }], { lowRes: v.durationSec > 20 * 60 }); watched = true; }
+    catch (e) { if (!e.videoProblem) throw e; }
+  }
+  if (!res) res = await geminiJson(db, [...frames.map(imgPart), { text: ask(false) }]);
+  const j = res.json || {};
+  const arr = (x) => (Array.isArray(x) ? x : []);
+  return {
+    assistiu: watched,
+    modelo: res.model,
+    resumo: String(j.resumo || '').slice(0, 800),
+    gancho: { nota: Math.max(0, Math.min(10, Number(j.gancho?.nota) || 0)), analise: String(j.gancho?.analise || '').slice(0, 600), sugestao: String(j.gancho?.sugestao || '').slice(0, 600) },
+    desempenho: { veredito: String(j.desempenho?.veredito || '').slice(0, 40), porque: String(j.desempenho?.porque || '').slice(0, 800) },
+    ideias: arr(j.ideias).slice(0, 3).map((x) => ({ titulo: String(x?.titulo || x || '').slice(0, 100), porque: String(x?.porque || '').slice(0, 300) })),
+    inscritos: arr(j.inscritos).slice(0, 3).map((x) => String(x).slice(0, 300)),
+    aviso: watched ? 'A IA assistiu ao vídeo. Notas e vereditos são opiniões da IA, não métricas do YouTube.' : 'A IA não pôde assistir (só vídeos públicos); usou os dados e quadros do vídeo.'
+  };
+}

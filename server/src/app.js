@@ -1,6 +1,7 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { openDb, getSetting, printSetupHints } from './db.js';
 import { HttpError, rateLimit } from './util.js';
@@ -57,6 +58,10 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
     } catch (e) { next(e); }
   });
   app.get('/api/health', (req, res) => res.json({ ok: true, db: db.kind }));
+  // Versão atual da extensão (a extensão compara com a dela e avisa quando há atualização)
+  let extVersion = null;
+  try { extVersion = JSON.parse(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../extension/manifest.json'), 'utf8')).version; } catch {}
+  app.get('/api/extension/version', (req, res) => res.json({ version: extVersion, download: '/turbocanal-extensao.zip' }));
 
   app.use('/api', (req, res) => res.status(404).json({ error: 'Rota de API não encontrada.' }));
 

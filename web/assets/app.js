@@ -1169,6 +1169,14 @@ views.ajuda = async () => {
         <li>Abra qualquer vídeo do YouTube: o painel do TurboCanal aparece ao lado do vídeo.</li></ol>
         <p class="small muted"><b>Para atualizar:</b> baixe o .zip de novo, troque a pasta antiga pela nova e, em chrome://extensions, clique no botão de recarregar (↻) do TurboCanal.</p>
         <p class="small muted">A extensão ainda não está publicada na Chrome Web Store, por isso a instalação é manual (modo do desenvolvedor). Quando for publicada na loja, bastará um clique.</p></div>
+      <div class="card"><h3>O que a extensão faz no YouTube?</h3>
+        <ol class="muted">
+        <li><b>Miniaturas:</b> mostra o VPH (views por hora) e o outlier (quantas vezes acima da média) em cima de cada vídeo, no início, na busca, nos relacionados e na aba Vídeos dos canais. É grátis: usa os números da própria página.</li>
+        <li><b>Página do vídeo:</b> painel com abas Vídeo (views, VPH, outlier no canal, engajamento), Canal (inscritos, idade, tags do canal, adicionar aos concorrentes), SEO (pontuação, checklist e tags) e IA (resumo, nota do gancho, por que foi bem ou mal, 3 ideias parecidas e dicas para ganhar inscritos).</li>
+        <li><b>Busca:</b> resumo da busca (demanda, vídeos recentes, oportunidade) e pesquisa de palavras-chave.</li>
+        <li><b>Canal:</b> botão para analisar o canal e adicionar aos concorrentes.</li>
+        <li><b>Shorts e YouTube Studio:</b> botão do TurboCanal com SEO do vídeo e atalhos para a IA do vídeo e os 3 cortes.</li></ol>
+        <p class="small muted">No ícone da extensão você liga ou desliga o VPH nas miniaturas e o painel automático, e vê quando sair versão nova.</p></div>
       <div class="card"><h3>De onde vêm os dados?</h3>
         <p class="muted">Das APIs oficiais e públicas do YouTube (YouTube Data API v3). Quando mostramos uma estimativa ou pontuação própria, isso vem identificado. Não inventamos métricas que a API não fornece.</p></div>
       <div class="card"><h3>Pagamentos</h3>

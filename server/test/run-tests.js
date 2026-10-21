@@ -356,6 +356,14 @@ check('se a IA não consegue assistir, usa quadros e dados (e avisa)', vf.status
 const vo = await req('/api/tools/video_insights_ai', { method: 'POST', token: t1, body: { video: 'vidAlheio01' } });
 check('vídeo público de outro canal: analisa, mas marca que não é seu (sem salvar)', vo.status === 200 && vo.data.result.own === false);
 
+const vpan = await req('/api/tools/video_panel', { method: 'POST', token: t1, body: { video: 'vidAlheio01' } });
+check('painel da extensão traz o canal (inscritos, idade, tags do canal) e custa 1 crédito', vpan.status === 200 && vpan.data.result.channel?.subs === 50000 && vpan.data.result.channel.keywords.includes('geometry dash') && vpan.data.result.channel.handle === '@outrocanal' && vpan.data.credits.charged === 1, JSON.stringify(vpan.data).slice(0, 300));
+check('painel marca as tags que aparecem no título', Array.isArray(vpan.data.result.seoTags?.noTitulo));
+b0 = await bal();
+const coach = await req('/api/tools/coach_ai', { method: 'POST', token: t1, body: { video: 'vidAlheio01' } });
+check('análise da IA na extensão: resumo, nota do gancho, desempenho, 3 ideias e dicas (300 créditos)', coach.status === 200 && coach.data.result.gancho.nota === 7 && coach.data.result.ideias.length === 3 && coach.data.result.inscritos.length === 3 && coach.data.result.desempenho.veredito && coach.data.credits.charged === 300 && (await bal()) === b0 - 300, JSON.stringify(coach.data).slice(0, 300));
+const extv = await req('/api/extension/version');
+check('site informa a versão atual da extensão (para o aviso de atualização)', extv.status === 200 && /^\d+\.\d+\.\d+$/.test(extv.data.version || ''), JSON.stringify(extv.data));
 const noThumb = await req('/api/channel/videos/vidMeu00001/ai-thumbnail', { method: 'POST', token: t1, body: {} });
 check('capa com IA foi retirada (a rota não existe mais)', noThumb.status === 404);
 b0 = await bal();

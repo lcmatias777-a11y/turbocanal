@@ -243,6 +243,50 @@ export async function videoAnalysis(db, idOrUrl, user = null) {
   return { video, seo: seoChecklist(video) };
 }
 
+const channelKeywords = (s) => [...String(s || '').matchAll(/"([^"]+)"|(\S+)/g)].map((m) => (m[1] || m[2]).trim()).filter(Boolean).slice(0, 30);
+
+/**
+ * Painel da extensão: vídeo + SEO + dados do canal (inscritos, idade, tags do canal) e o
+ * "outlier" do vídeo em relação à mediana dos vídeos recentes do mesmo canal.
+ */
+export async function videoPanel(db, idOrUrl, user = null) {
+  const base = await videoAnalysis(db, idOrUrl, user);
+  const v = base.video;
+  const lc = (x) => String(x || '').toLowerCase();
+  const seoTags = {
+    noTitulo: (v.tags || []).filter((t) => lc(v.title).includes(lc(t))),
+    naDescricao: (v.tags || []).filter((t) => lc(v.description).includes(lc(t)))
+  };
+  if (isMock()) {
+    const channel = { id: v.channelId, title: v.channel, handle: '@canalexemplo', thumb: null, publishedAt: new Date(Date.now() - 900 * 86400e3).toISOString(), subs: 12345, views: 987654, videos: 120, keywords: ['exemplo', 'teste'], medianRecentViews: Math.max(1, Math.round(v.views / 2)), recentCount: 10 };
+    return { ...base, channel, outlierCanal: 2, seoTags };
+  }
+  let channel = null, outlierCanal = null;
+  try {
+    const ch = await yt(db, 'channels', { part: 'snippet,statistics,brandingSettings,contentDetails', id: v.channelId }, user);
+    const c = ch.items?.[0];
+    if (c) {
+      let recent = [];
+      const uploads = c.contentDetails?.relatedPlaylists?.uploads;
+      if (uploads) {
+        const pl = await yt(db, 'playlistItems', { part: 'contentDetails', playlistId: uploads, maxResults: 15 }, user);
+        const ids = (pl.items || []).map((i) => i.contentDetails?.videoId).filter((x) => x && x !== v.id);
+        recent = await fetchVideosByIds(db, ids.slice(0, 14), user);
+      }
+      const views = recent.map((r) => r.views || 0).sort((a, b) => a - b);
+      const median = views.length ? views[Math.floor(views.length / 2)] : null;
+      const st = c.statistics || {};
+      channel = {
+        id: c.id, title: c.snippet?.title, handle: c.snippet?.customUrl || null, thumb: c.snippet?.thumbnails?.default?.url || null,
+        publishedAt: c.snippet?.publishedAt || null, subs: st.hiddenSubscriberCount ? null : +st.subscriberCount || 0, views: +st.viewCount || 0,
+        videos: +st.videoCount || 0, keywords: channelKeywords(c.brandingSettings?.channel?.keywords), medianRecentViews: median, recentCount: recent.length
+      };
+      outlierCanal = median ? Math.round(((v.views || 0) / Math.max(1, median)) * 10) / 10 : null;
+    }
+  } catch { /* os dados do canal são um extra: o painel funciona sem eles */ }
+  return { ...base, channel, outlierCanal, seoTags };
+}
+
 export async function channelAnalysis(db, q, user = null) {
   if (isMock()) {
     const rnd = seededRand('c:' + q);

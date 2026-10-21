@@ -150,7 +150,8 @@ const TOOL_SEED = [
   ['competitor_check', 8, 'Atualizar concorrente'],
   ['playlist_create', 10, 'Criar playlist no YouTube'],
   ['playlist_add', 5, 'Adicionar ou remover vídeo de playlist'],
-  ['ideas_ai', 10, 'Ideias de vídeos para o seu canal (IA)']
+  ['ideas_ai', 10, 'Ideias de vídeos para o seu canal (IA)'],
+  ['coach_ai', 300, 'Análise da IA na extensão (resumo, gancho, desempenho, ideias)']
 ];
 
 const DEFAULT_SETTINGS = () => ({
