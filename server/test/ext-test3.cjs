@@ -272,6 +272,7 @@ const PAGES = {
   await anon.click('#cEntrar');
   check('botão "Entrar com Google" abre o login mesmo com o service worker fora do ar', opened.filter((u) => u.endsWith('/api/auth/google')).length === 1, JSON.stringify(opened));
   check('e o botão avisa na tela o que fez', /Abri o login do Google/.test(await anon.textContent('#msg')));
+  check('popup tem o botão de recarregar a extensão (sem precisar de chrome://extensions)', !!(await anon.$('#rec')));
   await anon.click('#diag');
   await anon.waitForFunction(() => /Site no ar|Não consegui falar/.test(document.querySelector('#msg')?.textContent || ''), null, { timeout: 25000 });
   check('"testar conexão" mostra o diagnóstico', /Site no ar/.test(await anon.textContent('#msg')), (await anon.textContent('#msg')).slice(0, 120));

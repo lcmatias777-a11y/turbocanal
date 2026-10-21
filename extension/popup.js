@@ -35,7 +35,7 @@ async function avisoVersao() {
   try {
     const r = await (await fetch(BASE + '/api/extension/version', { cache: 'no-store' })).json();
     if (r.version && maisNovo(r.version, VERSION)) {
-      el.innerHTML = `<div class="warn">🆕 Saiu a v${esc(r.version)} (você tem a ${esc(VERSION)}). <a href="#" id="updDl">Baixar</a>, trocar os arquivos da mesma pasta e clicar em ↻ em chrome://extensions.</div>`;
+      el.innerHTML = `<div class="warn">🆕 Saiu a v${esc(r.version)} (você tem a ${esc(VERSION)}). <a href="#" id="updDl">Baixar</a>, trocar os arquivos da mesma pasta e clicar em <b>recarregar</b> aqui embaixo.</div>`;
       on('#updDl', () => openTab(BASE + (r.download || '/turbocanal-extensao.zip')));
     }
   } catch {}
@@ -65,7 +65,7 @@ async function main() {
     <input type="text" id="kw" placeholder="ex.: bedwars dicas">
     <button class="btn sec" id="kwgo">Pesquisar</button>
     <div id="out"></div><div id="msg"></div>
-    <p class="muted" style="margin-top:10px"><a href="#" id="dash">Abrir o site</a> · <a href="#" id="diag">testar conexão</a> · <a href="#" id="opt">opções</a></p>`;
+    <p class="muted" style="margin-top:10px"><a href="#" id="dash">Abrir o site</a> · <a href="#" id="diag">testar conexão</a> · <a href="#" id="opt">opções</a> · <a href="#" id="rec">recarregar</a></p>`;
 
   const sw = (sel, key) => { const el = $(sel); if (el) el.addEventListener('change', () => chrome.storage.sync.set({ [key]: el.checked })); };
   sw('#swB', 'tc_badges');
@@ -76,6 +76,11 @@ async function main() {
   on('#tend', () => go('ferramentas/tendencias'));
   on('#ideias', () => go('ferramentas/ideias'));
   on('#opt', () => chrome.runtime.openOptionsPage());
+  on('#rec', () => {
+    // Depois de trocar os arquivos da pasta, isso evita ter que abrir chrome://extensions.
+    msg('ok', 'Recarregando a extensão… feche e abra este menu, e atualize (F5) as abas do YouTube.');
+    setTimeout(() => { try { chrome.runtime.reload(); } catch (e) { msg('err', 'Não consegui recarregar: ' + e.message); } }, 300);
+  });
   on('#diag', diagnostico);
   if (vid) {
     on('#ia', () => go('ferramentas/insights?video=' + vid));
