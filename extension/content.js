@@ -63,7 +63,7 @@
     wire(panel);
     try {
       const me = (await api('/me')).user;
-      const r = await api('/tools/video_analysis', { method: 'POST', body: { video: vid } });
+      const r = await api('/tools/video_panel', { method: 'POST', body: { video: vid } });
       const v = r.result.video, s = r.result.seo;
       const kws = (v.tags || []).slice(0, 12);
       panel.innerHTML = header(`<span class="tc-credits">💎 ${me.unlimited ? '∞' : fmt(r.credits.balance)}</span>`) + `
@@ -71,21 +71,27 @@
           ${r.result.mock ? `<p class="tc-err">⚠️ ${esc(r.result.aviso)}</p>` : ''}
           <div class="tc-score"><div class="tc-score-n">${s.score}</div><div><b>Pontuação de SEO</b><br><span class="tc-muted">heurística TurboCanal (0 a 100)</span></div></div>
           <table class="tc-table">
-            <tr><td>👁 Views</td><td>${fmt(v.views)}</td><td>👍 Likes</td><td>${fmt(v.likes)}</td></tr>
-            <tr><td>💬 Coment.</td><td>${fmt(v.comments)}</td><td>⏱ Duração</td><td>${Math.round((v.durationSec || 0) / 60)} min</td></tr>
+            <tr><td>👁 Views</td><td>${fmt(v.views)}</td><td>⚡ VPH</td><td>${fmt(v.vph)}</td></tr>
+            <tr><td>👍 Likes</td><td>${fmt(v.likes)}</td><td>💬 Coment.</td><td>${fmt(v.comments)}</td></tr>
+            <tr><td>📊 Engaj.</td><td>${v.engagement != null ? v.engagement + '%' : '—'}</td><td>⏱ Duração</td><td>${Math.round((v.durationSec || 0) / 60)} min</td></tr>
             <tr><td>📅 Publicado</td><td colspan="3">${esc((v.publishedAt || '').slice(0, 10))}</td></tr>
           </table>
-          ${kws.length ? `<div class="tc-sec"><b>Tags do vídeo</b><div class="tc-tags">${kws.map((k) => `<span>${esc(k)}</span>`).join('')}</div></div>` : '<div class="tc-sec tc-muted">Este vídeo não tem tags públicas.</div>'}
+          ${kws.length ? `<div class="tc-sec"><b>Tags do vídeo</b> <button class="tc-mini" id="tc-copytags">copiar todas</button><div class="tc-tags">${(v.tags || []).map((k) => `<span>${esc(k)}</span>`).join('')}</div></div>` : '<div class="tc-sec tc-muted">Este vídeo não tem tags públicas.</div>'}
           <div class="tc-sec"><b>Checklist</b>${s.checks.map((c) => `<div class="tc-check">${c.ok ? '✅' : '⚠️'} ${esc(c.item)}</div>`).join('')}</div>
           <div class="tc-actions">
-            <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/palavras" target="_blank" rel="noopener">🔑 Palavras-chave</a>
-            <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/insights" target="_blank" rel="noopener">🎥 IA assiste</a>
+            <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/palavras?q=${encodeURIComponent(kws[0] || (v.title || '').split(/\s+/).slice(0, 4).join(' '))}" target="_blank" rel="noopener">🔑 Palavras-chave</a>
+            <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/insights?video=${vid}" target="_blank" rel="noopener">🎥 IA assiste</a>
+            <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/transformar?video=${vid}&mode=shorts" target="_blank" rel="noopener">🔁 Cortes p/ Shorts</a>
+            <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/video?video=${vid}" target="_blank" rel="noopener">🔍 Análise completa</a>
+            <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/editor" target="_blank" rel="noopener">✂️ Editor</a>
             <a class="tc-btn" href="${esc(baseUrl)}/#/canal" target="_blank" rel="noopener">📺 Meu canal</a>
             <a class="tc-btn" href="${esc(baseUrl)}/#/canal/postar" target="_blank" rel="noopener">⬆️ Postar</a>
           </div>
-          <p class="tc-muted tc-foot">${r.credits.unlimited ? 'Conta do administrador: sem consumo de créditos.' : `Usados ${r.credits.charged} créditos nesta análise.`}</p>
+          <p class="tc-muted tc-foot">${r.credits.unlimited ? 'Conta do administrador: sem consumo de créditos.' : (r.credits.charged === 1 ? 'Usado 1 crédito nesta análise.' : `Usados ${r.credits.charged} créditos nesta análise.`)}</p>
         </div>`;
       wire(panel);
+      const ct = panel.querySelector('#tc-copytags');
+      if (ct) ct.onclick = () => { navigator.clipboard.writeText((v.tags || []).join(', ')); ct.textContent = 'copiado ✓'; };
     } catch (e) {
       panel.innerHTML = header() + `<div class="tc-body"><p class="tc-err">${esc(e.message)}</p>
         <p class="tc-muted">${e.status === 401 ? 'Sessão expirada: entre de novo pelo ícone da extensão.' : e.status === 409 ? 'Configuração pendente no servidor (nenhum crédito foi cobrado).' : 'Confira se o servidor do TurboCanal está no ar.'}</p></div>`;

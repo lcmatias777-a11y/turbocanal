@@ -146,6 +146,74 @@ check('settings públicos informam o que está configurado', pub.status === 200 
 const health = await req('/api/health');
 check('health informa o tipo de banco', health.data.db === 'pglite');
 
+console.log('\n== Novas ferramentas: preparar, responder, transformar, painel, concorrentes ==');
+const prep = await req('/api/tools/prep_ai', { method: 'POST', token: t1, body: { topic: 'bedwars no minecraft', notes: 'mostrar estrategia de cama' } });
+check('Preparar publicação devolve títulos, tags, roteiro e ideias (gerador local sem IA)', prep.status === 200 && prep.data.result.titulos?.length >= 5 && prep.data.result.roteiro?.length >= 4 && prep.data.result.ideias?.length >= 5 && prep.data.credits.charged === 15, `(status=${prep.status})`);
+const rep = await req('/api/tools/reply_ai', { method: 'POST', token: t1, body: { comment: 'Que vídeo top, como você fez a ponte?' } });
+check('Sugestão de resposta a comentário devolve 3 opções', rep.status === 200 && rep.data.result.respostas?.length === 3);
+const before = (await req('/api/me', { token: t1 })).data.user.credits;
+const tr = await req('/api/tools/transform_ai', { method: 'POST', token: t1, body: { video: 'dQw4w9WgXcQ', mode: 'shorts' } });
+const after2 = (await req('/api/me', { token: t1 })).data.user.credits;
+check('Transformar sem chave do Gemini: 409 e créditos devolvidos', tr.status === 409 && after2 === before, `(status=${tr.status}, antes=${before}, depois=${after2})`);
+const panel = await req('/api/tools/video_panel', { method: 'POST', token: t1, body: { video: 'dQw4w9WgXcQ' } });
+check('Painel da extensão custa 1 crédito e traz views por hora e engajamento', panel.status === 200 && panel.data.credits.charged === 1 && typeof panel.data.result.video.vph === 'number' && panel.data.result.video.engagement != null);
+const kw2 = await req('/api/tools/keyword_research', { method: 'POST', token: t1, body: { q: 'geometry dash' } });
+check('Vídeos da pesquisa trazem VPH e outlier', kw2.data.result.topVideos.every((v) => typeof v.vph === 'number' && typeof v.outlier === 'number'));
+const comp = await req('/api/competitors', { method: 'POST', token: t1, body: { channel: '@canalexemplo' } });
+const compList = await req('/api/competitors', { token: t1 });
+check('Adicionar concorrente salva na lista com vídeos recentes', comp.status === 200 && compList.data.items.length === 1 && compList.data.items[0].last_data.recent.length > 0, `(status=${comp.status})`);
+const compDel = await req('/api/competitors/' + compList.data.items[0].id, { method: 'DELETE', token: t1 });
+const compList2 = await req('/api/competitors', { token: t1 });
+check('Remover concorrente', compDel.status === 200 && compList2.data.items.length === 0);
+const compOther = await req('/api/competitors', { token: t2 });
+check('Lista de concorrentes é separada por usuário', compOther.status === 200 && compOther.data.items.length === 0);
+
+console.log('\n== Studio sem canal vinculado: avisa e devolve créditos ==');
+const bal0 = (await req('/api/me', { token: t1 })).data.user.credits;
+const up = await req('/api/channel/upload/start', { method: 'POST', token: t1, body: { title: 'teste', size: 10, mime: 'video/mp4' } });
+const lv = await req('/api/channel/live', { method: 'POST', token: t1, body: { title: 'live teste' } });
+const an = await req('/api/channel/analytics', { token: t1 });
+const cm = await req('/api/channel/comments', { token: t1 });
+const bal1 = (await req('/api/me', { token: t1 })).data.user.credits;
+check('Postar, live, analytics e comentários exigem canal vinculado (409)', [up, lv, an, cm].every((r) => r.status === 409), `(${[up, lv, an, cm].map((r) => r.status)})`);
+check('Nenhum crédito perdido nas tentativas sem canal', bal1 === bal0, `(antes=${bal0}, depois=${bal1})`);
+
+console.log('\n== Páginas legais e motor do editor ==');
+const privR = await fetch(base + '/privacidade');
+const privT = await privR.text();
+check('/privacidade é uma página HTML real (sem depender de JavaScript)', privR.status === 200 && privT.includes('Política de Privacidade') && privT.includes('Uso Limitado'));
+const termR = await fetch(base + '/termos');
+check('/termos é uma página HTML real', termR.status === 200 && (await termR.text()).includes('Termos de Uso'));
+const wasm = await fetch(base + '/vendor/ffmpeg/core/ffmpeg-core.wasm', { method: 'HEAD' });
+check('Motor do editor (ffmpeg.wasm) servido pelo site com tipo correto', wasm.status === 200 && wasm.headers.get('content-type') === 'application/wasm');
+const ffjs = await fetch(base + '/vendor/ffmpeg/ffmpeg/index.js');
+check('Biblioteca do editor servida pelo site', ffjs.status === 200);
+
+console.log('\n== Com o Google configurado: login SOMENTE com Google ==');
+process.env.GOOGLE_CLIENT_ID = 'teste.apps.googleusercontent.com';
+process.env.GOOGLE_CLIENT_SECRET = 'segredo-de-teste';
+const regG = await req('/api/auth/register', { method: 'POST', body: { email: 'novo@example.com', password: 'senha12345' } });
+const logG = await req('/api/auth/login', { method: 'POST', body: { email: 'maria@example.com', password: 'senha12345' } });
+check('cadastro por senha bloqueado (403)', regG.status === 403, `(status=${regG.status})`);
+check('login por senha bloqueado (403)', logG.status === 403, `(status=${logG.status})`);
+const g1 = await fetch(base + '/api/auth/google', { redirect: 'manual' });
+const loc1 = g1.headers.get('location') || '';
+check('Entrar com Google redireciona ao Google pedindo leitura do YouTube', g1.status === 302 && loc1.startsWith('https://accounts.google.com/') && loc1.includes('youtube.readonly') && loc1.includes('access_type=offline'));
+const g2 = await fetch(base + '/api/auth/google?connect=1', { redirect: 'manual' });
+const gUrl2 = new URL(g2.headers.get('location') || 'http://x');
+const sc2 = (gUrl2.searchParams.get('scope') || '').split(' ');
+check('Vincular canal pede gestão do canal e analytics, com consentimento', sc2.includes('https://www.googleapis.com/auth/youtube') && sc2.includes('https://www.googleapis.com/auth/yt-analytics.readonly') && gUrl2.searchParams.get('prompt') === 'consent', `(${sc2.join(' ')})`);
+const pubG = await req('/api/settings/public');
+check('site informa que o login com Google está ativo', pubG.data.google_login === true);
+const tokOld = await req('/api/me', { token: t1 });
+check('sessões já abertas continuam válidas', tokOld.status === 200);
+delete process.env.GOOGLE_CLIENT_ID;
+delete process.env.GOOGLE_CLIENT_SECRET;
+
+console.log('\n== Admin enxerga a cota do YouTube ==');
+const ov = await req('/api/admin/overview', { token: tOwn });
+check('visão geral mostra unidades de cota usadas hoje', ov.status === 200 && typeof ov.data.youtubeQuota?.usedToday === 'number');
+
 console.log(`\nRESULTADO: ${pass} passaram, ${fail} falharam.`);
 server.close();
 process.exit(fail ? 1 : 0);

@@ -26,3 +26,4 @@
 #tc-panel .tc-btn { background: #ff5d3b; color: #fff !important; text-decoration: none; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 700; display: inline-block; }
 #tc-panel .tc-btn:hover { filter: brightness(1.1); }
 #tc-panel .tc-foot { margin: 8px 0 0; }
+#tc-panel .tc-mini { background: #1b2850; color: #ffb03b; border: 1px solid #27345f; border-radius: 6px; font-size: 11px; padding: 1px 6px; cursor: pointer; }

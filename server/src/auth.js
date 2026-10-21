@@ -18,6 +18,9 @@ export const isManageScope = (scopes) => /auth\/youtube(\s|$)|youtube\.force-ssl
 
 const baseUrl = () => (process.env.BASE_URL || 'http://localhost:8787').replace(/\/$/, '');
 export const googleConfigured = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+// Com o login do Google configurado, cadastro/login por senha ficam desligados (só Google),
+// a menos que PASSWORD_LOGIN=1. Sem Google (ex.: rodando local/testes), a senha funciona.
+export const passwordLoginEnabled = () => process.env.PASSWORD_LOGIN === '1' || !googleConfigured();
 
 async function secret(db) {
   return getSetting(db, 'jwt_secret');
@@ -128,6 +131,7 @@ async function grantOwnerIfVerified(db, user, email, via) {
 export function authRoutes(app, db, auth) {
   app.post('/api/auth/register', async (req, res, next) => {
     try {
+      if (!passwordLoginEnabled()) throw new HttpError(403, 'Cadastro apenas com o Google. Use "Entrar com Google".');
       const email = must(req.body?.email, 'e-mail', { max: 190 }).toLowerCase();
       const password = must(req.body?.password, 'senha', { max: 200 });
       const name = String(req.body?.name || '').trim().slice(0, 120);
@@ -147,6 +151,7 @@ export function authRoutes(app, db, auth) {
 
   app.post('/api/auth/login', async (req, res, next) => {
     try {
+      if (!passwordLoginEnabled()) throw new HttpError(403, 'Login apenas com o Google. Use "Entrar com Google".');
       const email = must(req.body?.email, 'e-mail', { max: 190 }).toLowerCase();
       const password = must(req.body?.password, 'senha', { max: 200 });
       const user = await db.get('SELECT * FROM users WHERE email=?', [email]);
@@ -231,7 +236,8 @@ export function authRoutes(app, db, auth) {
         .json({ error: 'Login com Google ainda não configurado neste servidor (faltam GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET).' });
     }
     const connect = req.query.connect === '1';
-    const stateObj = { s: crypto.randomBytes(12).toString('hex'), connect };
+    const force = req.query.force === '1';
+    const stateObj = { s: crypto.randomBytes(12).toString('hex'), connect, forced: force };
     res.cookie('tc_oauth_state', stateObj.s, { httpOnly: true, sameSite: 'lax', maxAge: 600000, path: '/' });
     const u = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     u.searchParams.set('client_id', process.env.GOOGLE_CLIENT_ID);
@@ -241,7 +247,9 @@ export function authRoutes(app, db, auth) {
     u.searchParams.set('state', Buffer.from(JSON.stringify(stateObj)).toString('base64url'));
     u.searchParams.set('access_type', 'offline');
     u.searchParams.set('include_granted_scopes', 'true');
-    if (connect) u.searchParams.set('prompt', 'consent');
+    // prompt=consent garante o refresh_token (necessário para o acesso continuar após 1 hora)
+    if (connect || force) u.searchParams.set('prompt', 'consent');
+    else u.searchParams.set('prompt', 'select_account');
     res.redirect(u.toString());
   });
 
@@ -299,6 +307,10 @@ export function authRoutes(app, db, auth) {
         } catch {}
         const prev = await db.get('SELECT refresh_token FROM yt_tokens WHERE user_id=?', [user.id]);
         const refresh = tok.refresh_token || prev?.refresh_token || null;
+        if (!refresh && !st.forced) {
+          // Sem refresh_token (o Google só envia no primeiro consentimento): pede de novo, uma vez.
+          return res.redirect(`/api/auth/google?force=1${st.connect ? '&connect=1' : ''}`);
+        }
         await db.run(
           `INSERT INTO yt_tokens(user_id,access_token,refresh_token,expires_at,channel_id,channel_title,scopes,updated_at)
            VALUES(?,?,?,?,?,?,?,?)
@@ -317,9 +329,20 @@ export function authRoutes(app, db, auth) {
   });
 
   app.post('/api/auth/youtube/disconnect', auth.required, async (req, res) => {
+    const row = await db.get('SELECT refresh_token, access_token FROM yt_tokens WHERE user_id=?', [req.user.id]);
+    const tk = row?.refresh_token || row?.access_token;
+    if (tk) {
+      try {
+        await fetch('https://oauth2.googleapis.com/revoke', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ token: tk })
+        });
+      } catch { /* melhor esforço */ }
+    }
     await db.run('DELETE FROM yt_tokens WHERE user_id=?', [req.user.id]);
     await audit(db, req.user, 'youtube.disconnected', req.user.email);
-    res.json({ ok: true });
+    res.json({ ok: true, relogin: true });
   });
 }
 

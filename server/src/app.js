@@ -61,6 +61,15 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
   app.use('/api', (req, res) => res.status(404).json({ error: 'Rota de API não encontrada.' }));
 
   const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web');
+  // Páginas legais em URLs reais (o Google lê sem JavaScript)
+  app.get(['/privacidade', '/privacy'], (req, res) => res.sendFile(path.join(webDir, 'privacidade.html')));
+  app.get(['/termos', '/terms'], (req, res) => res.sendFile(path.join(webDir, 'termos.html')));
+  // Motor do editor de vídeo (ffmpeg.wasm), servido do próprio site e com cache longo
+  const nm = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../node_modules/@ffmpeg');
+  const vendorOpts = { maxAge: '30d', immutable: true, setHeaders: (r, f) => { if (f.endsWith('.wasm')) r.setHeader('Content-Type', 'application/wasm'); } };
+  app.use('/vendor/ffmpeg/ffmpeg', express.static(path.join(nm, 'ffmpeg/dist/esm'), vendorOpts));
+  app.use('/vendor/ffmpeg/util', express.static(path.join(nm, 'util/dist/esm'), vendorOpts));
+  app.use('/vendor/ffmpeg/core', express.static(path.join(nm, 'core/dist/esm'), vendorOpts));
   app.use(express.static(webDir));
   app.get('*', (req, res) => res.sendFile(path.join(webDir, 'index.html')));
 

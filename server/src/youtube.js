@@ -41,7 +41,47 @@ async function authFor(db, user) {
   throw new HttpError(409, 'Entre com o Google para usar as ferramentas do YouTube.');
 }
 
+// Custo em unidades de cota da YouTube Data API (padrão: 10.000/dia por projeto,
+// compartilhado por TODOS os usuários do site). search.list custa 100.
+const UNIT_COST = { search: 100 };
+
+// Cache de dados públicos (não depende do usuário): economiza a cota diária.
+const CACHE = new Map();
+const TTL_MS = { search: 6 * 3600e3, videos: 30 * 60e3, channels: 6 * 3600e3, playlistItems: 30 * 60e3 };
+function cacheGet(key) {
+  const hit = CACHE.get(key);
+  if (!hit) return null;
+  if (hit.exp < Date.now()) { CACHE.delete(key); return null; }
+  return hit.data;
+}
+function cacheSet(key, data, ttl) {
+  if (CACHE.size > 3000) CACHE.delete(CACHE.keys().next().value);
+  CACHE.set(key, { data, exp: Date.now() + ttl });
+}
+
+export async function countUnits(db, units) {
+  const key = 'yt_units_' + new Date().toISOString().slice(0, 10);
+  try {
+    await db.run(
+      "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value = ((COALESCE(NULLIF(settings.value,''),'0'))::int + (EXCLUDED.value)::int)::text",
+      [key, String(units)]
+    );
+  } catch (e) {
+    console.error('[cota] falha ao contar unidades:', e.message);
+  }
+}
+
+export function quotaError(msg) {
+  return /quota|exceeded your|dailyLimitExceeded|rateLimitExceeded/i.test(String(msg || ''));
+}
+
 async function yt(db, endpoint, params, user) {
+  const cacheKey = endpoint + '?' + Object.keys(params).sort().map((k) => `${k}=${params[k]}`).join('&');
+  const ttl = endpoint === 'videos' && params.chart ? 60 * 60e3 : TTL_MS[endpoint];
+  if (ttl) {
+    const cached = cacheGet(cacheKey);
+    if (cached) return cached;
+  }
   const a = await authFor(db, user);
   const u = new URL('https://www.googleapis.com/youtube/v3/' + endpoint);
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) u.searchParams.set(k, v);
@@ -53,13 +93,21 @@ async function yt(db, endpoint, params, user) {
   } catch (e) {
     throw new HttpError(502, 'Não foi possível falar com a API do YouTube agora. Tente de novo em instantes.');
   }
+  await countUnits(db, UNIT_COST[endpoint] || 1);
   if (!resp.ok) {
     const msg = data?.error?.message || `HTTP ${resp.status}`;
     if (/has not been used|is disabled|accessNotConfigured/i.test(msg)) {
       throw new HttpError(502, 'A YouTube Data API ainda não está ativada no projeto do Google Cloud deste site.');
     }
+    if (quotaError(msg)) {
+      throw new HttpError(429, 'O limite diário da API do YouTube deste site foi atingido. Ele renova à meia-noite (horário do Pacífico, por volta das 4h ou 5h no Brasil). Seus créditos foram devolvidos.');
+    }
+    if (resp.status === 401) {
+      throw new HttpError(401, 'Sua sessão com o Google expirou. Saia e entre com o Google novamente.');
+    }
     throw new HttpError(502, 'Erro da API do YouTube: ' + msg);
   }
+  if (ttl) cacheSet(cacheKey, data, ttl);
   return data;
 }
 
@@ -98,6 +146,22 @@ function mapVideo(item) {
   };
 }
 
+/** Views por hora desde a publicação (métrica pública, estilo "VPH"). */
+export function vph(v) {
+  const hours = Math.max(1, (Date.now() - new Date(v.publishedAt || Date.now()).getTime()) / 3600e3);
+  return Math.round((v.views || 0) / hours);
+}
+/** Engajamento: (likes + comentários) / views, em %. */
+export function engagement(v) {
+  if (!v.views) return null;
+  return Math.round((((v.likes || 0) + (v.comments || 0)) / v.views) * 10000) / 100;
+}
+function withMetrics(list) {
+  const views = list.map((v) => v.views || 0).sort((a, b) => a - b);
+  const median = views.length ? views[Math.floor(views.length / 2)] || 1 : 1;
+  return list.map((v) => ({ ...v, vph: vph(v), engagement: engagement(v), outlier: Math.round(((v.views || 0) / Math.max(1, median)) * 10) / 10 }));
+}
+
 // ---------------- Dados de exemplo (SOMENTE testes automatizados) ----------------
 function mockVideos(q, n = 10) {
   const rnd = seededRand('v:' + q);
@@ -126,10 +190,10 @@ async function fetchVideosByIds(db, ids, user) {
 
 // ---------------- Ferramentas ----------------
 export async function searchVideos(db, q, max = 10, user = null) {
-  if (isMock()) return { mock: true, aviso: MOCK_AVISO, items: mockVideos(q, max) };
+  if (isMock()) return { mock: true, aviso: MOCK_AVISO, items: withMetrics(mockVideos(q, max)) };
   const s = await yt(db, 'search', { part: 'snippet', q, type: 'video', maxResults: Math.min(max, 25) }, user);
   const ids = (s.items || []).map((i) => i.id?.videoId).filter(Boolean);
-  const items = await fetchVideosByIds(db, ids, user);
+  const items = withMetrics(await fetchVideosByIds(db, ids, user));
   return { items };
 }
 
@@ -155,18 +219,21 @@ export async function videoAnalysis(db, idOrUrl, user = null) {
   if (isMock()) {
     const v = mockVideos(id, 1)[0];
     v.id = id;
+    v.vph = vph(v); v.engagement = engagement(v);
     return { mock: true, aviso: MOCK_AVISO, video: v, seo: seoChecklist(v) };
   }
   const items = await fetchVideosByIds(db, [id], user);
   if (!items.length) throw new HttpError(404, 'Vídeo não encontrado (pode ser privado ou removido).');
   const video = items[0];
+  video.vph = vph(video);
+  video.engagement = engagement(video);
   return { video, seo: seoChecklist(video) };
 }
 
 export async function channelAnalysis(db, q, user = null) {
   if (isMock()) {
     const rnd = seededRand('c:' + q);
-    const recent = mockVideos(q, 6);
+    const recent = withMetrics(mockVideos(q, 6));
     return {
       mock: true,
       aviso: MOCK_AVISO,
@@ -195,7 +262,7 @@ export async function channelAnalysis(db, q, user = null) {
   if (uploads) {
     const pl = await yt(db, 'playlistItems', { part: 'contentDetails', playlistId: uploads, maxResults: 10 }, user);
     const ids = (pl.items || []).map((i) => i.contentDetails?.videoId).filter(Boolean);
-    recent = await fetchVideosByIds(db, ids, user);
+    recent = withMetrics(await fetchVideosByIds(db, ids, user));
   }
   const st = c.statistics || {};
   return {
@@ -253,14 +320,14 @@ export async function keywordResearch(db, q, user = null) {
     query: q,
     baseadoEm: items.length,
     terms: list,
-    topVideos: items.slice(0, 8),
+    topVideos: withMetrics(items).slice(0, 8),
     aviso: isMock() ? MOCK_AVISO : EST_AVISO,
     ...(isMock() ? { mock: true } : {})
   };
 }
 
 export async function trends(db, region = 'BR', categoryId, user = null) {
-  if (isMock()) return { mock: true, aviso: MOCK_AVISO, region, items: mockVideos('tendências ' + region, 12) };
+  if (isMock()) return { mock: true, aviso: MOCK_AVISO, region, items: withMetrics(mockVideos('tendências ' + region, 12)) };
   const data = await yt(db, 'videos', {
     part: 'snippet,statistics,contentDetails',
     chart: 'mostPopular',
@@ -268,5 +335,5 @@ export async function trends(db, region = 'BR', categoryId, user = null) {
     maxResults: 12,
     ...(categoryId ? { videoCategoryId: categoryId } : {})
   }, user);
-  return { region, items: (data.items || []).map(mapVideo) };
+  return { region, items: withMetrics((data.items || []).map(mapVideo)) };
 }

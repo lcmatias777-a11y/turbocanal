@@ -3,6 +3,7 @@ import { must } from './util.js';
 import * as ytb from './youtube.js';
 import * as ai from './ai.js';
 import * as gemini from './gemini.js';
+import { HttpError, uid, now } from './util.js';
 
 export function toolRoutes(app, db, auth) {
   // Executa uma ferramenta cobrando créditos NO SERVIDOR, com estorno em caso de falha.
@@ -72,6 +73,60 @@ export function toolRoutes(app, db, auth) {
     const style = typeof req.body?.style === 'string' ? req.body.style.slice(0, 60) : 'vibrante';
     return gemini.generateThumbnail(db, { title, brief, style });
   }));
+
+  // Painel automático da extensão (mesma análise, custo mínimo)
+  app.post('/api/tools/video_panel', auth.required, run('video_panel', (req) => ytb.videoAnalysis(db, must(req.body?.video, 'vídeo'), req.user)));
+
+  // Preparar: pacote de publicação / ideias / roteiro
+  app.post('/api/tools/prep_ai', auth.required, run('prep_ai', (req) => {
+    const topic = must(req.body?.topic, 'tema do vídeo', { max: 200 });
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 2000) : '';
+    const audience = typeof req.body?.audience === 'string' ? req.body.audience.slice(0, 200) : '';
+    return ai.prepPack(db, { topic, notes, audience });
+  }));
+
+  // Transformar: IA assiste o vídeo e acha cortes para Shorts ou reaproveita em post/artigo/thread
+  app.post('/api/tools/transform_ai', auth.required, run('transform_ai', (req) => {
+    const id = ytb.parseVideoId(must(req.body?.video, 'link ou ID do vídeo'));
+    const mode = ['shorts', 'post', 'artigo', 'thread'].includes(req.body?.mode) ? req.body.mode : 'shorts';
+    return gemini.transformVideo(db, id, mode);
+  }));
+
+  // Sugestões de resposta a um comentário
+  app.post('/api/tools/reply_ai', auth.required, run('reply_ai', (req) => {
+    const comment = must(req.body?.comment, 'comentário', { max: 2000 });
+    return ai.replySuggestions(db, { comment, channel: String(req.body?.channel || '').slice(0, 100) });
+  }));
+
+  // ---------- Concorrentes ----------
+  app.get('/api/competitors', auth.required, async (req, res, next) => {
+    try {
+      const rows = await db.all('SELECT id,channel_id,title,thumb,subs,last_data,last_checked,created_at FROM competitors WHERE user_id=? ORDER BY created_at', [req.user.id]);
+      res.json({ items: rows.map((r) => ({ ...r, last_data: r.last_data ? JSON.parse(r.last_data) : null })) });
+    } catch (e) { next(e); }
+  });
+
+  // Adicionar = analisar o canal (cobra como análise) e salvar na lista
+  app.post('/api/competitors', auth.required, run('competitor_check', async (req) => {
+    const q = must(req.body?.channel, 'canal (@handle ou link)', { max: 200 });
+    const count = (await db.get('SELECT COUNT(*)::int AS n FROM competitors WHERE user_id=?', [req.user.id])).n;
+    if (count >= 20) throw new HttpError(400, 'Você já acompanha 20 canais. Remova algum para adicionar outro.');
+    const r = await ytb.channelAnalysis(db, q, req.user);
+    const summary = { recent: (r.recent || []).slice(0, 6), media: r.mediaViewsRecentes, views: r.channel.views, videos: r.channel.videos };
+    await db.run(
+      `INSERT INTO competitors(id,user_id,channel_id,title,thumb,subs,last_data,last_checked,created_at) VALUES(?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(user_id, channel_id) DO UPDATE SET title=EXCLUDED.title, thumb=EXCLUDED.thumb, subs=EXCLUDED.subs, last_data=EXCLUDED.last_data, last_checked=EXCLUDED.last_checked`,
+      [uid(), req.user.id, r.channel.id, r.channel.title, r.channel.thumb, r.channel.subs, JSON.stringify(summary), now(), now()]
+    );
+    return { channel: r.channel, ...summary };
+  }));
+
+  app.delete('/api/competitors/:id', auth.required, async (req, res, next) => {
+    try {
+      await db.run('DELETE FROM competitors WHERE id=? AND user_id=?', [req.params.id, req.user.id]);
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
 
   // Tabela de custos (pública)
   app.get('/api/tools/costs', async (req, res, next) => {

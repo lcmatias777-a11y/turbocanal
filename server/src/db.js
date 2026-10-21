@@ -103,6 +103,19 @@ CREATE TABLE IF NOT EXISTS ab_tests (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ab_user ON ab_tests(user_id, created_at);
+-- Concorrentes acompanhados por usuário
+CREATE TABLE IF NOT EXISTS competitors (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  title TEXT,
+  thumb TEXT,
+  subs BIGINT,
+  last_data TEXT,
+  last_checked TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_comp_user_ch ON competitors(user_id, channel_id);
 `;
 
 const PLAN_SEED = [
@@ -130,7 +143,12 @@ const TOOL_SEED = [
   ['ab_test', 30, 'Teste A/B de capas'],
   ['video_upload', 20, 'Postar vídeo no YouTube'],
   ['live_create', 20, 'Criar transmissão ao vivo'],
-  ['comment_reply', 2, 'Responder comentário']
+  ['comment_reply', 2, 'Responder comentário'],
+  ['video_panel', 1, 'Painel da extensão no YouTube'],
+  ['prep_ai', 15, 'Preparar publicação (IA)'],
+  ['transform_ai', 40, 'Transformar vídeo (IA)'],
+  ['reply_ai', 3, 'Sugerir resposta a comentário (IA)'],
+  ['competitor_check', 8, 'Atualizar concorrente']
 ];
 
 const DEFAULT_SETTINGS = () => ({

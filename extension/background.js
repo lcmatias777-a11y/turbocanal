@@ -6,16 +6,15 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (!baseUrl) await chrome.storage.sync.set({ baseUrl: DEFAULT_URL });
 });
 
-// Token da sessão: usa o token salvo ou o cookie de login do site (login com Google).
+// Token da sessão: a sessão atual do site (cookie do login com Google) vale primeiro,
+// assim a extensão sempre mostra a mesma conta que está aberta no site.
 async function getToken() {
   const { baseUrl, token } = await chrome.storage.sync.get(['baseUrl', 'token']);
-  if (token) return token;
   try {
     const c = await chrome.cookies.get({ url: (baseUrl || DEFAULT_URL).replace(/\/$/, '') + '/', name: 'tc_token' });
-    return c?.value || '';
-  } catch {
-    return '';
-  }
+    if (c?.value) return c.value;
+  } catch {}
+  return token || '';
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

@@ -42,7 +42,12 @@ const TOOL_LINKS = [
   ['#/ferramentas/titulos', 'Títulos (IA)'],
   ['#/ferramentas/descricao', 'Descrição (IA)'],
   ['#/ferramentas/insights', 'IA assiste o vídeo'],
+  ['#/ferramentas/preparar', '📝 Preparar publicação'],
+  ['#/ferramentas/transformar', '🔁 Transformar vídeo (IA)'],
+  ['#/ferramentas/editor', '✂️ Editor de vídeo'],
+  ['#/ferramentas/criar-capa', '🎨 Criar capa'],
   ['#/ferramentas/capa', 'Capa com IA'],
+  ['#/ferramentas/concorrentes', '🏆 Concorrentes'],
   ['#/ferramentas/busca', 'Buscar vídeos']
 ];
 
@@ -94,12 +99,14 @@ views.home = async () => {
     </section>
     <section class="grid cols3">
       ${[
-        ['🔎 Palavras-chave', 'Descubra termos com demanda real a partir de dados públicos da API oficial do YouTube.'],
-        ['📈 Análise de SEO', 'Checklist com pontuação e dicas práticas para título, descrição, tags e duração.'],
-        ['🏆 Concorrentes', 'Analise canais públicos: inscritos, média de views recentes e vídeos que performam.'],
-        ['🔥 Tendências', 'Veja o que está em alta no Brasil e gere ideias de conteúdo.'],
-        ['🤖 IA para criadores', 'Sugestões de títulos e descrições otimizadas (quando a IA está ativada no servidor, você é avisado do método usado).'],
-        ['🧩 Extensão Chrome', 'Analise qualquer vídeo direto na página do YouTube, com a mesma conta e o mesmo saldo.']
+        ['🔎 Palavras-chave e tendências', 'Termos com demanda real a partir da API oficial do YouTube, com views por hora (VPH) e vídeos que estão estourando (outliers).'],
+        ['📺 Seu canal, como no Studio', 'Postar vídeo com agendamento, criar live com chave de transmissão, analytics, comentários, capas e testes A/B, tudo daqui.'],
+        ['✂️ Editor de vídeo grátis', 'Corte trechos, transforme em Shorts 9:16, acelere, tire o áudio. Roda no seu navegador, sem gastar créditos.'],
+        ['🎨 Capas que chamam clique', 'Crie capas com texto grande a partir de um quadro do vídeo e veja a prévia no feed (claro, escuro e celular).'],
+        ['🤖 IA para criadores', 'Prepara título, descrição, tags e roteiro; assiste o vídeo e acha os melhores cortes para Shorts.'],
+        ['🏆 Concorrentes', 'Acompanhe canais do seu nicho e descubra quais vídeos deles estão performando acima da média.'],
+        ['📈 SEO de cada vídeo', 'Nota de SEO com o que falta arrumar em cada vídeo do seu canal.'],
+        ['🧩 Extensão Chrome', 'Painel na página do vídeo do YouTube: VPH, engajamento, tags e SEO, com a mesma conta.']
       ].map(([t, d]) => `<div class="card"><h3>${t}</h3><p class="muted">${d}</p></div>`).join('')}
     </section>
     <p class="center" style="margin-top:18px"><a class="btn ghost" href="#/ajuda">🧩 Baixar a extensão para Chrome</a></p>
@@ -137,7 +144,7 @@ views.login = async (params) => {
       <p class="muted">Entre com sua conta do Google (a mesma do seu canal do YouTube). Sua conta é criada automaticamente na primeira vez, com 5.000 créditos.</p>
       ${googleButton('Entrar com Google')}
       <p class="muted small">Ao entrar, você autoriza a leitura de dados públicos do YouTube para as ferramentas de pesquisa. Gerenciar o seu canal (capas, vídeos, lives) é uma autorização separada, feita em "Meu canal".</p>
-      <p class="small"><a href="#/privacidade">Privacidade</a> · <a href="#/termos">Termos de uso</a></p>
+      <p class="small"><a href="/privacidade">Privacidade</a> · <a href="/termos">Termos de uso</a></p>
     </div>`;
 };
 
@@ -185,9 +192,11 @@ function toolCostLabel(hash) {
   const map = {
     palavras: 'keyword_research', video: 'video_analysis', canal: 'channel_analysis',
     tendencias: 'trends', titulos: 'title_ai', descricao: 'description_ai', busca: 'video_search',
-    insights: 'video_insights_ai', capa: 'thumbnail_ai'
+    insights: 'video_insights_ai', capa: 'thumbnail_ai', preparar: 'prep_ai', transformar: 'transform_ai', concorrentes: 'competitor_check'
   };
-  const key = map[hash.split('/').pop()];
+  const last = hash.split('/').pop();
+  if (last === 'editor' || last === 'criar-capa') return 'Grátis (roda no seu navegador)';
+  const key = map[last];
   const c = state.costs.find((x) => x.tool === key);
   if (!c) return '';
   return state.user?.unlimited ? 'Incluído (ilimitado)' : `${c.cost} créditos por uso`;
@@ -212,7 +221,7 @@ function creditsNote(credits) {
   if (!credits) return '';
   if (credits.unlimited) return alertBox('info', 'Conta do administrador principal: nenhum crédito foi consumido (uso ilimitado).');
   if (credits.reused) return alertBox('info', 'Requisição repetida detectada: nenhum crédito foi cobrado de novo.');
-  return alertBox('ok', `Foram usados <b>${credits.charged}</b> créditos. Saldo atual: <b>${fmt(credits.balance)}</b>.`);
+  return alertBox('ok', `${credits.charged === 1 ? 'Foi usado <b>1</b> crédito' : `Foram usados <b>${credits.charged}</b> créditos`}. Saldo atual: <b>${fmt(credits.balance)}</b>.`);
 }
 function resultAviso(result) {
   const parts = [];
@@ -221,9 +230,14 @@ function resultAviso(result) {
   return parts.length ? alertBox('warn', parts.join('<br>')) : '';
 }
 
-function toolPage({ title, desc, toolKey, formHtml, getBody, render }) {
-  return async () => {
+function toolPage({ title, desc, toolKey, formHtml, getBody, render, after, onMount }) {
+  return async (params) => {
     if (!state.user) return needLogin();
+    // Campos podem vir no endereço (ex.: #/ferramentas/insights?video=ID, usado pela extensão).
+    // Só preenche: nada roda nem cobra crédito sem o clique em "Executar".
+    const fromUrl = {};
+    if (params) for (const [k, v] of params) fromUrl[k] = v;
+    if (Object.keys(fromUrl).length) state.toolPrefill = { ...fromUrl, ...(state.toolPrefill || {}) };
     const cost = state.costs.find((c) => c.tool === toolKey)?.cost;
     appEl().innerHTML = `
       <h1>${title}</h1>
@@ -231,6 +245,11 @@ function toolPage({ title, desc, toolKey, formHtml, getBody, render }) {
       <div class="card"><form id="f">${formHtml}
         <p><button class="btn">Executar <span id="sp"></span></button></p></form></div>
       <div id="msg"></div><div id="out"></div>`;
+    if (onMount) onMount($('#f'));
+    if (state.toolPrefill) {
+      for (const [k, v] of Object.entries(state.toolPrefill)) { const inp = $('#f').querySelector(`[name="${k}"]`); if (inp) inp.value = v; }
+      state.toolPrefill = null;
+    }
     $('#f').onsubmit = async (ev) => {
       ev.preventDefault();
       const body = getBody(new FormData(ev.target));
@@ -240,6 +259,7 @@ function toolPage({ title, desc, toolKey, formHtml, getBody, render }) {
         await refreshMe();
         $('#msg').innerHTML = creditsNote(r.credits) + resultAviso(r.result);
         $('#out').innerHTML = render(r.result);
+        if (after) after(r.result, $('#out'));
       } catch (e) {
         $('#msg').innerHTML = alertBox('err', esc(e.message) + (e.status === 402 ? ' <a href="#/planos">Ver planos</a>' : '') + (e.status === 409 ? ' <span class="muted small">(configuração pendente, nenhum crédito foi cobrado)</span>' : ''));
       }
@@ -248,13 +268,19 @@ function toolPage({ title, desc, toolKey, formHtml, getBody, render }) {
   };
 }
 
+function outlierPill(v) {
+  if (v.outlier == null) return '';
+  if (v.outlier >= 2) return `<span class="pill ok" title="Views ${v.outlier}x a mediana do grupo">🔥 ${v.outlier}x</span>`;
+  if (v.outlier <= 0.5) return `<span class="pill" title="Abaixo da mediana do grupo">${v.outlier}x</span>`;
+  return `<span class="pill" title="Views em relação à mediana do grupo">${v.outlier}x</span>`;
+}
 function videoTable(items) {
-  return `<div class="card scroll"><table><tr><th></th><th>Vídeo</th><th>Canal</th><th>Views</th><th>Likes</th><th>Publicado</th></tr>
+  return `<div class="card scroll"><table><tr><th></th><th>Vídeo</th><th>Canal</th><th>Views</th><th title="Views por hora desde a publicação">VPH</th><th title="Views em relação à mediana dos vídeos desta lista">Outlier</th><th>Engaj.</th><th>Publicado</th></tr>
     ${items.map((v) => `<tr>
       <td>${v.thumb ? `<img src="${esc(v.thumb)}" width="96" style="border-radius:6px">` : '🎬'}</td>
       <td>${v.mock ? esc(v.title) : `<a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc(v.title)}</a>`}</td>
-      <td>${esc(v.channel)}</td><td>${fmt(v.views)}</td><td>${fmt(v.likes)}</td><td class="small">${dt(v.publishedAt).split(',')[0]}</td></tr>`).join('')}
-  </table></div>`;
+      <td>${esc(v.channel)}</td><td>${fmt(v.views)}</td><td>${fmt(v.vph)}</td><td>${outlierPill(v)}</td><td class="small">${v.engagement != null ? v.engagement + '%' : '—'}</td><td class="small">${dt(v.publishedAt).split(',')[0]}</td></tr>`).join('')}
+  </table><p class="muted small">VPH = views por hora desde a publicação. Outlier = views em relação à mediana desta lista (🔥 = 2x ou mais). Métricas calculadas com dados públicos.</p></div>`;
 }
 
 views['ferramentas/busca'] = toolPage({
@@ -288,7 +314,9 @@ views['ferramentas/video'] = toolPage({
     return `<div class="card"><div class="thumbrow">
         ${v.thumb ? `<img src="${esc(v.thumb)}">` : ''}
         <div><h3>${esc(v.title)}</h3><p class="muted">${esc(v.channel)} · ${dt(v.publishedAt).split(',')[0]}</p>
-        <p>👁 ${fmt(v.views)} views · 👍 ${fmt(v.likes)} · 💬 ${fmt(v.comments)} · ⏱ ${Math.round(v.durationSec / 60)} min</p></div></div></div>
+        <p>👁 ${fmt(v.views)} views · 👍 ${fmt(v.likes)} · 💬 ${fmt(v.comments)} · ⏱ ${Math.round(v.durationSec / 60)} min</p>
+        <p><span class="pill">⚡ ${fmt(v.vph)} views/hora</span> <span class="pill">💬 engajamento ${v.engagement != null ? v.engagement + '%' : '—'}</span></p>
+        ${(v.tags || []).length ? `<p class="small">Tags: ${v.tags.map((t) => `<span class="pill">${esc(t)}</span>`).join(' ')} <button class="btn sm ghost" type="button" onclick="navigator.clipboard.writeText(${esc(JSON.stringify((v.tags || []).join(', ')))})">copiar tags</button></p>` : '<p class="small muted">Sem tags públicas.</p>'}</div></div></div>
       <div class="card"><h3>Pontuação de SEO: ${s.score}/100 <span class="muted small">(heurística TurboCanal)</span></h3>
       <ul class="checklist">${s.checks.map((c) => `<li class="${c.ok ? 'ok' : 'no'}"><b>${esc(c.item)}</b><br><span class="muted small">${esc(c.dica)}</span></li>`).join('')}</ul></div>`;
   }
@@ -375,6 +403,120 @@ views['ferramentas/capa'] = toolPage({
   }
 });
 
+/* ------------------------------ Preparar / Transformar / Editor / Capa / Concorrentes ------------------------------ */
+const studioCtx = () => ({ esc, alertBox, fmt, state, api, refreshMe, go: (h) => (location.hash = h) });
+const loadStudio = () => import('./studio.js');
+
+function copyBtn(text, label = 'copiar') {
+  return `<button class="btn sm ghost" type="button" onclick="navigator.clipboard.writeText(${esc(JSON.stringify(String(text || '')))});this.textContent='copiado ✓'">${label}</button>`;
+}
+
+views['ferramentas/preparar'] = toolPage({
+  title: '📝 Preparar publicação', toolKey: 'prep_ai',
+  desc: 'Antes de gravar ou postar: títulos, descrição, tags, hashtags, roteiro com gancho, textos para a capa e ideias dos próximos vídeos. Depois é um clique para levar tudo ao "Postar vídeo".',
+  formHtml: `<label>Tema do vídeo</label><input name="topic" required maxlength="200" placeholder="ex.: como ganhar no bedwars sem gastar">
+    <label>Anotações (opcional): o que acontece no vídeo, pontos principais</label><textarea name="notes" maxlength="2000"></textarea>
+    <label>Público (opcional)</label><input name="audience" maxlength="200" placeholder="ex.: jogadores iniciantes de 12 a 18 anos">`,
+  getBody: (fd) => ({ topic: fd.get('topic'), notes: fd.get('notes'), audience: fd.get('audience') }),
+  render: (r) => {
+    const list = (arr) => (arr || []).map((x) => (typeof x === 'string' ? x : JSON.stringify(x)));
+    return `<div class="grid cols2">
+      <div class="card"><h3>Títulos <span class="pill">${r.metodo === 'ia' ? 'IA' : 'gerador local'}</span></h3>
+        ${list(r.titulos).map((t, i) => `<label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="radio" name="ptitle" value="${i}" ${i === 0 ? 'checked' : ''} style="width:auto"> ${esc(t)}</label>`).join('')}</div>
+      <div class="card"><h3>Textos para a capa</h3>${list(r.capa_textos).map((t) => `<p><span class="pill">${esc(t)}</span> <a href="#/ferramentas/criar-capa" data-capa="${esc(t)}">criar capa com este texto →</a></p>`).join('')}</div>
+      <div class="card"><h3>Descrição</h3><textarea id="pdesc" style="min-height:220px">${esc(r.descricao || '')}</textarea></div>
+      <div class="card"><h3>Tags e hashtags</h3><p>${list(r.tags).map((t) => `<span class="pill">${esc(t)}</span>`).join(' ')}</p><p>${copyBtn(list(r.tags).join(', '), 'copiar tags')}</p>
+        <p>${list(r.hashtags).map((t) => `<span class="pill">${esc(t)}</span>`).join(' ')}</p></div>
+      <div class="card"><h3>Roteiro</h3><ol>${(r.roteiro || []).map((p) => `<li><b>${esc(p.parte || '')}</b>: ${esc(p.texto || p.fala || '')}</li>`).join('')}</ol></div>
+      <div class="card"><h3>Ideias dos próximos vídeos</h3><ol>${list(r.ideias).map((t) => `<li>${esc(t)}</li>`).join('')}</ol></div>
+    </div>
+    <p><button class="btn" id="pUse" type="button">⬆️ Usar no "Postar vídeo"</button></p>`;
+  },
+  after: (r, out) => {
+    for (const a of out.querySelectorAll('[data-capa]')) a.onclick = () => { state.thumbText = a.dataset.capa; };
+    const use = out.querySelector('#pUse');
+    if (use) use.onclick = () => {
+      const i = +(out.querySelector('input[name=ptitle]:checked')?.value || 0);
+      state.prepDraft = { title: (r.titulos || [])[i] || '', description: out.querySelector('#pdesc').value, tags: r.tags || [] };
+      location.hash = '#/canal/postar';
+    };
+  }
+});
+
+views['ferramentas/transformar'] = toolPage({
+  title: '🔁 Transformar vídeo (IA)', toolKey: 'transform_ai',
+  desc: 'A IA assiste o vídeo e reaproveita: acha os melhores trechos para Shorts (com os tempos), ou transforma em post da Comunidade, artigo de blog ou sequência para redes.',
+  formHtml: `<label>Link ou ID do vídeo (público)</label><input name="video" required placeholder="https://www.youtube.com/watch?v=...">
+    <label>Transformar em</label><select name="mode"><option value="shorts">✂️ Cortes para Shorts (trechos com tempo)</option><option value="post">📣 Post da Comunidade + enquete</option><option value="artigo">📰 Artigo de blog</option><option value="thread">🧵 Sequência para redes sociais</option></select>`,
+  getBody: (fd) => ({ video: fd.get('video'), mode: fd.get('mode') }),
+  render: (r) => {
+    const x = r.resultado || {};
+    if (r.mode === 'shorts') {
+      return `<div class="card"><h3>Trechos para Shorts</h3>${(x.cortes || []).map((c, i) => `
+        <div style="border-bottom:1px solid var(--line);padding:8px 0"><b>${esc(c.titulo || 'Corte ' + (i + 1))}</b> <span class="pill">${esc(c.inicio)} → ${esc(c.fim)}</span>
+          <p class="small">Gancho: ${esc(c.gancho || '')}<br><span class="muted">${esc(c.motivo || '')}</span></p>
+          <button class="btn sm secondary" type="button" data-cut="${i}">✂️ Abrir no editor com estes tempos</button></div>`).join('') || '<p class="muted">Nenhum trecho sugerido.</p>'}
+        <p class="muted small">O editor corta o arquivo ORIGINAL do seu computador (por direitos autorais, não baixamos vídeos do YouTube).</p></div>`;
+    }
+    if (r.mode === 'post') return `<div class="card"><h3>Post da Comunidade</h3><textarea style="min-height:160px">${esc(x.post || '')}</textarea><p>${copyBtn(x.post, 'copiar post')}</p>
+      ${x.enquete ? `<h3>Enquete</h3><p><b>${esc(x.enquete.pergunta || '')}</b></p><ol>${(x.enquete.opcoes || []).map((o) => `<li>${esc(o)}</li>`).join('')}</ol>` : ''}</div>`;
+    if (r.mode === 'artigo') return `<div class="card"><h3>${esc(x.titulo || 'Artigo')}</h3><textarea style="min-height:360px">${esc(x.texto || '')}</textarea><p>${copyBtn((x.titulo ? x.titulo + '\n\n' : '') + (x.texto || ''), 'copiar artigo')}</p></div>`;
+    return `<div class="card"><h3>Sequência</h3><ol>${(x.posts || []).map((t) => `<li style="margin:6px 0">${esc(t)} ${copyBtn(t)}</li>`).join('')}</ol></div>`;
+  },
+  after: (r, out) => {
+    const toSec = (t) => String(t || '0').split(':').reduce((a, n) => a * 60 + (parseFloat(n) || 0), 0);
+    for (const b of out.querySelectorAll('[data-cut]')) b.onclick = () => {
+      const c = (r.resultado?.cortes || [])[+b.dataset.cut] || {};
+      state.editorPreset = { start: toSec(c.inicio), end: toSec(c.fim), title: c.titulo || '', shorts: true };
+      location.hash = '#/ferramentas/editor';
+    };
+  }
+});
+
+views['ferramentas/editor'] = async () => {
+  if (!state.user) return needLogin();
+  const m = await loadStudio();
+  await m.mountEditor(appEl(), studioCtx());
+};
+views['ferramentas/criar-capa'] = async () => {
+  if (!state.user) return needLogin();
+  const m = await loadStudio();
+  await m.mountThumbMaker(appEl(), studioCtx());
+};
+
+views['ferramentas/concorrentes'] = async () => {
+  if (!state.user) return needLogin();
+  const cost = state.costs.find((c) => c.tool === 'competitor_check')?.cost;
+  appEl().innerHTML = `<h1>🏆 Concorrentes</h1>
+    <p class="muted">Acompanhe até 20 canais: últimos vídeos, views por hora e quais vídeos estão "estourando" (outliers 🔥) em relação ao próprio canal. ${cost != null ? `<span class="pill">${state.user.unlimited ? 'Incluído (ilimitado)' : cost + ' créditos por atualização'}</span>` : ''}</p>
+    <div class="card"><div class="row"><div><label>@handle ou link do canal</label><input id="cq" placeholder="ex.: @canaldojogo"></div>
+      <div class="fit"><button class="btn" id="cadd" type="button">Adicionar / atualizar</button></div></div><div id="cmsg"></div></div>
+    <div id="clist"><span class="spin"></span></div>`;
+  const load = async () => {
+    const r = await api('/competitors');
+    $('#clist').innerHTML = r.items.length ? r.items.map((c) => `
+      <div class="card"><div class="thumbrow">${c.thumb ? `<img src="${esc(c.thumb)}" style="border-radius:50%;width:64px">` : ''}
+        <div style="flex:1"><h3>${esc(c.title || c.channel_id)}</h3>
+          <p class="muted small">${c.subs != null ? fmt(c.subs) + ' inscritos · ' : ''}média recente: ${fmt(c.last_data?.media)} views · atualizado ${dt(c.last_checked)}</p>
+          <p><button class="btn sm secondary" data-up="${esc(c.channel_id)}">Atualizar</button> <button class="btn sm ghost" data-del="${esc(c.id)}">Remover</button></p></div></div>
+        ${c.last_data?.recent?.length ? videoTable(c.last_data.recent) : ''}</div>`).join('') : '<p class="muted">Nenhum concorrente ainda. Adicione o primeiro acima.</p>';
+    for (const b of document.querySelectorAll('[data-del]')) b.onclick = async () => { await api('/competitors/' + b.dataset.del, { method: 'DELETE' }); load(); };
+    for (const b of document.querySelectorAll('[data-up]')) b.onclick = () => add(b.dataset.up);
+  };
+  const add = async (q) => {
+    $('#cmsg').innerHTML = '<span class="spin"></span>';
+    try {
+      const r = await api('/competitors', { method: 'POST', body: { channel: q } });
+      await refreshMe();
+      $('#cmsg').innerHTML = creditsNote(r.credits);
+      $('#cq').value = '';
+      load();
+    } catch (e) { $('#cmsg').innerHTML = alertBox('err', esc(e.message)); }
+  };
+  $('#cadd').onclick = () => { const q = $('#cq').value.trim(); if (q) add(q); };
+  load();
+};
+
 /* ------------------------------ Meu canal (OAuth YouTube) ------------------------------ */
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -387,7 +529,7 @@ function fileToDataUrl(file) {
   });
 }
 
-const CANAL_TABS = [['videos', '🎬 Meus vídeos'], ['postar', '⬆️ Postar vídeo'], ['live', '🔴 Live'], ['analytics', '📊 Analytics'], ['comentarios', '💬 Comentários'], ['ab', '🧪 Testes A/B']];
+const CANAL_TABS = [['videos', '🎬 Meus vídeos'], ['postar', '⬆️ Postar vídeo'], ['editar', '✂️ Editar vídeo'], ['capa', '🎨 Criar capa'], ['live', '🔴 Live'], ['analytics', '📊 Analytics'], ['comentarios', '💬 Comentários'], ['ab', '🧪 Testes A/B']];
 
 views.canal = async (params, sub) => {
   if (!state.user) return needLogin();
@@ -414,6 +556,8 @@ views.canal = async (params, sub) => {
 };
 
 const canalTabs = {
+  async editar(el) { const m = await loadStudio(); await m.mountEditor(el, studioCtx()); },
+  async capa(el) { const m = await loadStudio(); await m.mountThumbMaker(el, studioCtx()); },
   async videos(el) {
     const data = await api('/channel/videos');
     const c = data.channel;
@@ -424,8 +568,10 @@ const canalTabs = {
       <div class="grid cols2">${data.videos.map((v) => `
         <div class="card" id="v-${esc(v.id)}">
           <div class="thumbrow">${v.thumb ? `<img src="${esc(v.thumb)}">` : ''}<div><b>${esc(v.title)}</b>
-            <p class="muted small">👁 ${fmt(v.views)} · 👍 ${fmt(v.likes)} · 💬 ${fmt(v.comments)} · ${dt(v.publishedAt).split(',')[0]} · ${esc(v.privacy || '')}</p>
-            <p class="small"><a href="https://studio.youtube.com/video/${esc(v.id)}/edit" target="_blank" rel="noopener">editar no Studio ↗</a></p></div></div>
+            <p class="muted small">👁 ${fmt(v.views)} · 👍 ${fmt(v.likes)} · 💬 ${fmt(v.comments)} · ⚡ ${fmt(v.vph)}/h · ${dt(v.publishedAt).split(',')[0]} · ${esc(v.privacy || '')}</p>
+            <p class="small"><span class="pill ${v.seoScore >= 80 ? 'ok' : v.seoScore >= 50 ? 'warn' : 'err'}" title="${esc((v.seoTodo || []).join(' · ') || 'Tudo certo')}">SEO ${v.seoScore ?? '—'}/100</span>
+              ${(v.seoTodo || []).length ? `<span class="muted">falta: ${esc((v.seoTodo || []).slice(0, 2).join(', '))}${v.seoTodo.length > 2 ? '…' : ''}</span>` : '<span class="muted">checklist completo ✅</span>'}</p>
+            <p class="small"><a href="https://studio.youtube.com/video/${esc(v.id)}/edit" target="_blank" rel="noopener">editar no Studio ↗</a> · <a href="#/ferramentas/insights" data-insight="${esc(v.id)}">IA assiste este vídeo</a> · <a href="#/ferramentas/transformar" data-transform="${esc(v.id)}">transformar em Shorts</a></p></div></div>
           <details><summary class="small">✏️ Editar título e descrição</summary>
             <label>Título</label><input data-f="title" value="${esc(v.title)}" maxlength="100">
             <label>Descrição</label><textarea data-f="description">${esc(v.description)}</textarea>
@@ -442,7 +588,15 @@ const canalTabs = {
           <div class="small" id="m-${esc(v.id)}"></div>
         </div>`).join('')}</div>
       ${data.videos.length ? '' : '<p class="muted">Nenhum vídeo encontrado neste canal.</p>'}`;
-    $('#ytoff').onclick = async () => { if (confirm('Desvincular o canal do YouTube desta conta?')) { await api('/auth/youtube/disconnect', { method: 'POST' }); await refreshMe(); route(); } };
+    $('#ytoff').onclick = async () => {
+      if (!confirm('Desvincular o canal do YouTube desta conta? O acesso é revogado no Google; para voltar a usar as ferramentas, entre com o Google de novo.')) return;
+      await api('/auth/youtube/disconnect', { method: 'POST' });
+      try { await api('/auth/logout', { method: 'POST' }); } catch {}
+      state.user = null;
+      location.hash = '#/login';
+    };
+    for (const a of el.querySelectorAll('[data-insight]')) a.onclick = () => { state.toolPrefill = { video: 'https://www.youtube.com/watch?v=' + a.dataset.insight }; };
+    for (const a of el.querySelectorAll('[data-transform]')) a.onclick = () => { state.toolPrefill = { video: 'https://www.youtube.com/watch?v=' + a.dataset.transform, mode: 'shorts' }; };
     const msg = (id, kind, html) => ($('#m-' + id).innerHTML = alertBox(kind, html));
     for (const b of el.querySelectorAll('[data-save]')) b.onclick = async () => {
       const id = b.dataset.save, card = $('#v-' + id);
@@ -477,11 +631,13 @@ const canalTabs = {
     el.innerHTML = `<div class="card" style="max-width:720px"><h3>Postar vídeo no YouTube</h3>
       <p class="muted small">O arquivo vai direto do seu computador para o YouTube (não passa pelo nosso servidor). Para publicar em data marcada, escolha "Agendar". ${costOf('video_upload')}</p>
       <div id="pmsg"></div>
+      ${state.pendingUpload ? alertBox('info', `Vídeo vindo do editor: <b>${esc(state.pendingUpload.name)}</b> (${(state.pendingUpload.size / 1048576).toFixed(1)} MB). <a href="#" id="pClear">usar outro arquivo</a>`) : ''}
+      <p class="small"><a href="#/ferramentas/preparar">📝 Preparar título, descrição e tags com IA</a> · <a href="#/canal/editar">✂️ Editar o vídeo antes</a></p>
       <form id="pf">
-        <label>Arquivo de vídeo</label><input type="file" name="file" accept="video/*" required>
-        <label>Título</label><input name="title" maxlength="100" required>
-        <label>Descrição</label><textarea name="description" maxlength="5000"></textarea>
-        <label>Tags (separadas por vírgula)</label><input name="tags">
+        <div id="pFileWrap" style="${state.pendingUpload ? 'display:none' : ''}"><label>Arquivo de vídeo</label><input type="file" name="file" accept="video/*" ${state.pendingUpload ? '' : 'required'}></div>
+        <label>Título</label><input name="title" maxlength="100" required value="${esc(state.prepDraft?.title || '')}">
+        <label>Descrição</label><textarea name="description" maxlength="5000">${esc(state.prepDraft?.description || '')}</textarea>
+        <label>Tags (separadas por vírgula)</label><input name="tags" value="${esc((state.prepDraft?.tags || []).join(', '))}">
         <div class="row">
           <div><label>Visibilidade</label><select name="privacy"><option value="private">Privado</option><option value="unlisted">Não listado</option><option value="public">Público</option></select></div>
           <div><label>Categoria</label><select name="categoryId"><option value="20">Jogos</option><option value="22">Pessoas e blogs</option><option value="24">Entretenimento</option><option value="27">Educação</option><option value="28">Ciência e tecnologia</option><option value="10">Música</option><option value="26">Como fazer e estilo</option></select></div>
@@ -490,10 +646,13 @@ const canalTabs = {
         <p><button class="btn" id="pbtn">Enviar para o YouTube</button></p>
         <div id="pprog" class="muted small"></div>
       </form></div>`;
+    const pc = $('#pClear');
+    if (pc) pc.onclick = (e) => { e.preventDefault(); state.pendingUpload = null; canalTabs.postar(el); };
     $('#pf').onsubmit = async (ev) => {
       ev.preventDefault();
       const fd = new FormData(ev.target);
-      const file = fd.get('file');
+      const picked = fd.get('file');
+      const file = picked && picked.size ? picked : state.pendingUpload;
       const btn = $('#pbtn'); btn.disabled = true; $('#pmsg').innerHTML = '';
       try {
         if (!file || !file.size) throw new Error('Escolha um arquivo de vídeo.');
@@ -502,6 +661,8 @@ const canalTabs = {
         const videoId = await uploadToYouTube(r.result.uploadUrl, file, (pct) => ($('#pprog').textContent = `Enviando… ${pct}%`));
         const done = await api('/channel/upload/done', { method: 'POST', body: { videoId } });
         await refreshMe();
+        state.pendingUpload = null;
+        state.prepDraft = null;
         $('#pmsg').innerHTML = alertBox('ok', `✅ Vídeo enviado${r.result.scheduled ? ' e agendado' : ''}! <a href="${esc(done.url)}" target="_blank" rel="noopener">Ver no YouTube</a> · <a href="${esc(done.studio)}" target="_blank" rel="noopener">Abrir no Studio</a>. O processamento do YouTube pode levar alguns minutos. ` + creditsNote(r.credits));
         $('#pprog').textContent = '';
       } catch (e) { $('#pmsg').innerHTML = alertBox('err', esc(e.message)); }
@@ -559,8 +720,21 @@ const canalTabs = {
       ${c.items.length ? c.items.map((m) => `<div style="border-bottom:1px solid var(--line);padding:8px 0" id="c-${esc(m.id)}">
         <b>${esc(m.author)}</b> <span class="muted small">${dt(m.publishedAt)} · 👍 ${fmt(m.likes)} · ${m.replies} respostas · <a href="https://www.youtube.com/watch?v=${esc(m.videoId)}" target="_blank" rel="noopener">vídeo</a></span>
         <p>${esc(m.text)}</p>
-        <div class="row"><div><input placeholder="Responder…" data-reply="${esc(m.id)}"></div><div class="fit"><button class="btn sm secondary" data-send="${esc(m.id)}">Responder ${costOf('comment_reply')}</button></div></div>
+        <div class="row"><div><input placeholder="Responder…" data-reply="${esc(m.id)}"></div>
+          <div class="fit"><button class="btn sm ghost" data-suggest="${esc(m.id)}" data-text="${esc(m.text)}">✨ Sugerir ${costOf('reply_ai')}</button></div>
+          <div class="fit"><button class="btn sm secondary" data-send="${esc(m.id)}">Responder ${costOf('comment_reply')}</button></div></div>
         <div class="small" id="cm-${esc(m.id)}"></div></div>`).join('') : '<p class="muted">Nenhum comentário recente.</p>'}</div>`;
+    for (const b of el.querySelectorAll('[data-suggest]')) b.onclick = async () => {
+      const id = b.dataset.suggest, input = el.querySelector(`[data-reply="${id}"]`);
+      try {
+        const r = await api('/tools/reply_ai', { method: 'POST', body: { comment: b.dataset.text, channel: state.user?.youtube?.channel_title || '' } });
+        await refreshMe();
+        const opts = r.result.respostas || [];
+        input.value = opts[0] || '';
+        $('#cm-' + id).innerHTML = opts.slice(1).map((o) => `<a href="#" class="small" data-pick="${esc(o)}">↳ ${esc(o)}</a>`).join('<br>');
+        for (const a of $('#cm-' + id).querySelectorAll('[data-pick]')) a.onclick = (e) => { e.preventDefault(); input.value = a.dataset.pick; };
+      } catch (e) { $('#cm-' + id).innerHTML = alertBox('err', esc(e.message)); }
+    };
     for (const b of el.querySelectorAll('[data-send]')) b.onclick = async () => {
       const id = b.dataset.send, input = el.querySelector(`[data-reply="${id}"]`);
       try {
@@ -737,6 +911,10 @@ views.ajuda = async () => {
         <p class="muted">Aceitamos Pix por meio de provedor de pagamentos. Seu plano só é ativado depois que o provedor confirma o pagamento; não existe liberação por "já paguei". Problemas com uma cobrança? Fale com o administrador pela conta de contato do site.</p></div>
       <div class="card"><h3>Sou novo no YouTube, por onde começo?</h3>
         <p class="muted">1) Pesquise palavras-chave do seu nicho; 2) analise 3 canais concorrentes e veja a média de views deles; 3) use as sugestões de título antes de gravar; 4) rode a análise de SEO no vídeo publicado e aplique as dicas.</p></div>
+      <div class="card"><h3>O editor de vídeo envia meu vídeo para algum lugar?</h3>
+        <p class="muted">Não. O editor roda dentro do seu navegador: o arquivo não sai do seu computador e não gasta créditos. Só quando você clica em "Postar no meu canal" ele vai direto para o YouTube.</p></div>
+      <div class="card"><h3>Por que preciso vincular o canal?</h3>
+        <p class="muted">Para postar vídeos, criar lives, ver o analytics, responder comentários e trocar capas, o Google exige a sua autorização. Você vincula uma vez em "Meu canal" e pode desvincular quando quiser.</p></div>
       <div class="card"><h3>Privacidade e segurança</h3>
         <p class="muted">Senhas são armazenadas com hash (bcrypt). Permissões, saldos e pagamentos são validados sempre no servidor. O token da extensão equivale a uma senha: não compartilhe.</p></div>
     </div>`;
@@ -799,6 +977,8 @@ const adminTabs = {
           <p class="muted small">Indicador de uso e de custo operacional das APIs.</p></div>
         <div class="card"><h3>Pagamentos aprovados</h3><div class="kpi">${money(o.payments.approvedTotalCents)}</div>
           <p class="muted small">${o.payments.approvedCount} pagamentos confirmados.</p></div>
+        <div class="card"><h3>Cota do YouTube hoje</h3><div class="kpi">${fmt(o.youtubeQuota?.usedToday || 0)} <small class="muted">/ ${fmt(o.youtubeQuota?.dailyLimit || 10000)}</small></div>
+          <p class="muted small">Compartilhada por todo o site. Busca = 100 unidades, postar vídeo = 1.600, capa ou edição = 50, leitura = 1. Renova por volta das 4h ou 5h. Quando o site crescer, peça aumento gratuito ao Google no <a href="https://support.google.com/youtube/contact/yt_api_form" target="_blank" rel="noopener">formulário de cota da API do YouTube</a>.</p></div>
       </section>
       <div class="card"><h3>Status da configuração</h3>
         <p>YouTube API: ${cfgPill(o.config.youtubeApiConfigured, 'configurada', 'pendente')} ·

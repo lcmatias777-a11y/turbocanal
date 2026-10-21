@@ -4,8 +4,17 @@
 import { youtubeAccessToken } from './auth.js';
 import { spend, refund } from './credits.js';
 import { HttpError, audit, must, now, uid } from './util.js';
+import { seoChecklist, vph, engagement, countUnits, quotaError } from './youtube.js';
 
 const API = 'https://www.googleapis.com/youtube/v3/';
+let DB = null; // definido em channelRoutes (para contar a cota usada)
+
+function unitsFor(path, method) {
+  if (path.includes('youtubeanalytics')) return 0; // cota separada
+  if (path.includes('/upload/youtube/v3/thumbnails')) return 50;
+  if (method === 'GET') return 1;
+  return 50; // insert/update/bind
+}
 
 async function yt(token, path, { method = 'GET', params = {}, body, raw } = {}) {
   const u = new URL(path.startsWith('http') ? path : API + path);
@@ -24,16 +33,25 @@ async function yt(token, path, { method = 'GET', params = {}, body, raw } = {}) 
   } catch {
     throw new HttpError(502, 'Não foi possível falar com a API do YouTube agora.');
   }
+  if (DB) await countUnits(DB, unitsFor(String(u), method));
   if (!resp.ok) {
     const msg = data?.error?.message || `HTTP ${resp.status}`;
+    if (quotaError(msg)) throw new HttpError(429, 'O limite diário da API do YouTube deste site foi atingido. Ele renova por volta das 4h ou 5h (horário de Brasília). Seus créditos foram devolvidos.');
+    if (/insufficient|forbidden|permission/i.test(msg) && resp.status === 403) throw new HttpError(403, 'O YouTube negou a permissão para esta ação. Vincule o canal novamente (em Meu canal) e aceite todas as permissões. Detalhe: ' + msg);
+    if (/liveStreamingNotEnabled|live streaming/i.test(msg)) throw new HttpError(409, 'As transmissões ao vivo ainda não estão habilitadas no seu canal. Ative em studio.youtube.com > Criar > Transmitir ao vivo (pode levar até 24h na primeira vez).');
     throw new HttpError(502, 'YouTube: ' + msg);
   }
   return data;
 }
 
+function isoDur(iso) {
+  const m = String(iso || '').match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  return m ? (+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0) : 0;
+}
+
 function mapVideo(v) {
   const st = v.statistics || {};
-  return {
+  const base = {
     id: v.id,
     title: v.snippet?.title,
     description: v.snippet?.description || '',
@@ -44,8 +62,11 @@ function mapVideo(v) {
     privacy: v.status?.privacyStatus,
     views: +st.viewCount || 0,
     likes: st.likeCount != null ? +st.likeCount : null,
-    comments: st.commentCount != null ? +st.commentCount : null
+    comments: st.commentCount != null ? +st.commentCount : null,
+    durationSec: isoDur(v.contentDetails?.duration)
   };
+  const seo = seoChecklist(base);
+  return { ...base, vph: vph(base), engagement: engagement(base), seoScore: seo.score, seoTodo: seo.checks.filter((c) => !c.ok).map((c) => c.item) };
 }
 
 async function myChannel(db, user) {
@@ -93,6 +114,7 @@ async function videoViews(token, videoId) {
 }
 
 export function channelRoutes(app, db, auth) {
+  DB = db;
   // Executa cobrando créditos no servidor, com estorno em caso de falha.
   const charged = (tool, handler) => async (req, res, next) => {
     try {
@@ -123,7 +145,7 @@ export function channelRoutes(app, db, auth) {
         const pl = await yt(token, 'playlistItems', { params: { part: 'contentDetails', playlistId: uploads, maxResults: 50 } });
         const ids = (pl.items || []).map((i) => i.contentDetails?.videoId).filter(Boolean);
         if (ids.length) {
-          const vs = await yt(token, 'videos', { params: { part: 'snippet,statistics,status', id: ids.join(','), maxResults: 50 } });
+          const vs = await yt(token, 'videos', { params: { part: 'snippet,statistics,status,contentDetails', id: ids.join(','), maxResults: 50 } });
           videos = (vs.items || []).map(mapVideo);
         }
       }
@@ -250,6 +272,7 @@ export function studioRoutes(app, db, auth, charged) {
       const data = await resp.json().catch(() => ({}));
       throw new HttpError(502, 'YouTube: ' + (data?.error?.message || `HTTP ${resp.status}`));
     }
+    await countUnits(db, 1600); // videos.insert custa 1.600 unidades da cota diária
     const uploadUrl = resp.headers.get('location');
     if (!uploadUrl) throw new HttpError(502, 'O YouTube não devolveu a URL de envio.');
     await audit(db, req.user, 'youtube.upload_start', title, publishAt ? `agendado ${status.publishAt}` : privacy);

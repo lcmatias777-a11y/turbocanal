@@ -99,3 +99,33 @@ export async function generateThumbnail(db, { title, brief = '', style = 'vibran
     nota: parts.find((p) => p.text)?.text || ''
   };
 }
+
+/**
+ * Transformar: a IA assiste o vídeo e reaproveita o conteúdo.
+ *  - shorts: encontra de 3 a 5 trechos que funcionam sozinhos como Shorts (com tempos)
+ *  - post: post para a aba Comunidade; artigo: artigo de blog; thread: sequência para redes
+ */
+export async function transformVideo(db, videoId, mode = 'shorts') {
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
+  const prompts = {
+    shorts:
+      'Assista a este vídeo e encontre de 3 a 5 trechos que funcionam sozinhos como YouTube Shorts (cada um com no máximo 60 segundos). ' +
+      'Responda SOMENTE com JSON: {"cortes":[{"inicio":"mm:ss","fim":"mm:ss","titulo":"título do Short (até 60 caracteres)","gancho":"frase de abertura","motivo":"por que esse trecho prende"}]}.',
+    post: 'Assista a este vídeo e escreva um post para a aba Comunidade do YouTube (até 500 caracteres) que gere comentários, mais uma enquete com 4 opções. Responda SOMENTE com JSON: {"post":"...","enquete":{"pergunta":"...","opcoes":["...","...","...","..."]}}.',
+    artigo: 'Assista a este vídeo e transforme o conteúdo em um artigo de blog em português (título, introdução, 3 a 5 seções com subtítulos e conclusão). Responda SOMENTE com JSON: {"titulo":"...","texto":"... em markdown simples ..."}.',
+    thread: 'Assista a este vídeo e transforme em uma sequência de 6 posts curtos para redes sociais (até 270 caracteres cada), o primeiro com um gancho forte e o último com chamada para o vídeo. Responda SOMENTE com JSON: {"posts":["...","..."]}.'
+  };
+  const prompt = prompts[mode] || prompts.shorts;
+  const data = await call(db, TEXT_MODEL(), {
+    contents: [{ role: 'user', parts: [{ file_data: { file_uri: url } }, { text: prompt }] }],
+    generationConfig: { maxOutputTokens: 2500, temperature: 0.7, responseMimeType: 'application/json' }
+  });
+  const raw = textOf(data);
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+  }
+  if (!parsed) throw new HttpError(502, 'A IA respondeu em um formato inesperado. Tente novamente.');
+  return { videoId, mode, modelo: TEXT_MODEL(), resultado: parsed, aviso: 'Gerado por IA a partir do conteúdo público do vídeo. Confira os tempos antes de cortar.' };
+}
