@@ -1159,7 +1159,7 @@ views.ajuda = async () => {
       <div class="card"><h3>Como funcionam os créditos?</h3>
         <p class="muted">Cada ferramenta tem um custo em créditos, mostrado antes de usar. No plano Free, seu saldo é completado até 5.000 créditos no início de cada mês. Planos pagos liberam mais créditos a cada pagamento confirmado. Se uma ferramenta falhar, os créditos daquela chamada são estornados automaticamente.</p></div>
       <div class="card"><h3>Como instalo a extensão do Chrome?</h3>
-        <p><a class="btn sm" href="/turbocanal-extensao.zip" download>⬇️ Baixar extensão (.zip)</a></p>
+        <p><a class="btn sm" href="/turbocanal-extensao.zip" download id="extDl">⬇️ Baixar extensão (.zip)</a> <span class="muted small" id="extVer"></span></p>
         <ol class="muted">
         <li>Baixe o arquivo acima e descompacte (botão direito &gt; Extrair tudo).</li>
         <li>No Chrome, digite <b>chrome://extensions</b> na barra de endereço e aperte Enter.</li>
@@ -1194,6 +1194,7 @@ views.ajuda = async () => {
       <div class="card"><h3>Privacidade e segurança</h3>
         <p class="muted">Você entra só com o Google: o TurboCanal não pede nem guarda a sua senha. Permissões, saldos e pagamentos são validados sempre no servidor, e só vídeos e playlists do seu próprio canal podem ser alterados. Detalhes na <a href="/privacidade">Política de Privacidade</a>.</p></div>
     </div>`;
+  showExtVersion();
 };
 
 /* ------------------------------ Admin ------------------------------ */
@@ -1201,6 +1202,16 @@ const ADMIN_TABS = [
   ['geral', 'Visão geral'], ['usuarios', 'Usuários'], ['planos', 'Planos'], ['custos', 'Custos'],
   ['pagamentos', 'Pagamentos'], ['config', 'Configurações'], ['admins', 'Administradores'], ['auditoria', 'Auditoria']
 ];
+
+// Mostra a versão atual no botão de baixar, para dar para comparar com a instalada
+async function showExtVersion() {
+  try {
+    const r = await api('/extension/version');
+    const b = $('#extDl'), v = $('#extVer');
+    if (r.version && b) b.textContent = `⬇️ Baixar extensão v${r.version} (.zip)`;
+    if (r.version && v) v.innerHTML = `Clique no ícone da extensão no Chrome: a versão ao lado do nome precisa ser a <b>${esc(r.version)}</b>.`;
+  } catch {}
+}
 
 views.extensao = (p) => views.ajuda(p);
 
