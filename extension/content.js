@@ -80,7 +80,7 @@
           <div class="tc-sec"><b>Checklist</b>${s.checks.map((c) => `<div class="tc-check">${c.ok ? '✅' : '⚠️'} ${esc(c.item)}</div>`).join('')}</div>
           <div class="tc-actions">
             <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/palavras?q=${encodeURIComponent(kws[0] || (v.title || '').split(/\s+/).slice(0, 4).join(' '))}" target="_blank" rel="noopener">🔑 Palavras-chave</a>
-            <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/insights?video=${vid}" target="_blank" rel="noopener">🎥 IA assiste</a>
+            <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/insights?video=${vid}" target="_blank" rel="noopener">✨ IA do vídeo</a>
             <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/transformar?video=${vid}&mode=shorts" target="_blank" rel="noopener">🔁 Cortes p/ Shorts</a>
             <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/video?video=${vid}" target="_blank" rel="noopener">🔍 Análise completa</a>
             <a class="tc-btn" href="${esc(baseUrl)}/#/ferramentas/editor" target="_blank" rel="noopener">✂️ Editor</a>

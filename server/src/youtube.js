@@ -83,7 +83,7 @@ async function yt(db, endpoint, params, user) {
     if (cached) return cached;
   }
   const a = await authFor(db, user);
-  const u = new URL('https://www.googleapis.com/youtube/v3/' + endpoint);
+  const u = new URL((process.env.YT_API_BASE || 'https://www.googleapis.com/youtube/v3/') + endpoint);
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) u.searchParams.set(k, v);
   if (a.key) u.searchParams.set('key', a.key);
   let resp, data;
@@ -107,7 +107,9 @@ async function yt(db, endpoint, params, user) {
     }
     throw new HttpError(502, 'Erro da API do YouTube: ' + msg);
   }
-  if (ttl) cacheSet(cacheKey, data, ttl);
+  // Nunca guardar no cache compartilhado dados de vídeos não públicos (só o dono os vê pelo token dele)
+  const privateItems = endpoint === 'videos' && (data.items || []).some((i) => i.status && i.status.privacyStatus !== 'public');
+  if (ttl && !privateItems) cacheSet(cacheKey, data, ttl);
   return data;
 }
 
@@ -142,7 +144,9 @@ function mapVideo(item) {
     views: +st.viewCount || 0,
     likes: st.likeCount != null ? +st.likeCount : null,
     comments: st.commentCount != null ? +st.commentCount : null,
-    durationSec: isoDurToSec(item.contentDetails?.duration)
+    durationSec: isoDurToSec(item.contentDetails?.duration),
+    privacy: item.status?.privacyStatus || null,
+    categoryId: item.snippet?.categoryId || null
   };
 }
 
@@ -184,8 +188,17 @@ function mockVideos(q, n = 10) {
 
 async function fetchVideosByIds(db, ids, user) {
   if (!ids.length) return [];
-  const data = await yt(db, 'videos', { part: 'snippet,statistics,contentDetails', id: ids.join(','), maxResults: 50 }, user);
+  const data = await yt(db, 'videos', { part: 'snippet,statistics,contentDetails,status', id: ids.join(','), maxResults: 50 }, user);
   return (data.items || []).map(mapVideo);
+}
+
+/** Dados de um vídeo (inclui canal e visibilidade). Vídeos privados só aparecem para o dono. */
+export async function videoMeta(db, idOrUrl, user = null) {
+  const id = parseVideoId(idOrUrl);
+  if (isMock()) { const v = mockVideos(id, 1)[0]; return { ...v, id, privacy: 'public', mock: true }; }
+  const items = await fetchVideosByIds(db, [id], user);
+  if (!items.length) throw new HttpError(404, 'Vídeo não encontrado (pode ser privado de outra pessoa ou ter sido removido).');
+  return items[0];
 }
 
 // ---------------- Ferramentas ----------------
@@ -324,6 +337,38 @@ export async function keywordResearch(db, q, user = null) {
     aviso: isMock() ? MOCK_AVISO : EST_AVISO,
     ...(isMock() ? { mock: true } : {})
   };
+}
+
+export const CATEGORY_NAMES = { 1: 'Filmes e animação', 2: 'Carros', 10: 'Música', 15: 'Animais', 17: 'Esportes', 19: 'Viagens', 20: 'Jogos', 22: 'Pessoas e blogs', 23: 'Comédia', 24: 'Entretenimento', 25: 'Notícias', 26: 'Estilo e dicas', 27: 'Educação', 28: 'Ciência e tecnologia', 29: 'Ativismo' };
+
+/**
+ * Tendências do NICHO: vídeos dos últimos 7 dias mais vistos para os termos do canal
+ * (até 2 termos, 100 unidades de cota cada, com cache de 6h) + em alta na categoria do canal.
+ */
+export async function nicheTrends(db, { keywords = [], categoryId = null, region = 'BR' }, user = null) {
+  const kws = [...new Set(keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean))].slice(0, 2);
+  const cat = categoryId && CATEGORY_NAMES[categoryId] ? String(categoryId) : null;
+  if (isMock()) {
+    const groups = kws.map((k) => ({ titulo: `Em alta sobre "${k}" nos últimos 7 dias`, termo: k, items: withMetrics(mockVideos(k, 8)).sort((a, b) => b.vph - a.vph) }));
+    if (cat) groups.push({ titulo: `Em alta na categoria ${CATEGORY_NAMES[cat]} (Brasil)`, items: withMetrics(mockVideos('categoria ' + cat, 8)) });
+    return { mock: true, aviso: MOCK_AVISO, region, nicho: kws, categoria: cat && CATEGORY_NAMES[cat], groups };
+  }
+  const day = new Date(); day.setUTCHours(0, 0, 0, 0);
+  const after = new Date(day.getTime() - 7 * 86400e3).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const groups = [];
+  for (const k of kws) {
+    const s = await yt(db, 'search', { part: 'snippet', q: k, type: 'video', order: 'viewCount', publishedAfter: after, regionCode: region, relevanceLanguage: 'pt', maxResults: 15 }, user);
+    const ids = (s.items || []).map((i) => i.id?.videoId).filter(Boolean);
+    const items = withMetrics(await fetchVideosByIds(db, ids, user)).sort((a, b) => b.vph - a.vph);
+    groups.push({ titulo: `Em alta sobre "${k}" nos últimos 7 dias`, termo: k, items });
+  }
+  if (cat) {
+    try {
+      const data = await yt(db, 'videos', { part: 'snippet,statistics,contentDetails', chart: 'mostPopular', regionCode: region, videoCategoryId: cat, maxResults: 12 }, user);
+      groups.push({ titulo: `Em alta na categoria ${CATEGORY_NAMES[cat]} (Brasil)`, items: withMetrics((data.items || []).map(mapVideo)) });
+    } catch { /* algumas categorias não têm lista "em alta" */ }
+  }
+  return { region, nicho: kws, categoria: cat && CATEGORY_NAMES[cat], groups };
 }
 
 export async function trends(db, region = 'BR', categoryId, user = null) {

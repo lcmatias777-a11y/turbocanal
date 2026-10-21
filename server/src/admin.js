@@ -3,6 +3,7 @@ import { HttpError, audit, isEmail, must } from './util.js';
 import { grant } from './credits.js';
 import { activatePayment, providerReady } from './payments.js';
 import { googleConfigured } from './auth.js';
+import { testGemini } from './gemini.js';
 
 const SETTING_KEYS = ['site_name', 'free_monthly_topup', 'yt_api_key', 'gemini_api_key', 'mp_access_token', 'payments_enabled', 'pix_key_value', 'pix_key_type', 'pix_key_confirmed'];
 const SECRET_KEYS = new Set(['yt_api_key', 'gemini_api_key', 'mp_access_token']);
@@ -142,6 +143,13 @@ export function adminRoutes(app, db, auth) {
     out.google_redirect_uri = out.base_url.replace(/\/$/, '') + '/api/auth/google/callback';
     out.database = db.kind;
     res.json({ settings: out });
+  }));
+
+  // Testa a chave do Gemini (texto, gratuito). Não gasta créditos de ninguém.
+  app.post('/api/admin/ai-test', ...auth.admin, wrap(async (req, res) => {
+    const r = await testGemini(db);
+    await audit(db, req.user, 'admin.ai_test', r.modelo, r.ok ? 'ok' : 'resposta inesperada');
+    res.json(r);
   }));
 
   app.put('/api/admin/settings', ...auth.admin, wrap(async (req, res) => {

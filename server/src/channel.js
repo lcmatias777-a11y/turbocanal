@@ -5,6 +5,8 @@ import { youtubeAccessToken } from './auth.js';
 import { spend, refund } from './credits.js';
 import { HttpError, audit, must, now, uid } from './util.js';
 import { seoChecklist, vph, engagement, countUnits, quotaError } from './youtube.js';
+import { videoThumbnail } from './videoai.js';
+import { needGemini } from './tools.js';
 
 // Endereços da API (podem ser trocados por um YouTube simulado nos testes automáticos)
 const API = process.env.YT_API_BASE || 'https://www.googleapis.com/youtube/v3/';
@@ -72,7 +74,7 @@ function mapVideo(v) {
   return { ...base, vph: vph(base), engagement: engagement(base), seoScore: seo.score, seoTodo: seo.checks.filter((c) => !c.ok).map((c) => c.item) };
 }
 
-async function myChannel(db, user) {
+export async function myChannel(db, user) {
   const token = await youtubeAccessToken(db, user);
   const ch = await yt(token, 'channels', { params: { part: 'snippet,statistics,contentDetails', mine: 'true' } });
   const c = ch.items?.[0];
@@ -83,7 +85,7 @@ async function myChannel(db, user) {
 
 async function ownedVideo(db, user, videoId) {
   const { token, channel } = await myChannel(db, user);
-  const r = await yt(token, 'videos', { params: { part: 'snippet,statistics,status', id: videoId } });
+  const r = await yt(token, 'videos', { params: { part: 'snippet,statistics,status,contentDetails', id: videoId } });
   const v = r.items?.[0];
   if (!v) throw new HttpError(404, 'Vídeo não encontrado.');
   if (v.snippet?.channelId !== channel.id) {
@@ -187,6 +189,22 @@ export function channelRoutes(app, db, auth) {
     const r = await yt(token, 'videos', { method: 'PUT', params: { part: status ? 'snippet,status' : 'snippet' }, body });
     await audit(db, req.user, 'youtube.video_update', videoId, body.snippet.title + (status ? ` (visibilidade: ${status.privacyStatus})` : ''));
     return mapVideo({ ...r, status: r.status || video.status, statistics: video.statistics });
+  }));
+
+  // Capa com IA a partir do próprio vídeo (quadros reais + conceito), sem digitar nada.
+  // Só gera a imagem: enviar ao YouTube é outro passo (rota /thumbnail), escolhido pelo usuário.
+  app.post('/api/channel/videos/:id/ai-thumbnail', auth.required, needGemini(db), charged('thumbnail_ai', async (req) => {
+    const videoId = must(req.params.id, 'vídeo', { max: 20 });
+    const style = ['auto', 'gamer', 'vibrante', 'dramatico', 'minimalista', 'vlog'].includes(req.body?.style) ? req.body.style : 'auto';
+    const { video, channel } = await ownedVideo(db, req.user, videoId);
+    const meta = {
+      title: video.snippet?.title, description: video.snippet?.description, tags: video.snippet?.tags || [],
+      durationSec: isoDur(video.contentDetails?.duration), views: +(video.statistics?.viewCount || 0),
+      channel: channel.snippet?.title, privacy: video.status?.privacyStatus
+    };
+    const r = await videoThumbnail(db, videoId, meta, style);
+    await audit(db, req.user, 'ia.thumbnail', videoId, r.model);
+    return { videoId, title: meta.title, ...r };
   }));
 
   // ---------- Playlists do MEU canal ----------

@@ -135,8 +135,8 @@ const TOOL_SEED = [
   ['trends', 3, 'Tendências e ideias'],
   ['title_ai', 20, 'Sugestões de títulos (IA)'],
   ['description_ai', 15, 'Otimização de descrição (IA)'],
-  ['video_insights_ai', 40, 'IA assiste o vídeo (insights)'],
-  ['thumbnail_ai', 60, 'Capa gerada por IA'],
+  ['video_insights_ai', 300, 'IA do vídeo: assiste e sugere título, descrição e tags'],
+  ['thumbnail_ai', 300, 'Capa com IA a partir do vídeo'],
   ['channel_sync', 5, 'Sincronizar meu canal'],
   ['thumbnail_upload', 10, 'Enviar capa para o YouTube'],
   ['video_update', 10, 'Editar título/descrição no YouTube'],
@@ -279,6 +279,15 @@ async function seed(db) {
   }
   for (const t of TOOL_SEED) {
     await db.run('INSERT INTO tool_costs(tool,cost,label) VALUES(?,?,?) ON CONFLICT(tool) DO NOTHING', t);
+  }
+  // Atualizações de preço/nome pedidas pelo dono (só se o valor ainda for o padrão antigo; não pisa em ajuste manual)
+  const MIGRATE = [
+    ['video_insights_ai', 40, 300, 'IA assiste o vídeo (insights)', 'IA do vídeo: assiste e sugere título, descrição e tags'],
+    ['thumbnail_ai', 60, 300, 'Capa gerada por IA', 'Capa com IA a partir do vídeo']
+  ];
+  for (const [tool, oldCost, newCost, oldLabel, newLabel] of MIGRATE) {
+    await db.run('UPDATE tool_costs SET cost=? WHERE tool=? AND cost=?', [newCost, tool, oldCost]);
+    await db.run('UPDATE tool_costs SET label=? WHERE tool=? AND label=?', [newLabel, tool, oldLabel]);
   }
   for (const [k, v] of Object.entries(DEFAULT_SETTINGS())) {
     if ((await getSetting(db, k)) === undefined) await setSetting(db, k, v);

@@ -3,9 +3,20 @@ import { must } from './util.js';
 import * as ytb from './youtube.js';
 import * as ai from './ai.js';
 import * as gemini from './gemini.js';
+import * as videoai from './videoai.js';
+import { myChannel } from './channel.js';
 import { HttpError, uid, now } from './util.js';
 
+/** Recusa ANTES de cobrar quando a IA não está ligada (nada de resultado falso). */
+export const needAI = (db) => async (req, res, next) => {
+  try { next((await ai.aiConfigured(db)) ? undefined : new HttpError(409, gemini.AI_MISSING_MSG)); } catch (e) { next(e); }
+};
+export const needGemini = (db) => async (req, res, next) => {
+  try { next((await gemini.geminiKey(db)) ? undefined : new HttpError(409, gemini.AI_MISSING_MSG)); } catch (e) { next(e); }
+};
+
 export function toolRoutes(app, db, auth) {
+  const AI = needAI(db), GEM = needGemini(db);
   // Executa uma ferramenta cobrando créditos NO SERVIDOR, com estorno em caso de falha.
   const run = (tool, handler) => async (req, res, next) => {
     try {
@@ -43,42 +54,51 @@ export function toolRoutes(app, db, auth) {
   app.post('/api/tools/video_analysis', auth.required, run('video_analysis', (req) => ytb.videoAnalysis(db, must(req.body?.video, 'link ou ID do vídeo'), req.user)));
   app.post('/api/tools/channel_analysis', auth.required, run('channel_analysis', (req) => ytb.channelAnalysis(db, must(req.body?.channel, 'canal'), req.user)));
   app.post('/api/tools/trends', auth.required, run('trends', (req) => {
-    const region = String(req.body?.region || 'BR').toUpperCase().slice(0, 2);
-    return ytb.trends(db, /^[A-Z]{2}$/.test(region) ? region : 'BR', undefined, req.user);
+    const r = String(req.body?.region || 'BR').toUpperCase().slice(0, 2);
+    const region = /^[A-Z]{2}$/.test(r) ? r : 'BR';
+    const keywords = Array.isArray(req.body?.keywords) ? req.body.keywords.map((k) => String(k).slice(0, 60)).filter((k) => k.trim()).slice(0, 2) : [];
+    const categoryId = /^\d{1,2}$/.test(String(req.body?.categoryId || '')) ? String(req.body.categoryId) : null;
+    if (keywords.length || categoryId) return ytb.nicheTrends(db, { keywords, categoryId, region }, req.user);
+    return ytb.trends(db, region, undefined, req.user);
   }));
 
-  app.post('/api/tools/title_ai', auth.required, run('title_ai', (req) => {
+  app.post('/api/tools/title_ai', auth.required, AI, run('title_ai', (req) => {
     const topic = must(req.body?.topic, 'tema do vídeo', { max: 200 });
     const keywords = Array.isArray(req.body?.keywords) ? req.body.keywords.map(String).slice(0, 10) : [];
     return ai.titleSuggestions(db, { topic, keywords });
   }));
 
-  app.post('/api/tools/description_ai', auth.required, run('description_ai', (req) => {
+  app.post('/api/tools/description_ai', auth.required, AI, run('description_ai', (req) => {
     const topic = must(req.body?.topic, 'tema do vídeo', { max: 200 });
     const draft = typeof req.body?.draft === 'string' ? req.body.draft.slice(0, 4000) : '';
     const keywords = Array.isArray(req.body?.keywords) ? req.body.keywords.map(String).slice(0, 10) : [];
     return ai.descriptionOptimize(db, { topic, draft, keywords });
   }));
 
-  // IA assiste o vídeo (Gemini) e devolve insights
-  app.post('/api/tools/video_insights_ai', auth.required, run('video_insights_ai', (req) => {
-    const id = ytb.parseVideoId(must(req.body?.video, 'link ou ID do vídeo'));
-    return gemini.videoInsights(db, id);
-  }));
-
-  // Capa gerada por IA (Gemini imagem)
-  app.post('/api/tools/thumbnail_ai', auth.required, run('thumbnail_ai', (req) => {
-    const title = must(req.body?.title, 'título ou tema', { max: 200 });
-    const brief = typeof req.body?.brief === 'string' ? req.body.brief.slice(0, 600) : '';
-    const style = typeof req.body?.style === 'string' ? req.body.style.slice(0, 60) : 'vibrante';
-    return gemini.generateThumbnail(db, { title, brief, style });
+  // IA do vídeo: assiste (vídeos públicos), vê quadros reais e sugere título, descrição,
+  // tags, hashtags, capítulos e textos de capa. O usuário não digita nada além do vídeo.
+  const videoInput = async (req, res, next) => {
+    try { req.videoId = ytb.parseVideoId(must(req.body?.video, 'link ou ID do vídeo')); next(); } catch (e) { next(e); }
+  };
+  app.post('/api/tools/video_insights_ai', auth.required, GEM, videoInput, run('video_insights_ai', async (req) => {
+    const meta = await ytb.videoMeta(db, req.videoId, req.user);
+    let mine = (await db.get('SELECT channel_id FROM yt_tokens WHERE user_id=?', [req.user.id]))?.channel_id || null;
+    if (!mine && meta.channelId) { try { mine = (await myChannel(db, req.user)).channel.id; } catch { /* canal não vinculado */ } }
+    const own = !!(meta.channelId && mine && meta.channelId === mine);
+    if (!own && meta.privacy && meta.privacy !== 'public') throw new HttpError(403, 'Este vídeo não é público e não é do seu canal.');
+    const r = await videoai.videoSuggestions(db, req.videoId, meta);
+    return {
+      videoId: req.videoId, own,
+      video: { id: req.videoId, title: meta.title, description: meta.description, tags: meta.tags, privacy: meta.privacy, thumb: meta.thumb, durationSec: meta.durationSec, channel: meta.channel },
+      ...r
+    };
   }));
 
   // Painel automático da extensão (mesma análise, custo mínimo)
   app.post('/api/tools/video_panel', auth.required, run('video_panel', (req) => ytb.videoAnalysis(db, must(req.body?.video, 'vídeo'), req.user)));
 
   // Preparar: pacote de publicação / ideias / roteiro
-  app.post('/api/tools/prep_ai', auth.required, run('prep_ai', (req) => {
+  app.post('/api/tools/prep_ai', auth.required, AI, run('prep_ai', (req) => {
     const topic = must(req.body?.topic, 'tema do vídeo', { max: 200 });
     const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 2000) : '';
     const audience = typeof req.body?.audience === 'string' ? req.body.audience.slice(0, 200) : '';
@@ -86,7 +106,7 @@ export function toolRoutes(app, db, auth) {
   }));
 
   // Transformar: IA assiste o vídeo e acha cortes para Shorts ou reaproveita em post/artigo/thread
-  app.post('/api/tools/transform_ai', auth.required, run('transform_ai', (req) => {
+  app.post('/api/tools/transform_ai', auth.required, GEM, run('transform_ai', (req) => {
     const id = ytb.parseVideoId(must(req.body?.video, 'link ou ID do vídeo'));
     const mode = ['shorts', 'post', 'artigo', 'thread'].includes(req.body?.mode) ? req.body.mode : 'shorts';
     return gemini.transformVideo(db, id, mode);
@@ -98,12 +118,12 @@ export function toolRoutes(app, db, auth) {
     titles: Array.isArray(req.body?.titles) ? req.body.titles.map((t) => String(t).slice(0, 120)).filter(Boolean).slice(0, 20) : [],
     channel: String(req.body?.channel || '').slice(0, 100)
   });
-  app.post('/api/tools/ideas_ai', auth.required,
+  app.post('/api/tools/ideas_ai', auth.required, AI,
     (req, res, next) => { const i = ideasInput(req); next(i.niche || i.titles.length ? undefined : new HttpError(400, 'Diga o tema do canal (ou vincule seu canal para eu usar os seus vídeos).')); },
     run('ideas_ai', (req) => ai.channelIdeas(db, ideasInput(req))));
 
   // Sugestões de resposta a um comentário
-  app.post('/api/tools/reply_ai', auth.required, run('reply_ai', (req) => {
+  app.post('/api/tools/reply_ai', auth.required, AI, run('reply_ai', (req) => {
     const comment = must(req.body?.comment, 'comentário', { max: 2000 });
     return ai.replySuggestions(db, { comment, channel: String(req.body?.channel || '').slice(0, 100) });
   }));

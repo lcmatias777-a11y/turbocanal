@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TurboCanal para YouTube",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Painel do TurboCanal direto no YouTube: SEO do vídeo, tags, estatísticas, atalhos para o seu canal. Mesma conta do site (login com Google).",
   "icons": {
     "16": "icons/icon16.png",

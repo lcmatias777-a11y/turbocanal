@@ -47,6 +47,12 @@ export async function startFakeYouTube() {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
   app.use(express.raw({ type: ['image/*', 'application/octet-stream'], limit: '3mb' }));
+  // Quadros públicos do vídeo (como i.ytimg.com): não precisam de login
+  app.get('/vi/:id/:file', (req, res) => {
+    const v = videos[req.params.id];
+    if (!v || v.status.privacyStatus === 'private' || !/^(hq[123]|hqdefault|maxresdefault)\.jpg$/.test(req.params.file)) return res.status(404).end();
+    res.type('image/jpeg').send(Buffer.alloc(3000, 7));
+  });
   app.use((req, res, next) => {
     if (req.get('authorization') !== `Bearer ${TOKEN}`) return res.status(401).json({ error: { message: 'Invalid Credentials' } });
     next();
@@ -58,7 +64,11 @@ export async function startFakeYouTube() {
     res.json({ items: [{ id: ME, snippet: { title: 'Canal do Teste', thumbnails: thumb('canal') }, statistics: { subscriberCount: '1234', viewCount: '56789', videoCount: '2', hiddenSubscriberCount: false }, contentDetails: { relatedPlaylists: { uploads: 'UU_MEU' } } }] });
   });
 
+  y.get('/search', (req, res) => {
+    res.json({ items: Object.values(videos).filter((v) => v.status.privacyStatus === 'public').map((v) => ({ id: { kind: 'youtube#video', videoId: v.id } })) });
+  });
   y.get('/videos', (req, res) => {
+    if (req.query.chart) return res.json({ items: Object.values(videos).filter((v) => v.status.privacyStatus === 'public').map((v) => pick({ kind: 'youtube#video', ...v }, req.query.part)) });
     const ids = String(req.query.id || '').split(',').filter(Boolean);
     res.json({ items: ids.map((i) => videos[i]).filter(Boolean).map((v) => pick({ kind: 'youtube#video', ...v }, req.query.part)) });
   });

@@ -14,6 +14,12 @@ const fake = await startFakeYouTube();
 process.env.YT_API_BASE = fake.base + '/youtube/v3/';
 process.env.YT_UPLOAD_BASE = fake.base + '/upload/youtube/v3/';
 process.env.YT_ANALYTICS_BASE = fake.base + '/youtubeanalytics/v2/';
+process.env.YT_IMG_BASE = fake.base + '/vi/';
+process.env.YT_API_BASE_RESEARCH = '1';
+const { startFakeGemini } = await import('./fake-gemini.js');
+const gem = await startFakeGemini();
+process.env.GEMINI_API_BASE = gem.base;
+delete process.env.GEMINI_API_KEY; delete process.env.ANTHROPIC_API_KEY; delete process.env.GEMINI_TEXT_MODEL; delete process.env.GEMINI_IMAGE_MODEL;
 
 const { buildApp } = await import('../src/app.js');
 const { getSetting } = await import('../src/db.js');
@@ -84,10 +90,10 @@ const goodClaim = await req('/api/auth/claim-owner', { method: 'POST', token: tO
 check('reivindicação correta (e-mail + token do console) vira owner', goodClaim.status === 200 && goodClaim.data.user?.role === 'owner', `(status=${goodClaim.status})`);
 
 const ownTool1 = await req('/api/tools/keyword_research', { method: 'POST', token: tOwn, body: { q: 'geometry dash' } });
-const ownTool2 = await req('/api/tools/title_ai', { method: 'POST', token: tOwn, body: { topic: 'bedwars no minecraft' } });
+const ownTool2 = await req('/api/tools/trends', { method: 'POST', token: tOwn, body: {} });
 const ownMe = await req('/api/me', { token: tOwn });
 check('owner usa ferramentas sem cobrança (charged=0, unlimited)', ownTool1.data.credits?.charged === 0 && ownTool1.data.credits?.unlimited === true);
-check('owner usa ferramenta de IA também sem cobrança', ownTool2.status === 200 && ownTool2.data.credits?.charged === 0);
+check('owner usa outra ferramenta também sem cobrança', ownTool2.status === 200 && ownTool2.data.credits?.charged === 0);
 check('saldo do owner é tratado como ilimitado no /api/me', ownMe.data.user?.unlimited === true);
 const ownAdmin = await req('/api/admin/overview', { token: tOwn });
 check('owner acessa o painel administrativo', ownAdmin.status === 200 && typeof ownAdmin.data.users === 'number');
@@ -154,10 +160,13 @@ const health = await req('/api/health');
 check('health informa o tipo de banco', health.data.db === 'pglite');
 
 console.log('\n== Novas ferramentas: preparar, responder, transformar, painel, concorrentes ==');
+const bNoAI = (await req('/api/me', { token: t1 })).data.user.credits;
+const txNoAI = (await db.get('SELECT COUNT(*)::int AS n FROM transactions')).n;
 const prep = await req('/api/tools/prep_ai', { method: 'POST', token: t1, body: { topic: 'bedwars no minecraft', notes: 'mostrar estrategia de cama' } });
-check('Preparar publicação devolve títulos, tags, roteiro e ideias (gerador local sem IA)', prep.status === 200 && prep.data.result.titulos?.length >= 5 && prep.data.result.roteiro?.length >= 4 && prep.data.result.ideias?.length >= 5 && prep.data.credits.charged === 15, `(status=${prep.status})`);
 const rep = await req('/api/tools/reply_ai', { method: 'POST', token: t1, body: { comment: 'Que vídeo top, como você fez a ponte?' } });
-check('Sugestão de resposta a comentário devolve 3 opções', rep.status === 200 && rep.data.result.respostas?.length === 3);
+const tit = await req('/api/tools/title_ai', { method: 'POST', token: t1, body: { topic: 'bedwars' } });
+check('sem IA ligada: ferramentas de IA recusam (409) sem resultado de mentira', prep.status === 409 && rep.status === 409 && tit.status === 409 && /chave do Gemini/.test(prep.data.error || ''), `(${prep.status}/${rep.status}/${tit.status})`);
+check('sem IA ligada: nenhum crédito sai e nem aparece cobrança no histórico', (await req('/api/me', { token: t1 })).data.user.credits === bNoAI && (await db.get('SELECT COUNT(*)::int AS n FROM transactions')).n === txNoAI);
 const before = (await req('/api/me', { token: t1 })).data.user.credits;
 const tr = await req('/api/tools/transform_ai', { method: 'POST', token: t1, body: { video: 'dQw4w9WgXcQ', mode: 'shorts' } });
 const after2 = (await req('/api/me', { token: t1 })).data.user.credits;
@@ -221,13 +230,10 @@ console.log('\n== Admin enxerga a cota do YouTube ==');
 const ov = await req('/api/admin/overview', { token: tOwn });
 check('visão geral mostra unidades de cota usadas hoje', ov.status === 200 && typeof ov.data.youtubeQuota?.usedToday === 'number');
 
-console.log('\n== Ideias de vídeos (IA ou gerador local) ==');
+console.log('\n== Ideias de vídeos sem IA ligada ==');
 const meI = (await req('/api/me', { token: t1 })).data.user.credits;
-const idBad = await req('/api/tools/ideas_ai', { method: 'POST', token: t1, body: {} });
-const meI2 = (await req('/api/me', { token: t1 })).data.user.credits;
-check('sem tema e sem canal: recusa (400) sem cobrar nada', idBad.status === 400 && meI2 === meI, `(status=${idBad.status}, ${meI} -> ${meI2})`);
-const idOk = await req('/api/tools/ideas_ai', { method: 'POST', token: t1, body: { titles: ['Como vencer no bedwars', 'Bedwars sem gastar nada', 'Melhores dicas de bedwars'] } });
-check('com os títulos do canal: 10 ideias com formato, porquê e palavra-chave (10 créditos)', idOk.status === 200 && idOk.data.result?.ideias?.length === 10 && idOk.data.result.ideias.every((x) => x.titulo && x.formato && x.porque) && idOk.data.credits?.charged === 10, JSON.stringify(idOk.data).slice(0, 200));
+const idNo = await req('/api/tools/ideas_ai', { method: 'POST', token: t1, body: { titles: ['Como vencer no bedwars'] } });
+check('Ideias sem IA: 409 sem cobrar', idNo.status === 409 && (await req('/api/me', { token: t1 })).data.user.credits === meI, `(status=${idNo.status})`);
 
 console.log('\n== Meu canal com o YouTube simulado: só mexe no que é seu ==');
 const mariaId = (await db.get('SELECT id FROM users WHERE email=?', ['maria@example.com'])).id;
@@ -295,7 +301,75 @@ const repC = await req('/api/channel/comments/cm1/reply', { method: 'POST', toke
 check('comentários: lista e responde', cms.status === 200 && cms.data.items[0]?.text === 'Que vídeo top!' && repC.status === 200 && fake.log.some((l) => l.op === 'comments.insert' && l.body.snippet.parentId === 'cm1'));
 const ownC = await req('/api/channel/videos', { token: tOwn });
 check('quem não vinculou canal recebe aviso para vincular (409)', ownC.status === 409);
-fake.close();
+
+console.log('\n== IA ligada (Gemini simulado): troca de modelo, IA do vídeo, capa a partir do vídeo ==');
+const { setSetting } = await import('../src/db.js');
+const noKeyThumb = await req('/api/channel/videos/vidMeu00001/ai-thumbnail', { method: 'POST', token: t1, body: {} });
+check('capa com IA sem chave: 409 e nada cobrado', noKeyThumb.status === 409);
+await setSetting(db, 'gemini_api_key', 'chave-errada');
+b0 = await bal();
+const badKey = await req('/api/tools/prep_ai', { method: 'POST', token: t1, body: { topic: 'bedwars' } });
+check('chave recusada pelo Google: aviso claro e créditos devolvidos', badKey.status === 409 && /recusada/.test(badKey.data.error || '') && (await bal()) === b0, `(status=${badKey.status} ${badKey.data.error})`);
+await setSetting(db, 'gemini_api_key', gem.key);
+const aiT = await req('/api/admin/ai-test', { method: 'POST', token: tOwn });
+check('Admin "Testar a IA": funciona e pula o modelo que a chave não acessa', aiT.status === 200 && aiT.data.ok === true && aiT.data.modelo === 'gemini-3.6-flash', JSON.stringify(aiT.data));
+const aiTUser = await req('/api/admin/ai-test', { method: 'POST', token: t1 });
+check('usuário comum não acessa o teste da IA', aiTUser.status === 403);
+const prepAI = await req('/api/tools/prep_ai', { method: 'POST', token: t1, body: { topic: 'bedwars no minecraft' } });
+check('Preparar com IA de verdade (15 créditos)', prepAI.status === 200 && prepAI.data.result.metodo === 'ia' && prepAI.data.result.titulos.length === 5 && prepAI.data.credits.charged === 15);
+const repAI = await req('/api/tools/reply_ai', { method: 'POST', token: t1, body: { comment: 'top!' } });
+check('Resposta a comentário com IA (lê JSON mesmo vindo em bloco de código)', repAI.status === 200 && repAI.data.result.respostas.length === 3);
+const idBad = await req('/api/tools/ideas_ai', { method: 'POST', token: t1, body: {} });
+check('Ideias sem tema e sem canal: 400 sem cobrar', idBad.status === 400);
+const idOk = await req('/api/tools/ideas_ai', { method: 'POST', token: t1, body: { titles: ['Como vencer no bedwars', 'Bedwars sem gastar nada'] } });
+check('Ideias com IA: 10 ideias (10 créditos)', idOk.status === 200 && idOk.data.result.ideias.length === 10 && idOk.data.credits.charged === 10);
+const ownPrep = await req('/api/tools/prep_ai', { method: 'POST', token: tOwn, body: { topic: 'geometry dash' } });
+check('owner usa a IA sem cobrança', ownPrep.status === 200 && ownPrep.data.credits.charged === 0 && ownPrep.data.credits.unlimited === true);
+
+process.env.YT_MOCK = '0'; // a IA do vídeo lê os dados reais do vídeo (aqui, no YouTube simulado)
+fake.videos.vidMeu00001.status.privacyStatus = 'public'; // os testes anteriores deixaram como não listado
+b0 = await bal();
+gem.state.log.length = 0;
+const va = await req('/api/tools/video_insights_ai', { method: 'POST', token: t1, body: { video: 'https://youtu.be/vidMeu00001' } });
+const vaReq = gem.state.log.find((l) => !l.isImage);
+const sg = va.data.result?.sugestoes || {};
+check('IA do vídeo: assiste (vídeo público), recebe quadros reais e reconhece que o vídeo é seu', va.status === 200 && va.data.result.own === true && va.data.result.assistiu === true && vaReq?.video === true && vaReq?.images === 3, JSON.stringify({ s: va.status, e: va.data.error, own: va.data.result?.own, log: vaReq && { v: vaReq.video, i: vaReq.images } }));
+check('IA do vídeo custa 300 créditos para usuário comum', va.data.credits?.charged === 300 && (await bal()) === b0 - 300);
+check('sugestões dentro dos limites do YouTube (tags ≤ 480 caracteres, sem #, sem repetidas)', sg.tags.length > 5 && sg.tags.join(',').length <= 480 && sg.tags.every((t) => !t.startsWith('#')) && new Set(sg.tags).size === sg.tags.length, sg.tags.join(',').length);
+check('títulos sem repetição, hashtags com #, capítulos válidos começando em 00:00', sg.titulos.length === 2 && sg.hashtags.every((h) => h.startsWith('#')) && sg.capitulos.length === 3 && sg.capitulos[0].tempo === '00:00');
+gem.state.log.length = 0;
+fake.videos.vidMeu00002.status = { privacyStatus: 'private', license: 'youtube', embeddable: true, publicStatsViewable: true, madeForKids: false };
+const vp = await req('/api/tools/video_insights_ai', { method: 'POST', token: t1, body: { video: 'vidMeu00002' } });
+const vpReq = gem.state.log.find((l) => !l.isImage);
+check('vídeo privado: a IA não tenta assistir nem pegar quadros e não inventa capítulos', vp.status === 200 && vp.data.result.assistiu === false && vpReq.video === false && vpReq.images === 0 && vp.data.result.sugestoes.capitulos.length === 0, JSON.stringify(vp.data).slice(0, 200));
+gem.state.videoFails = true;
+const vf = await req('/api/tools/video_insights_ai', { method: 'POST', token: t1, body: { video: 'vidMeu00001' } });
+gem.state.videoFails = false;
+check('se a IA não consegue assistir, usa quadros e dados (e avisa)', vf.status === 200 && vf.data.result.assistiu === false && vf.data.result.quadros === 3 && /não pôde assistir/.test(vf.data.result.aviso));
+const vo = await req('/api/tools/video_insights_ai', { method: 'POST', token: t1, body: { video: 'vidAlheio01' } });
+check('vídeo público de outro canal: analisa, mas marca que não é seu (sem salvar)', vo.status === 200 && vo.data.result.own === false);
+
+b0 = await bal();
+gem.state.log.length = 0;
+const at = await req('/api/channel/videos/vidMeu00001/ai-thumbnail', { method: 'POST', token: t1, body: { style: 'gamer' } });
+const atImg = gem.state.log.find((l) => l.isImage);
+check('capa com IA a partir do vídeo: usa 4 quadros reais e devolve imagem 16:9 (300 créditos)', at.status === 200 && at.data.result.base64?.length > 10 && atImg?.images === 4 && atImg?.gen?.imageConfig?.aspectRatio === '16:9' && at.data.credits.charged === 300 && (await bal()) === b0 - 300, JSON.stringify({ s: at.status, e: at.data.error }));
+check('texto da capa em maiúsculas e no máximo 4 palavras', at.data.result.conceito.texto === 'VENCI SEM GASTAR NADA');
+const atOther = await req('/api/channel/videos/vidAlheio01/ai-thumbnail', { method: 'POST', token: t1, body: {} });
+check('capa com IA em vídeo de outro canal: bloqueada', atOther.status === 403);
+const atPriv = await req('/api/channel/videos/vidMeu00002/ai-thumbnail', { method: 'POST', token: t1, body: {} });
+check('vídeo privado sem quadros públicos: explica e devolve os créditos', atPriv.status === 409 && /quadros/.test(atPriv.data.error));
+gem.state.imageBilling = true;
+b0 = await bal();
+const atBill = await req('/api/channel/videos/vidMeu00001/ai-thumbnail', { method: 'POST', token: t1, body: {} });
+gem.state.imageBilling = false;
+check('imagem sem faturamento ativo: explica o custo e devolve os créditos', atBill.status === 409 && /faturamento/.test(atBill.data.error) && (await bal()) === b0, atBill.data.error);
+process.env.YT_MOCK = '1';
+const trN = await req('/api/tools/trends', { method: 'POST', token: t1, body: { keywords: ['bedwars', 'geometry dash', 'extra'], categoryId: '20' } });
+check('Tendências do nicho: até 2 termos do canal + categoria do canal', trN.status === 200 && trN.data.result.groups.length === 3 && trN.data.result.nicho.length === 2 && trN.data.result.categoria === 'Jogos', JSON.stringify(trN.data).slice(0, 200));
+const costsNow = (await req('/api/tools/costs')).data.costs;
+check('preços novos: IA do vídeo e capa com IA a 300 créditos', costsNow.find((c) => c.tool === 'video_insights_ai').cost === 300 && costsNow.find((c) => c.tool === 'thumbnail_ai').cost === 300);
+fake.close(); gem.close();
 
 console.log(`\nRESULTADO: ${pass} passaram, ${fail} falharam.`);
 server.close();

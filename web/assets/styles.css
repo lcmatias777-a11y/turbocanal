@@ -121,3 +121,19 @@ tr:hover td { background: #ffffff06; }
   .nav { gap: 8px; }
   .hero { padding-top: 28px; }
 }
+
+/* Escolher vídeo com um clique */
+.vpick { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; max-height: 420px; overflow: auto; padding: 2px; }
+.vp { display: flex; flex-direction: column; gap: 4px; text-align: left; background: var(--card2); border: 2px solid var(--line); border-radius: 12px; padding: 6px; color: var(--text); cursor: pointer; font: inherit; }
+.vp:hover { border-color: var(--accent2); }
+.vp.sel { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(255, 93, 59, .35); }
+.vp img, .vpnone { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: var(--bg2); display: flex; align-items: center; justify-content: center; font-size: 28px; }
+.vpt { font-size: 13px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.vpm { font-size: 11px; color: var(--muted); }
+/* Sugestões removíveis */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: var(--card2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 13px; }
+.chip button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 0 4px; border-radius: 50%; }
+.chip button:hover { color: var(--err); background: rgba(255, 107, 122, .12); }
+label.opt { display: flex; gap: 8px; align-items: flex-start; color: var(--text); margin: 6px 0; font-size: 14px; }
+label.opt input { width: auto; margin-top: 3px; }
