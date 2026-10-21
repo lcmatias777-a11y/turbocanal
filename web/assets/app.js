@@ -1167,7 +1167,9 @@ views.ajuda = async () => {
         <li>Clique em <b>Carregar sem compactação</b> e escolha a pasta descompactada (a que contém o arquivo manifest.json).</li>
         <li>Clique no ícone laranja do TurboCanal (fica no quebra-cabeça 🧩 da barra do Chrome; use o alfinete para fixar) e entre com o Google, a mesma conta do site.</li>
         <li>Abra qualquer vídeo do YouTube: o painel do TurboCanal aparece ao lado do vídeo.</li></ol>
-        <p class="small muted"><b>Para atualizar:</b> baixe o .zip de novo, troque a pasta antiga pela nova e, em chrome://extensions, clique no botão de recarregar (↻) do TurboCanal.</p>
+        <p class="small muted"><b>Para atualizar:</b> baixe o .zip de novo, <b>substitua os arquivos da MESMA pasta</b> que você usou ao instalar (se descompactar em outra pasta, o Chrome continua usando a antiga) e, em chrome://extensions, clique no botão de recarregar (↻) do TurboCanal.</p>
+        <p class="small muted"><b>Como saber se atualizou:</b> clique no ícone do TurboCanal e veja o número da versão ao lado do nome. Se estiver diferente da versão mais nova, o Chrome ainda está com a pasta antiga. Em chrome://extensions, clique em "Detalhes" e confira o caminho em "Carregado de".</p>
+        <p class="small muted"><b>Botões parados?</b> No ícone da extensão há o link <b>testar conexão</b>: ele diz se o site está no ar, se a sua sessão foi encontrada e se a extensão está atualizada.</p>
         <p class="small muted">A extensão ainda não está publicada na Chrome Web Store, por isso a instalação é manual (modo do desenvolvedor). Quando for publicada na loja, bastará um clique.</p></div>
       <div class="card"><h3>O que a extensão faz no YouTube?</h3>
         <ol class="muted">
@@ -1175,7 +1177,9 @@ views.ajuda = async () => {
         <li><b>Página do vídeo:</b> painel com abas Vídeo (views, VPH, outlier no canal, engajamento), Canal (inscritos, idade, tags do canal, adicionar aos concorrentes), SEO (pontuação, checklist e tags) e IA (resumo, nota do gancho, por que foi bem ou mal, 3 ideias parecidas e dicas para ganhar inscritos).</li>
         <li><b>Busca:</b> resumo da busca (demanda, vídeos recentes, oportunidade) e pesquisa de palavras-chave.</li>
         <li><b>Canal:</b> botão para analisar o canal e adicionar aos concorrentes.</li>
-        <li><b>Shorts e YouTube Studio:</b> botão do TurboCanal com SEO do vídeo e atalhos para a IA do vídeo e os 3 cortes.</li></ol>
+        <li><b>Shorts e YouTube Studio:</b> botão do TurboCanal com SEO do vídeo e atalhos para a IA do vídeo e os 3 cortes.</li>
+        <li><b>Ordenar a tela:</b> na busca e na página do canal, botões para reordenar os vídeos por mais vistos, melhor VPH, outliers ou mais novos (só muda a ordem do que já está na tela, de graça).</li>
+        <li><b>Atalhos de graça:</b> baixar a capa do vídeo, copiar título, descrição e tags, copiar o código de incorporação no tempo atual e o botão 💡 na miniatura, que leva a ideia para o Preparar publicação.</li></ol>
         <p class="small muted">No ícone da extensão você liga ou desliga o VPH nas miniaturas e o painel automático, e vê quando sair versão nova.</p></div>
       <div class="card"><h3>De onde vêm os dados?</h3>
         <p class="muted">Das APIs oficiais e públicas do YouTube (YouTube Data API v3). Quando mostramos uma estimativa ou pontuação própria, isso vem identificado. Não inventamos métricas que a API não fornece.</p></div>

@@ -9,18 +9,19 @@
     label { display: block; color: #9aa7c7; font-size: .9rem; margin: 10px 0 4px; }
     input { width: 100%; box-sizing: border-box; background: #111933; color: #e8ecf8; border: 1px solid #27345f; border-radius: 8px; padding: 10px; }
     .btn { background: #ff5d3b; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-weight: 700; cursor: pointer; margin-top: 12px; }
-    .ok { color: #37d08a; }
+    .ok { color: #37d08a; } .err { color: #ff6b7a; }
     .muted { color: #9aa7c7; font-size: .85rem; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h2>🚀 TurboCanal — opções</h2>
+    <h2>🚀 TurboCanal — opções <span id="ver" style="font-size:.8rem;color:#9aa7c7"></span></h2>
     <label>Endereço do servidor (site do TurboCanal)</label>
     <input id="bu" placeholder="https://turbocanal.onrender.com">
     <p class="muted">Use o endereço onde o site está rodando (local ou publicado). A extensão usa a mesma conta e o mesmo saldo do site.</p>
     <button class="btn" id="save">Salvar</button>
-    <span id="msg"></span>
+    <button class="btn" id="test" style="background:#1b2850;border:1px solid #27345f">Testar conexão</button>
+    <div id="msg" style="margin-top:10px;font-size:.88rem"></div>
   </div>
   <script type="module" src="options.js"></script>
 </body>

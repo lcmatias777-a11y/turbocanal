@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TurboCanal para YouTube",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "VPH e outlier nas miniaturas, painel do vídeo (vídeo, canal, SEO e IA), análise da busca e do canal, atalhos no Studio.",
   "icons": {
     "16": "icons/icon16.png",

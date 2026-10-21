@@ -66,3 +66,10 @@
 /* YouTube Studio */
 #tc-studio { position: fixed; right: 18px; bottom: 24px; z-index: 99999; width: 360px; display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 8px; }
 #tc-studio .tc-body { width: 100%; box-sizing: border-box; max-height: 70vh; overflow: auto; background: #0b1020; color: #e8ecf8; border: 1px solid #27345f; border-radius: 14px; font-family: "Segoe UI", Roboto, system-ui, sans-serif; font-size: 13px; line-height: 1.5; box-shadow: 0 8px 28px rgba(0, 0, 0, .35); }
+
+/* ordenação e botão de ideia nas miniaturas */
+.tc-sort { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin: 8px 0; }
+.tc-sort .tc-mini { padding: 3px 8px; }
+.tc-remix { position: absolute; top: 6px; right: 6px; z-index: 5; background: rgba(11, 16, 32, .88); border: 1px solid rgba(255, 255, 255, .15);
+  border-radius: 6px; padding: 0 5px; font-size: 12px; line-height: 20px; text-decoration: none; opacity: 0; transition: opacity .15s; }
+a:hover > .tc-remix, .tc-remix:hover { opacity: 1; }
