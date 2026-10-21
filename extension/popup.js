@@ -131,7 +131,9 @@ async function diagnostico() {
   } catch { linhas.push('❌ Não consegui falar com o site. Se ele estava parado, espere 1 minuto e tente de novo.'); }
   try {
     const r = await (await fetch(BASE + '/api/extension/version', { cache: 'no-store' })).json();
-    linhas.push(r.version === VERSION ? `✅ Extensão atualizada (v${esc(VERSION)})` : `🆕 O site tem a v${esc(r.version)} e você está na v${esc(VERSION)}`);
+    linhas.push(r.version === VERSION ? `✅ Extensão atualizada (v${esc(VERSION)})`
+      : maisNovo(r.version, VERSION) ? `🆕 Saiu a v${esc(r.version)} e você está na v${esc(VERSION)}: baixe de novo pelo site`
+      : `✅ Você está na v${esc(VERSION)} (o site ainda oferece a v${esc(r.version)} para baixar)`);
   } catch {}
   msg('out', linhas.map((l) => `<div>${l}</div>`).join(''));
 }

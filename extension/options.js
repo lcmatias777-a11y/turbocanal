@@ -27,7 +27,10 @@ document.getElementById('test').onclick = async () => {
   linhas.push((await getToken()) ? '✅ Sessão encontrada' : '⚠️ Sem sessão: entre com o Google no site');
   try {
     const r = await (await fetch(base + '/api/extension/version', { cache: 'no-store' })).json();
-    linhas.push(r.version === VERSION ? `✅ Extensão atualizada (v${esc(VERSION)})` : `🆕 O site tem a v${esc(r.version)} e você está na v${esc(VERSION)}`);
+    const maisNovo = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) > (y[i] || 0)) return true; if ((x[i] || 0) < (y[i] || 0)) return false; } return false; };
+    linhas.push(r.version === VERSION ? `✅ Extensão atualizada (v${esc(VERSION)})`
+      : maisNovo(r.version, VERSION) ? `🆕 Saiu a v${esc(r.version)}: baixe de novo pelo site`
+      : `✅ Você está na v${esc(VERSION)} (o site ainda oferece a v${esc(r.version)} para baixar)`);
   } catch {}
   msg.innerHTML = linhas.map((l) => `<div>${l}</div>`).join('');
 };
