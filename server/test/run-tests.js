@@ -321,6 +321,15 @@ const idBad = await req('/api/tools/ideas_ai', { method: 'POST', token: t1, body
 check('Ideias sem tema e sem canal: 400 sem cobrar', idBad.status === 400);
 const idOk = await req('/api/tools/ideas_ai', { method: 'POST', token: t1, body: { titles: ['Como vencer no bedwars', 'Bedwars sem gastar nada'] } });
 check('Ideias com IA: 10 ideias (10 créditos)', idOk.status === 200 && idOk.data.result.ideias.length === 10 && idOk.data.credits.charged === 10);
+process.env.GEMINI_RETRY_MS = '10';
+gem.state.busy = new Set(['gemini-3.6-flash']);
+const busy1 = await req('/api/tools/prep_ai', { method: 'POST', token: t1, body: { topic: 'bedwars' } });
+check('modelo sobrecarregado: tenta de novo e usa outro modelo sozinho', busy1.status === 200 && busy1.data.result.modelo !== 'gemini-3.6-flash', JSON.stringify({ s: busy1.status, m: busy1.data.result?.modelo, e: busy1.data.error }));
+gem.state.busy = new Set(['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3-flash-preview', 'gemini-2.5-flash']);
+b0 = await bal();
+const busy2 = await req('/api/tools/prep_ai', { method: 'POST', token: t1, body: { topic: 'bedwars' } });
+check('todos sobrecarregados: aviso em português e créditos devolvidos', busy2.status === 503 && /sobrecarregada/.test(busy2.data.error) && (await bal()) === b0, busy2.data.error);
+gem.state.busy = new Set();
 const ownPrep = await req('/api/tools/prep_ai', { method: 'POST', token: tOwn, body: { topic: 'geometry dash' } });
 check('owner usa a IA sem cobrança', ownPrep.status === 200 && ownPrep.data.credits.charged === 0 && ownPrep.data.credits.unlimited === true);
 

@@ -11,6 +11,7 @@ export async function startFakeGemini() {
     unavailable: new Set(['gemini-3.8-flash']), // simula um modelo que esta chave ainda não acessa
     imageBilling: false, // simula "imagem sem uso gratuito"
     videoFails: false, // simula vídeo que a IA não consegue assistir
+    busy: new Set(), // simula modelo sobrecarregado (503)
     log: []
   };
   const reply = (text) => ({ candidates: [{ content: { parts: [{ text }] } }] });
@@ -19,6 +20,7 @@ export async function startFakeGemini() {
   app.post(/^\/v1beta\/models\/([^/:]+):generateContent$/, (req, res) => {
     const model = req.params[0];
     if (req.get('x-goog-api-key') !== KEY) return res.status(400).json({ error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } });
+    if (state.busy?.has(model)) return res.status(503).json({ error: { code: 503, message: 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', status: 'UNAVAILABLE' } });
     if (state.unavailable.has(model)) return res.status(404).json({ error: { code: 404, message: `models/${model} is not found for API version v1beta, or is not supported for generateContent.`, status: 'NOT_FOUND' } });
     const parts = req.body?.contents?.[0]?.parts || [];
     const text = parts.map((p) => p.text || '').join('\n');

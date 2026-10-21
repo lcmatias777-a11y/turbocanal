@@ -27,6 +27,7 @@ export function classifyGeminiError(status, msg) {
   const m = String(msg || '');
   if (/API key not valid|API_KEY_INVALID|invalid api key|API key expired/i.test(m)) return 'key';
   if (/limit: ?0\b|free[_ ]tier|FreeTier|billing|requires a paid|upgrade your plan/i.test(m)) return 'billing';
+  if (status === 503 || status === 500 || status === 504 || /high demand|overloaded|UNAVAILABLE|try again later|temporarily|Internal error|DEADLINE_EXCEEDED/i.test(m)) return 'busy';
   if (status === 404 || /is not found|not supported for generateContent|no longer available|is not available|does not exist|unknown model|has been deprecated|not found for API version/i.test(m)) return 'model';
   if (status === 429 || /RESOURCE_EXHAUSTED|quota/i.test(m)) return 'quota';
   if (status === 400 && /Unknown name|Invalid JSON payload|Cannot find field/i.test(m)) return 'payload';
@@ -44,6 +45,8 @@ function errorFor(kind, cls, msg) {
       return new HttpError(429, 'A IA atingiu o limite de uso por agora. Tente de novo em alguns minutos. Os créditos foram devolvidos.');
     case 'billing':
       return new HttpError(429, 'A IA gratuita do Gemini chegou ao limite por agora (por minuto ou do dia). Tente de novo mais tarde. Os créditos foram devolvidos.');
+    case 'busy':
+      return new HttpError(503, 'A IA do Google está sobrecarregada neste momento (isso costuma passar em poucos minutos). Tente de novo daqui a pouco. Os créditos foram devolvidos.');
     case 'region':
       return new HttpError(409, 'O Gemini não está disponível para a região do servidor. Os créditos foram devolvidos.');
     case 'safety':
@@ -79,7 +82,11 @@ export async function callGemini(db, kind, body, { variants = [] } = {}) {
   let lastCls = 'model', lastMsg = '';
   for (const model of list) {
     for (const b of [body, ...variants]) {
-      const r = await post(key, model, b);
+      let r = await post(key, model, b);
+      if (!r.ok && classifyGeminiError(r.status, r.msg) === 'busy') {
+        await new Promise((ok) => setTimeout(ok, Number(process.env.GEMINI_RETRY_MS || 1500))); // sobrecarga passageira: tenta de novo uma vez
+        r = await post(key, model, b);
+      }
       if (r.ok) {
         const blocked = r.data?.promptFeedback?.blockReason;
         if (blocked && !r.data?.candidates?.length) throw errorFor(kind, 'safety', blocked);
@@ -92,7 +99,7 @@ export async function callGemini(db, kind, body, { variants = [] } = {}) {
       if (cls === 'video') { const e = errorFor(kind, 'other', r.msg); e.videoProblem = true; throw e; }
       break; // sai do loop de corpos
     }
-    if (['model', 'payload', 'quota', 'billing'].includes(lastCls)) continue; // próximo modelo (os limites gratuitos são por modelo)
+    if (['model', 'payload', 'quota', 'billing', 'busy'].includes(lastCls)) continue; // próximo modelo (os limites gratuitos são por modelo)
     throw errorFor(kind, lastCls, lastMsg);
   }
   throw lastCls === 'model' || lastCls === 'payload'
