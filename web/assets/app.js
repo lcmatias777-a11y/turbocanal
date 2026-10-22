@@ -67,6 +67,7 @@ function renderNav() {
         ${u ? link('#/dashboard', 'Painel') + link('#/ferramentas/palavras', 'Ferramentas') + link('#/canal', '📺 Meu canal') + link('#/historico', 'Histórico') : ''}
         ${link('#/planos', 'Planos')}
         ${link('#/extensao', 'Extensão')}
+        ${link('#/resultados', '📊 Resultados')}
         ${link('#/avaliacoes', '⭐ Avaliações')}
         ${link('#/ajuda', 'Ajuda')}
         ${isAdmin ? link('#/admin', '🛠 Admin') : ''}
@@ -1914,7 +1915,7 @@ async function chNovoGrupo() {
 
 const ADMIN_TABS = [
   ['geral', 'Visão geral'], ['usuarios', 'Usuários'], ['planos', 'Planos'], ['custos', 'Custos'],
-  ['pagamentos', 'Pagamentos'], ['pedidos', '🙋 Pedidos'], ['chats', '💬 Chats'], ['avaliacoes', 'Avaliações'], ['blocos', 'Avisos e cards'], ['config', 'Configurações'], ['admins', 'Administradores'], ['auditoria', 'Auditoria']
+  ['pagamentos', 'Pagamentos'], ['estatisticas', '📊 Resultados'], ['pedidos', '🙋 Pedidos'], ['chats', '💬 Chats'], ['avaliacoes', 'Avaliações'], ['blocos', 'Avisos e cards'], ['config', 'Configurações'], ['admins', 'Administradores'], ['auditoria', 'Auditoria']
 ];
 
 // Mostra a versão atual no botão de baixar, para dar para comparar com a instalada
@@ -1951,6 +1952,130 @@ views.termos = async () => {
     <p class="muted small">Última atualização: outubro de 2026.</p></div>`;
 };
 
+/* ---------------------- Resultados dos criadores ----------------------
+   Três registros separados, medidos sobre dados reais do YouTube. Quando não
+   há gente suficiente, a tela diz isso em vez de desenhar gráfico fictício. */
+views.resultados = async () => {
+  appEl().innerHTML = '<h1>📊 Resultados dos criadores</h1><div class="card"><span class="spin"></span></div>';
+  let d, meu = null;
+  try { d = await api('/estatisticas/resultados'); }
+  catch (e) { appEl().innerHTML = '<h1>📊 Resultados dos criadores</h1>' + alertBox('err', esc(e.message)); return; }
+  if (state.user) { try { meu = await api('/estatisticas/meu'); } catch {} }
+
+  const data = (iso) => (iso ? new Date(iso).toLocaleDateString('pt-BR') : '—');
+  const pct = (v) => (v === null || v === undefined ? '—' : String(v).replace('.', ',') + '%');
+
+  const barras = (dist) => {
+    if (!dist.suficiente) {
+      return `<p class="muted small"><b>${esc(dist.populacao || 'Grupo')}</b></p>
+        ${alertBox('', `${esc(dist.mensagem)} São ${fmt(dist.n)} ${dist.n === 1 ? (dist.unidade === 'conquistas' ? 'conquista' : 'canal') : (dist.unidade || 'canais')} neste grupo e o mínimo para publicar é ${fmt(dist.minimo)}. Publicar porcentagem com tão pouca gente daria para identificar quem é, além de não significar nada.`)}`;
+    }
+    const max = Math.max(1, ...dist.categorias.map((c) => c.percentual));
+    return `<p class="muted small"><b>${esc(dist.populacao)}</b> · base de ${fmt(dist.n)} ${dist.n === 1 ? (dist.unidade === 'conquistas' ? 'conquista' : 'canal') : (dist.unidade || 'canais')}</p>
+      ${dist.categorias.map((c) => {
+        const w = Math.round((c.percentual / max) * 100);
+        const cor = c.quantidade ? 'var(--accent)' : 'var(--line)';
+        return `<div class="bt-linha"><span class="bt-nome">${esc(c.rotulo)}</span>
+          <span class="bt-trilho"><span class="bt-barra" style="width:${w}%;background:${cor}"></span></span>
+          <span class="bt-val muted small">${c.percentual}% · ${fmt(c.quantidade)}</span></div>`;
+      }).join('')}
+      <p class="muted small">Soma: ${dist.categorias.reduce((s, c) => s + c.percentual, 0)}%. Cada canal entra em uma categoria só, e o denominador é apenas deste grupo.</p>`;
+  };
+
+  const porMeta = (lista) => (lista.length
+    ? `<ul class="checklist">${lista.map((m) => `<li class="ok">${fmt(m.meta)} inscritos: ${fmt(m.quantidade)} ${m.quantidade === 1 ? 'canal' : 'canais'}</li>`).join('')}</ul>`
+    : '<p class="muted small">Nenhuma meta alcançada ainda nesta categoria.</p>');
+
+  const selo = (ok, n) => (ok ? '' : `<p class="muted small">⚠️ Só ${fmt(n)} até agora, abaixo do mínimo de ${fmt(d.regras.minimoParaPublicar)} para virar porcentagem publicada.</p>`);
+
+  const blocoMeu = !meu ? '' : !meu.canalLigado
+    ? `<div class="card"><h3>Seu acompanhamento</h3>
+        <p class="muted">Seu canal ainda não está ligado, então você não aparece nestes números. Ligar o canal é o que permite medir inscritos.</p>
+        <p><a class="btn sm" href="/api/auth/google?connect=1">Ligar meu canal</a></p></div>`
+    : `<div class="card"><h3>Seu acompanhamento</h3>
+        <p><span class="pill ${meu.estado === 'concluiu_meta' ? 'ok' : meu.estado === 'em_acompanhamento' ? '' : 'warn'}">${esc(meu.estadoRotulo)}</span>
+          ${meu.canal ? ' · ' + esc(meu.canal) : ''}</p>
+        <div class="grid cols3">
+          <div><b>Inscritos hoje</b><div class="kpi" style="font-size:1.3rem">${fmt(meu.inscritosAtuais)}</div>
+            <p class="muted small">${meu.precisaoAtual === 'arredondada' ? 'O YouTube arredonda acima de mil: este número é aproximado.' : meu.precisaoAtual === 'indisponivel' ? 'Seu canal esconde a contagem de inscritos.' : 'Contagem exata.'}</p></div>
+          <div><b>Meta mirada</b><div class="kpi" style="font-size:1.3rem">${meu.metaAlvo ? fmt(meu.metaAlvo) : '—'}</div>
+            <p class="muted small">${meu.metaAlvo ? `Identificada pelos seus números, não escolhida. Limite de ${fmt(meu.limiar)} separa os dois registros, e você começou ${meu.grupo === 1 ? 'abaixo dele' : 'acima dele'}.` : 'Você já passou da maior meta da lista.'}</p></div>
+          <div><b>Uso mínimo</b><div class="kpi" style="font-size:1.3rem">${meu.uso.elegivel ? '✅' : `${fmt(meu.uso.usosValidos)}/${fmt(meu.regras.usosMinimos)}`}</div>
+            <p class="muted small">${meu.uso.elegivel
+              ? `Cumprido em ${data(meu.elegivelEm)}. O acompanhamento vai até ${data(meu.fim)}.`
+              : `Faltam ${fmt(meu.uso.falta?.usos || 0)} uso(s) de ferramenta e ${fmt(meu.uso.falta?.dias || 0)} dia(s) diferente(s). Operação que falhou e foi estornada não conta.`}</p></div>
+        </div>
+        ${meu.crescimento?.suficiente
+          ? `<p>Durante o acompanhamento: <b>${meu.crescimento.diferenca >= 0 ? '+' : ''}${fmt(meu.crescimento.diferenca)}</b> inscritos${meu.crescimento.percentual !== null ? ` (${meu.crescimento.percentual >= 0 ? '+' : ''}${pct(meu.crescimento.percentual)})` : ''}, de ${fmt(meu.crescimento.inicial)} para ${fmt(meu.crescimento.final)} em ${fmt(meu.crescimento.dias)} dias.${meu.crescimento.estimado ? ' Números aproximados, porque o YouTube arredonda a contagem pública.' : ''}</p>`
+          : `<p class="muted small">Ainda não dá para medir seu crescimento: ${esc(meu.crescimento?.motivo || 'faltam medições')}.</p>`}
+        ${meu.conquistas?.length
+          ? `<p>Metas alcançadas: ${meu.conquistas.map((c) => `<span class="pill ok">${fmt(c.meta)} em ${data(c.atingida_em)}</span>`).join(' ')}</p>`
+          : ''}
+        <p class="muted small">Seus números vêm da leitura do seu canal pela API do YouTube. Não há onde digitar a contagem de inscritos, nem para você nem para o administrador.</p></div>`;
+
+  appEl().innerHTML = `<h1>📊 Resultados dos criadores</h1>
+    <p class="muted">O que aconteceu com os canais que usam o TurboCanal de verdade, medido pela API do YouTube. Três registros separados, porque misturar meta alcançada com inscrito ganho esconde as duas coisas.</p>
+    ${alertBox('', '<b>Antes de ler os números:</b> crescimento observado durante o acompanhamento não prova que o TurboCanal o causou. Não existe grupo de controle aqui, e qualquer canal é afetado por coisas de fora da plataforma. O que estes números mostram é o que foi medido, não a causa.')}
+
+    ${!d.base.suficienteParaPublicar
+      ? `<div class="card"><h3>Ainda não há canais suficientes</h3>
+          <p>São ${fmt(d.base.canaisElegiveis)} ${d.base.canaisElegiveis === 1 ? 'canal elegível' : 'canais elegíveis'} e o mínimo para publicar porcentagem é ${fmt(d.regras.minimoParaPublicar)}. Em vez de desenhar gráfico com número inventado, esta página mostra só o que já dá para contar.</p>
+          <p class="muted small">Canais com o canal ligado mas ainda sem o uso mínimo: ${fmt(d.base.aguardandoUso)}. Sem medição válida: ${fmt(d.base.semDados)}.</p></div>`
+      : ''}
+
+    <section class="grid cols3" style="margin-top:12px">
+      <div class="card"><h3>1. Metas com potencial de ajuda</h3>
+        <div class="kpi">${fmt(d.registro1.total)}</div>
+        <p class="muted small">${esc(d.registro1.descricao)}</p>
+        ${porMeta(d.registro1.porMeta)}${selo(d.registro1.publicavel, d.registro1.total)}</div>
+      <div class="card"><h3>2. Inscritos conquistados</h3>
+        <div class="kpi">${d.registro2.liquido >= 0 ? '+' : ''}${fmt(d.registro2.liquido)}</div>
+        <p class="muted small">${esc(d.registro2.descricao)}</p>
+        <ul class="checklist">
+          <li class="ok">Ganhos somados: +${fmt(d.registro2.inscritosGanhos)}</li>
+          <li class="${d.registro2.inscritosPerdidos ? 'no' : 'ok'}">Perdas somadas: ${d.registro2.inscritosPerdidos ? '−' + fmt(d.registro2.inscritosPerdidos) : 'nenhuma'}</li>
+          <li class="ok">Mediana por canal: ${d.registro2.medianaDiferenca === null ? '—' : fmt(d.registro2.medianaDiferenca)} inscritos${d.registro2.medianaPercentual === null ? '' : ` (${pct(d.registro2.medianaPercentual)})`}</li>
+          <li class="ok">Canais medidos: ${fmt(d.registro2.canais)}</li>
+        </ul>
+        ${d.registro2.estimado ? '<p class="muted small">Parte das contagens é arredondada pelo YouTube acima de mil inscritos, então estes totais são aproximados.</p>' : ''}
+        ${selo(d.registro2.publicavel, d.registro2.canais)}</div>
+      <div class="card"><h3>3. Metas de quem já estava perto</h3>
+        <div class="kpi">${fmt(d.registro3.total)}</div>
+        <p class="muted small">${esc(d.registro3.descricao)}</p>
+        ${porMeta(d.registro3.porMeta)}${selo(d.registro3.publicavel, d.registro3.total)}</div>
+    </section>
+
+    <div class="card" style="margin-top:12px"><h3>Por que o registro 1 e o registro 3 são separados</h3>
+      <p>Um canal que saiu de 200 para 1.000 inscritos e um que saiu de 800 para 1.000 alcançaram a mesma meta, mas não fizeram o mesmo caminho. O primeiro subiu 5 vezes de tamanho; o segundo subiu 25%. Juntar os dois num número só faria a ferramenta parecer mais eficaz do que ela é.</p>
+      <p class="muted small">O corte é em ${Math.round(d.regras.fracaoLimiar * 100)}% da meta: quem começou abaixo disso vai para o registro 1, quem começou nesse ponto ou acima vai para o registro 3. A meta é identificada pelos números do canal, nunca perguntada a ninguém.</p></div>
+
+    <div class="card" style="margin-top:12px"><h3>Distribuições</h3>
+      ${d.distribuicoes.map((x) => `<div style="margin:14px 0">${barras(x)}</div>`).join('')}</div>
+
+    <div class="card" style="margin-top:12px"><h3>Quem está dentro da conta</h3>
+      <div class="grid cols3">
+        <div><b>Canais elegíveis</b><div class="kpi" style="font-size:1.3rem">${fmt(d.base.canaisElegiveis)}</div></div>
+        <div><b>Em acompanhamento</b><div class="kpi" style="font-size:1.3rem">${fmt(d.base.emAcompanhamento)}</div></div>
+        <div><b>Encerrados sem a meta</b><div class="kpi" style="font-size:1.3rem">${fmt(d.base.encerradosSemMeta)}</div></div>
+      </div>
+      <p class="muted small" style="margin-top:10px">Fora da conta: ${fmt(d.base.aguardandoUso)} ainda não cumpriram o uso mínimo e ${fmt(d.base.semDados)} não têm medição válida. Quem não alcançou a meta continua contado: tirar essa gente da base inflaria o resultado.</p>
+      <p class="muted small">Período analisado: de ${data(d.base.periodoDe)} a ${data(d.base.periodoAte)}.</p></div>
+
+    <div class="card" style="margin-top:12px"><h3>Critérios usados</h3>
+      <ul class="checklist">
+        <li class="ok">Metas acompanhadas: ${d.regras.metas.map((m) => fmt(m)).join(', ')} inscritos.</li>
+        <li class="ok">Corte entre o registro 1 e o 3: ${Math.round(d.regras.fracaoLimiar * 100)}% da meta.</li>
+        <li class="ok">Uso mínimo: ${fmt(d.regras.usosMinimos)} usos de ferramenta em pelo menos ${fmt(d.regras.diasDistintosMinimos)} dias diferentes${d.regras.exigeFerramentaDeCanal ? ', incluindo ao menos uma de análise do canal, desempenho de vídeo ou melhoria de conteúdo' : ''}.</li>
+        <li class="ok">Criar conta, abrir página ou executar operação que falhou não conta como uso.</li>
+        <li class="ok">Duração do acompanhamento: ${fmt(d.regras.diasAcompanhamento)} dias a partir do dia em que o uso mínimo foi cumprido.</li>
+        <li class="ok">Mínimo para publicar uma porcentagem: ${fmt(d.regras.minimoParaPublicar)} canais.</li>
+        <li class="ok">Versão das regras em vigor: ${fmt(d.versaoRegras)}. Conquista registrada guarda a versão que valia e não é reclassificada quando a regra muda.</li>
+      </ul>
+      <p class="muted small">Nenhum número desta página é digitado por alguém. Todos vêm de medições da API do YouTube, gravadas no máximo uma vez por dia por canal.</p></div>
+
+    ${blocoMeu}`;
+};
+
 views.admin = async (params, sub) => {
   if (!state.user) return needLogin();
   if (!['owner', 'admin'].includes(state.user.role)) {
@@ -1985,6 +2110,106 @@ async function contarPendentes() {
 }
 
 const adminTabs = {
+
+  // ---------- Resultados dos criadores: regras, situação e recálculo ----------
+  async estatisticas(el) {
+    const [r, s] = await Promise.all([api('/admin/estatisticas/regras'), api('/admin/estatisticas/situacao')]);
+    const souDono = state.user?.role === 'owner';
+    const g = r.regras;
+    const data = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR') : '—');
+    const est = s.estados || {};
+    el.innerHTML = `
+      <div class="card"><h3>Situação dos acompanhamentos</h3>
+        <div class="grid cols3">
+          ${Object.entries(s.rotulos).map(([k, rot]) => `<div><b>${esc(rot)}</b>
+            <div class="kpi" style="font-size:1.4rem">${fmt(est[k] || 0)}</div></div>`).join('')}
+        </div>
+        <p class="muted small" style="margin-top:10px">Medições gravadas: ${fmt(s.medicoes.total)}${s.medicoes.primeira ? ` · da primeira em ${data(s.medicoes.primeira)} até ${data(s.medicoes.ultima)}` : ''}.
+          Conquistas: ${fmt(s.conquistas.registro1 || 0)} no registro 1 e ${fmt(s.conquistas.registro3 || 0)} no registro 3.</p>
+        <p><button class="btn sm secondary" id="estRecalc">🔄 Recalcular agora</button>
+          <a class="btn sm ghost" href="#/resultados">Ver a página pública</a></p>
+        <div id="estMsg"></div></div>
+
+      <div class="card" style="margin-top:12px"><h3>Regras de classificação (versão ${fmt(r.versao)})</h3>
+        ${souDono ? '' : alertBox('', 'Você pode ler as regras, mas só o administrador principal pode mudá-las: mexer no critério muda o que o site publica como resultado.')}
+        <form id="estForm" ${souDono ? '' : 'inert'}>
+          <div class="row">
+            <div><label>Metas de inscritos (separadas por vírgula)</label>
+              <input name="metas" value="${esc(g.metas.join(', '))}" ${souDono ? '' : 'disabled'}></div>
+            <div><label>Corte entre registro 1 e 3 (fração da meta)</label>
+              <input name="fracaoLimiar" type="number" step="0.05" min="0.05" max="0.95" value="${g.fracaoLimiar}" ${souDono ? '' : 'disabled'}></div>
+          </div>
+          <div class="row">
+            <div><label>Usos mínimos de ferramenta</label>
+              <input name="usosMinimos" type="number" min="1" max="100" value="${g.usosMinimos}" ${souDono ? '' : 'disabled'}></div>
+            <div><label>Dias diferentes mínimos</label>
+              <input name="diasDistintosMinimos" type="number" min="1" max="60" value="${g.diasDistintosMinimos}" ${souDono ? '' : 'disabled'}></div>
+          </div>
+          <div class="row">
+            <div><label>Duração do acompanhamento (dias)</label>
+              <input name="diasAcompanhamento" type="number" min="7" max="1095" value="${g.diasAcompanhamento}" ${souDono ? '' : 'disabled'}></div>
+            <div><label>Mínimo de canais para publicar porcentagem</label>
+              <input name="minimoParaPublicar" type="number" min="1" max="1000" value="${g.minimoParaPublicar}" ${souDono ? '' : 'disabled'}></div>
+          </div>
+          <div class="row">
+            <div><label>Horas mínimas entre duas medições do mesmo canal</label>
+              <input name="horasEntreMedicoes" type="number" min="1" max="720" value="${g.horasEntreMedicoes}" ${souDono ? '' : 'disabled'}></div>
+            <div><label>Exigir ferramenta de canal ou de conteúdo</label>
+              <select name="exigeFerramentaDeCanal" ${souDono ? '' : 'disabled'}>
+                <option value="1" ${g.exigeFerramentaDeCanal ? 'selected' : ''}>Sim</option>
+                <option value="0" ${g.exigeFerramentaDeCanal ? '' : 'selected'}>Não</option></select></div>
+          </div>
+          ${souDono ? '<p><button class="btn" type="submit">Salvar como nova versão</button></p>' : ''}
+        </form>
+        ${alertBox('', 'Salvar cria uma <b>versão nova</b>. Acompanhamentos e conquistas que já existem continuam rodando pela versão em que nasceram, e não são reclassificados. Por isso, comparar resultados de versões diferentes compara critérios diferentes: a versão aplicada fica gravada em cada registro.')}
+        <p class="muted small">Contam como uso de canal ou desempenho: ${r.ferramentas.canal.map((x) => esc(x)).join(', ')}.
+          Contam como melhoria de conteúdo: ${r.ferramentas.conteudo.map((x) => esc(x)).join(', ')}.</p>
+        <div id="estRegMsg"></div></div>
+
+      <div class="card" style="margin-top:12px"><h3>Histórico de regras</h3>
+        ${r.historico.length ? r.historico.map((h) => `<div class="rv-item">
+          <div class="rv-cab"><span class="pill ${h.versao === r.versao ? 'ok' : ''}">versão ${fmt(h.versao)}</span>
+            <b>${esc(h.autor_email || 'sistema')}</b> · ${data(h.criado_em)}</div>
+          <p class="small muted">${esc([
+            `metas ${(h.regras?.metas || []).map((m) => fmt(m)).join(' / ')}`,
+            `corte ${Math.round((h.regras?.fracaoLimiar ?? 0.5) * 100)}%`,
+            `${h.regras?.usosMinimos} usos em ${h.regras?.diasDistintosMinimos} dias`,
+            `${h.regras?.diasAcompanhamento} dias de acompanhamento`,
+            `mínimo ${h.regras?.minimoParaPublicar} canais para publicar`,
+            `${h.regras?.exigeFerramentaDeCanal ? 'exige' : 'não exige'} ferramenta de canal`
+          ].join(' · '))}</p></div>`).join('')
+          : '<p class="muted">Nenhuma alteração registrada ainda.</p>'}
+        <p class="muted small">Toda mudança também fica na aba Auditoria, com a regra anterior e a nova.</p></div>`;
+
+    $('#estRecalc').onclick = async (ev) => {
+      ev.target.disabled = true;
+      try {
+        const x = await api('/admin/estatisticas/recalcular', { method: 'POST' });
+        $('#estMsg').innerHTML = alertBox('ok', `Recalculado para ${fmt(x.usuarios)} canal(is).`);
+        setTimeout(() => adminTabs.estatisticas(el), 800);
+      } catch (e) { $('#estMsg').innerHTML = alertBox('err', esc(e.message)); ev.target.disabled = false; }
+    };
+    const f = $('#estForm');
+    if (souDono && f) f.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      const corpo = {
+        metas: String(fd.get('metas') || '').split(',').map((x) => x.trim()).filter(Boolean),
+        fracaoLimiar: Number(fd.get('fracaoLimiar')),
+        usosMinimos: Number(fd.get('usosMinimos')),
+        diasDistintosMinimos: Number(fd.get('diasDistintosMinimos')),
+        diasAcompanhamento: Number(fd.get('diasAcompanhamento')),
+        minimoParaPublicar: Number(fd.get('minimoParaPublicar')),
+        horasEntreMedicoes: Number(fd.get('horasEntreMedicoes')),
+        exigeFerramentaDeCanal: fd.get('exigeFerramentaDeCanal') === '1'
+      };
+      try {
+        const x = await api('/admin/estatisticas/regras', { method: 'POST', body: corpo });
+        $('#estRegMsg').innerHTML = alertBox(x.mudou ? 'ok' : '', x.mudou ? `Salvo como versão ${fmt(x.versao)}. ${esc(x.aviso)}` : esc(x.aviso));
+        if (x.mudou) setTimeout(() => adminTabs.estatisticas(el), 1200);
+      } catch (e) { $('#estRegMsg').innerHTML = alertBox('err', esc(e.message)); }
+    };
+  },
   // ---------- Pedidos que esperam o Sim do administrador principal ----------
   async pedidos(el) {
     const d = await api('/admin/pedidos');

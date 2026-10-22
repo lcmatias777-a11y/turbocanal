@@ -28,7 +28,7 @@ export function toolRoutes(app, db, auth) {
         result = await handler(req);
       } catch (e) {
         if (!charge.unlimited && !charge.reused && charge.charged > 0) {
-          await refund(db, user, charge.charged, `Estorno automático: falha em ${tool}`);
+          await refund(db, user, charge.charged, `Estorno automático: falha em ${tool}`, tool);
         }
         throw e;
       }

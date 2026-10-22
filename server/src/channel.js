@@ -78,6 +78,12 @@ export async function myChannel(db, user) {
   const c = ch.items?.[0];
   if (!c) throw new HttpError(404, 'Nenhum canal do YouTube encontrado nesta conta Google.');
   if (c.id) await db.run('UPDATE yt_tokens SET channel_id=?, channel_title=? WHERE user_id=?', [c.id, c.snippet?.title || null, user.id]);
+  // Medição de inscritos para os "Resultados dos criadores". Nunca derruba a
+  // ferramenta que chamou: falha aqui vira log, não erro para o usuário.
+  try {
+    const { registrarMedicao } = await import('./estatisticas.js');
+    await registrarMedicao(db, user, c, 'canal');
+  } catch (e) { console.error('[estatisticas] medição:', e.message); }
   return { token, channel: c };
 }
 
@@ -239,7 +245,7 @@ export function channelRoutes(app, db, auth) {
         result = await handler(req);
       } catch (e) {
         if (!charge.unlimited && !charge.reused && charge.charged > 0) {
-          await refund(db, req.user, charge.charged, `Estorno automático: falha em ${tool}`);
+          await refund(db, req.user, charge.charged, `Estorno automático: falha em ${tool}`, tool);
         }
         throw e;
       }

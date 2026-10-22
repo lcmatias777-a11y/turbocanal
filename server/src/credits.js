@@ -94,7 +94,9 @@ export async function grant(db, userId, amount, note, tool = null) {
   });
 }
 
-export async function refund(db, user, amount, note) {
+export async function refund(db, user, amount, note, tool = null) {
   if (user.role === 'owner' || amount <= 0) return;
-  await grant(db, user.id, amount, note);
+  // O estorno guarda QUAL ferramenta falhou. Sem isso não dá para saber que
+  // aquela cobrança não vale como uso real da plataforma.
+  await grant(db, user.id, amount, note, tool);
 }

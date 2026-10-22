@@ -300,6 +300,73 @@ CREATE TABLE IF NOT EXISTS cache_resposta (
   dados TEXT NOT NULL,
   ate TEXT NOT NULL
 );
+
+-- ===== Resultados dos criadores =====
+-- Medição de inscritos do canal. Uma por canal por dia (o índice único é o que
+-- impede medição repetida virar crescimento falso).
+CREATE TABLE IF NOT EXISTS medicoes_canal (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  canal_id TEXT NOT NULL,
+  inscritos BIGINT,
+  oculto INTEGER NOT NULL DEFAULT 0,
+  precisao TEXT NOT NULL DEFAULT 'exata',
+  origem TEXT NOT NULL DEFAULT 'canal',
+  dia TEXT NOT NULL,
+  medido_em TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_med_canal_dia ON medicoes_canal(canal_id, dia);
+CREATE INDEX IF NOT EXISTS idx_med_user ON medicoes_canal(user_id, medido_em);
+
+-- Acompanhamento do canal: um por usuário e canal.
+CREATE TABLE IF NOT EXISTS acompanhamentos (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  canal_id TEXT NOT NULL,
+  inicio TEXT,
+  inscritos_inicial BIGINT,
+  meta_alvo BIGINT,
+  limiar BIGINT,
+  grupo INTEGER,
+  elegivel_em TEXT,
+  elegivel_prova TEXT,
+  fim TEXT,
+  estado TEXT NOT NULL DEFAULT 'sem_dados',
+  regras_versao INTEGER NOT NULL DEFAULT 1,
+  criado_em TEXT NOT NULL,
+  atualizado_em TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_acomp_user_canal ON acompanhamentos(user_id, canal_id);
+CREATE INDEX IF NOT EXISTS idx_acomp_estado ON acompanhamentos(estado);
+
+-- Conquista de meta. Uma vez gravada nunca é reclassificada nem apagada:
+-- perder inscritos depois não desfaz o que aconteceu.
+CREATE TABLE IF NOT EXISTS conquistas (
+  id TEXT PRIMARY KEY,
+  acompanhamento_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  canal_id TEXT NOT NULL,
+  meta BIGINT NOT NULL,
+  registro INTEGER NOT NULL,
+  inscritos_inicio BIGINT NOT NULL,
+  inscritos_conquista BIGINT NOT NULL,
+  atingida_em TEXT NOT NULL,
+  precisao TEXT NOT NULL DEFAULT 'exata',
+  regras_versao INTEGER NOT NULL DEFAULT 1,
+  criado_em TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conq_canal_meta ON conquistas(canal_id, meta);
+CREATE INDEX IF NOT EXISTS idx_conq_registro ON conquistas(registro);
+
+-- Versões das regras de classificação. Nunca sobrescritas: cada acompanhamento
+-- guarda em qual versão nasceu.
+CREATE TABLE IF NOT EXISTS regras_estat (
+  versao INTEGER PRIMARY KEY,
+  regras TEXT NOT NULL,
+  autor_id TEXT,
+  autor_email TEXT,
+  criado_em TEXT NOT NULL
+);
 `;
 
 const PLAN_SEED = [
@@ -486,6 +553,16 @@ async function seed(db) {
     await db.run('UPDATE tool_costs SET cost=? WHERE tool=? AND cost=?', [newCost, tool, oldCost]);
     await db.run('UPDATE tool_costs SET label=? WHERE tool=? AND label=?', [newLabel, tool, oldLabel]);
   }
+  // Versão 1 das regras dos resultados dos criadores. Fica no banco (e não só
+  // no código) para que cada conquista possa apontar a versão que valia.
+  try {
+    const temRegras = await db.get('SELECT versao FROM regras_estat ORDER BY versao LIMIT 1');
+    if (!temRegras) {
+      const { REGRAS_PADRAO } = await import('./estatisticas.js');
+      await db.run('INSERT INTO regras_estat(versao,regras,autor_id,autor_email,criado_em) VALUES(?,?,?,?,?)',
+        [1, JSON.stringify(REGRAS_PADRAO), null, 'sistema', new Date().toISOString()]);
+    }
+  } catch (e) { console.error('[seed] regras de estatísticas:', e.message); }
   for (const [k, v] of Object.entries(DEFAULT_SETTINGS())) {
     if ((await getSetting(db, k)) === undefined) await setSetting(db, k, v);
   }
