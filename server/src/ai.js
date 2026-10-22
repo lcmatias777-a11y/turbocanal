@@ -132,7 +132,7 @@ export async function channelAudit(db, { canal = '', inscritos = null, videos = 
     melhorias: parsed.melhorias.slice(0, 5),
     proximos: (parsed.proximos || []).slice(0, 3),
     base: { videos: lista.length, medianaViews: medViews },
-    aviso: 'Análise feita só com os números públicos dos seus vídeos. Não inclui retenção, CTR nem impressões (o YouTube não libera isso aqui).',
+    aviso: 'Análise feita só com os números públicos dos seus vídeos: não inclui retenção nem CTR. A retenção e os inscritos por vídeo você vê no Raio-X dos vídeos, que lê o Analytics do seu canal. CTR e impressões o YouTube só mostra no Studio.',
     metodo: 'ia',
     modelo
   };

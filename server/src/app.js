@@ -14,6 +14,7 @@ import { reviewRoutes } from './reviews.js';
 import { notifyRoutes } from './notify.js';
 import { pedidoRoutes } from './pedidos.js';
 import { chatRoutes } from './chat.js';
+import { xrayRoutes } from './xray.js';
 import { blockRoutes } from './blocks.js';
 import { geminiKey } from './gemini.js';
 
@@ -50,6 +51,7 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
   notifyRoutes(app, db, auth);
   pedidoRoutes(app, db, auth);
   chatRoutes(app, db, auth);
+  xrayRoutes(app, db, auth);
 
   app.get('/api/plans', async (req, res, next) => {
     try {

@@ -141,6 +141,46 @@ export async function myPublicVideos(db, user, max = 50) {
   };
 }
 
+/** Raio-X por vídeo com os números que o YouTube Analytics entrega de verdade:
+ *  retenção (% médio assistido e tempo médio) e inscritos ganhos/perdidos.
+ *  CTR e impressões NÃO entram: não existem nos relatórios de canal da Analytics
+ *  API v2, só no Studio. Preferi faltar o número a inventar um. */
+export async function myVideoXray(db, user, dias = 90) {
+  const { token, channel } = await myChannel(db, user);
+  const d = Math.min(365, Math.max(28, parseInt(dias, 10) || 90));
+  const fim = new Date(); fim.setUTCDate(fim.getUTCDate() - 1);
+  const ini = new Date(fim); ini.setUTCDate(ini.getUTCDate() - d + 1);
+  const dt = (x) => x.toISOString().slice(0, 10);
+  const base = { ids: 'channel==MINE', startDate: dt(ini), endDate: dt(fim) };
+
+  const rel = await yt(token, ANALYTICS + 'reports', {
+    params: {
+      ...base,
+      metrics: 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,likes,comments',
+      dimensions: 'video', sort: '-views', maxResults: 50
+    }
+  });
+  const linhas = (rel.rows || []).map((r) => ({
+    id: r[0], views: r[1], minutos: r[2], duracaoMediaSeg: r[3], percentualMedio: r[4],
+    inscritosGanhos: r[5], inscritosPerdidos: r[6], likes: r[7], comentarios: r[8]
+  })).filter((v) => v.views > 0);
+
+  if (linhas.length) {
+    const vs = await yt(token, 'videos', { params: { part: 'snippet,contentDetails', id: linhas.slice(0, 50).map((v) => v.id).join(','), maxResults: 50 } });
+    const meta = Object.fromEntries((vs.items || []).map((v) => [v.id, {
+      titulo: v.snippet?.title || v.id,
+      publicado: v.snippet?.publishedAt || null,
+      duracaoSeg: isoDur(v.contentDetails?.duration)
+    }]));
+    for (const v of linhas) Object.assign(v, meta[v.id] || { titulo: v.id, publicado: null, duracaoSeg: 0 });
+  }
+  return {
+    canal: channel.snippet?.title || '',
+    periodo: { de: dt(ini), ate: dt(fim), dias: d },
+    videos: linhas
+  };
+}
+
 async function ownedVideo(db, user, videoId) {
   const { token, channel } = await myChannel(db, user);
   const r = await yt(token, 'videos', { params: { part: 'snippet,statistics,status,contentDetails', id: videoId } });

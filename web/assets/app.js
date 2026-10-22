@@ -41,6 +41,7 @@ const TOOL_LINKS = [
   ['#/ferramentas/tendencias', '🔥 Tendências do seu nicho'],
   ['#/ferramentas/auditoria', '🩺 Auditoria do meu canal (IA)'],
   ['#/ferramentas/horarios', '⏰ Melhor horário para publicar'],
+  ['#/ferramentas/raiox', '🔬 Raio-X dos meus vídeos'],
   ['#/ferramentas/titulo', '🧲 Laboratório de título'],
   ['#/ferramentas/insights', '✨ IA do vídeo (assiste e sugere)'],
   ['#/ferramentas/ideias', '💡 Ideias de vídeos'],
@@ -834,6 +835,68 @@ views['ferramentas/horarios'] = toolPage({
         <p class="small muted">Um grupo só vira recomendação com no mínimo ${r.base.minAmostra} vídeos. Os que têm menos aparecem em cinza.</p></div>`;
   }
 });
+
+views['ferramentas/raiox'] = async (params) => {
+  if (!state.user) return needLogin();
+  const dias = Math.min(365, Math.max(28, parseInt(params?.get?.('dias'), 10) || 90));
+  appEl().innerHTML = `<h1>🔬 Raio-X dos meus vídeos</h1>
+    <p class="muted">Duas perguntas que só os seus próprios números respondem: <b>quais vídeos trazem inscrito</b> (e não só view) e <b>que formato prende</b> o público. Os dados vêm do YouTube Analytics do seu canal. Não custa crédito.</p>
+    <div class="card"><label for="rxDias">Período</label>
+      <select id="rxDias" style="max-width:260px">
+        ${[28, 90, 180, 365].map((d) => `<option value="${d}"${d === dias ? ' selected' : ''}>últimos ${d} dias</option>`).join('')}
+      </select></div>
+    <div id="rxOut" style="margin-top:12px"><p class="center"><span class="spin"></span></p></div>`;
+  $('#rxDias').onchange = (ev) => { location.hash = `/ferramentas/raiox?dias=${ev.target.value}`; };
+
+  const out = $('#rxOut');
+  let r;
+  try { r = await api(`/channel/raiox?dias=${dias}`); }
+  catch (e) {
+    out.innerHTML = alertBox('warn', esc(e.message)) +
+      (state.user?.youtube?.connected ? '' : '<p><a class="btn" href="/api/auth/google?connect=1">Vincular meu canal do YouTube</a></p>');
+    return;
+  }
+
+  const tabela = (lista, campo, rotulo, unidade) => lista.length
+    ? `<table><tr><th>Vídeo</th><th>${rotulo}</th><th>Views</th></tr>${lista.map((v) => `<tr>
+        <td><a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc(v.titulo)}</a></td>
+        <td><b>${campo(v)}${unidade}</b></td><td>${fmt(v.views)}</td></tr>`).join('')}</table>`
+    : '<p class="muted">Sem vídeos suficientes no período.</p>';
+
+  const maxRet = Math.max(1, ...r.faixas.map((f) => f.retencaoMediana));
+  out.innerHTML = `
+    ${r.conclusoes.length ? `<div class="card"><h3>O que os seus números dizem</h3>
+      ${r.conclusoes.map((c) => `<p>• ${esc(c)}</p>`).join('')}</div>` : `<div class="card"><h3>Ainda não dá para concluir</h3>
+      <p>Faltam vídeos com views suficientes no período para comparar. Troque o período ou volte depois de publicar mais alguns.</p></div>`}
+
+    <div class="grid cols2" style="margin-top:12px">
+      <div class="card"><h3>🧲 Os que mais trazem inscrito</h3>
+        <p class="muted small">Inscritos ganhos menos perdidos, por mil views. A mediana do seu canal é ${r.base.medianaInscritosPorMil}.</p>
+        ${tabela(r.campeoes, (v) => v.inscritosPorMil, 'por mil views', '')}</div>
+      <div class="card"><h3>👀 Muita view, pouco inscrito</h3>
+        <p class="muted small">Esses trazem gente que assiste e vai embora. Pode ser público fora do seu nicho.</p>
+        ${tabela(r.soView, (v) => v.inscritosPorMil, 'por mil views', '')}</div>
+      <div class="card"><h3>⏳ Os que mais prendem</h3>
+        <p class="muted small">Percentual médio assistido. A mediana do canal é ${r.base.retencaoMediana}%.</p>
+        ${tabela(r.prendemMais, (v) => Math.round(v.percentualMedio), 'assistido', '%')}</div>
+      <div class="card"><h3>💤 Os que menos prendem</h3>
+        ${tabela(r.prendemMenos, (v) => Math.round(v.percentualMedio), 'assistido', '%')}</div>
+    </div>
+
+    <div class="card" style="margin-top:12px"><h3>Retenção por tamanho de vídeo</h3>
+      ${r.faixas.map((f) => {
+        const w = Math.round((f.retencaoMediana / maxRet) * 100);
+        const cor = !f.videos ? 'var(--line)' : f.suficiente ? (f.id === r.melhorFaixa?.id ? 'var(--ok)' : 'var(--accent)') : 'var(--line)';
+        return `<div class="bt-linha"><span class="bt-nome">${esc(f.nome)}</span>
+          <span class="bt-trilho"><span class="bt-barra" style="width:${w}%;background:${cor}"></span></span>
+          <span class="bt-val muted small">${f.videos ? `${f.retencaoMediana}% · ${f.videos} vídeo${f.videos > 1 ? 's' : ''}${f.suficiente ? '' : ' (pouco para comparar)'}` : 'nenhum vídeo'}</span></div>`;
+      }).join('')}
+      <p class="small muted">Faixa com menos de ${r.base.minGrupo} vídeos aparece em cinza e não vira conclusão.</p></div>
+
+    <div class="card" style="margin-top:12px"><h3>De onde vêm esses números</h3>
+      <p class="small muted">${esc(r.canal)} · ${r.periodo.de} a ${r.periodo.ate} · ${r.base.analisados} de ${r.base.total} vídeos entraram na comparação.</p>
+      <ul class="small muted">${r.avisos.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div>`;
+};
 
 views['ferramentas/preparar'] = toolPage({
   title: '📝 Preparar publicação', toolKey: 'prep_ai',

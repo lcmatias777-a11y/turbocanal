@@ -609,7 +609,7 @@ check('auditoria do canal: nota, o que funciona, 5 melhorias e próximos vídeos
   && aud.data.result.funciona.length === 3 && aud.data.result.proximos.length === 3, JSON.stringify(aud.data).slice(0, 180));
 check('cada melhoria vem com o dado que a sustenta', aud.data.result.melhorias.every((m) => m.dado && m.acao));
 check('a auditoria diz em que se baseou (quantidade de vídeos e mediana)', aud.data.result.base?.videos > 0 && aud.data.result.base.medianaViews >= 0, JSON.stringify(aud.data.result.base));
-check('a auditoria avisa que não tem retenção nem CTR', /retenção|CTR/i.test(aud.data.result.aviso || ''));
+check('a auditoria diz o que falta nela e onde ver a retenção', /CTR/i.test(aud.data.result.aviso || '') && /Raio-X/i.test(aud.data.result.aviso || ''), aud.data.result.aviso);
 check('auditoria custa 200 créditos', aud.data.credits.charged === 200 && (await req('/api/me', { token: t1 })).data.user.credits === b0a - 200);
 
 b0a = (await req('/api/me', { token: t1 })).data.user.credits;
@@ -779,6 +779,42 @@ check('o estado do Pix e o dos pagamentos batem com o que está mesmo salvo no b
   && itPag.ok === (itPix.ok && !!(await getSetting(db, 'mp_access_token')) && (await getSetting(db, 'payments_enabled')) === '1'),
   JSON.stringify({ pix: itPix.ok, pag: itPag.ok })); 
 check('usuário comum não vê o checklist', (await req('/api/admin/checklist', { token: t1 })).status === 403);
+
+// ---------- Raio-X dos videos (retencao e inscritos por video) ----------
+{
+console.log('\n— Raio-X dos vídeos —');
+const { analisarVideos, faixaDe, mediana: medXray } = await import('../src/xray.js');
+check('faixa de duracao cai na caixa certa', faixaDe(45) === 0 && faixaDe(240) === 1 && faixaDe(600) === 2 && faixaDe(1800) === 4);
+check('mediana do raio-x aceita lista vazia', medXray([]) === 0 && medXray([2, 4]) === 3);
+
+// canal de teste: curtos prendem mais; um video traz muita view e pouco inscrito
+const vidsX = [];
+for (let i = 0; i < 4; i++) vidsX.push({ id: 'c' + i, titulo: 'Curto ' + i, views: 1000 + i, duracaoSeg: 50, duracaoMediaSeg: 40, percentualMedio: 80, inscritosGanhos: 20, inscritosPerdidos: 0 });
+for (let i = 0; i < 4; i++) vidsX.push({ id: 'l' + i, titulo: 'Longo ' + i, views: 1000 + i, duracaoSeg: 1500, duracaoMediaSeg: 300, percentualMedio: 20, inscritosGanhos: 2, inscritosPerdidos: 0 });
+vidsX.push({ id: 'viral', titulo: 'Viral fora do nicho', views: 90000, duracaoSeg: 1500, duracaoMediaSeg: 150, percentualMedio: 10, inscritosGanhos: 5, inscritosPerdidos: 3 });
+vidsX.push({ id: 'fraco', titulo: 'Quase sem view', views: 9, duracaoSeg: 300, duracaoMediaSeg: 100, percentualMedio: 33, inscritosGanhos: 0, inscritosPerdidos: 0 });
+const ax = analisarVideos(vidsX);
+check('ignora o video com poucas views e diz quantos ficaram de fora',
+  ax.base.analisados === 9 && ax.base.total === 10 && ax.avisos.some((a) => /ficaram de fora/.test(a)), JSON.stringify(ax.base));
+check('acha os videos que mais trazem inscrito por mil views',
+  ax.campeoes.length && ax.campeoes[0].titulo.startsWith('Curto') && ax.campeoes[0].inscritosPorMil > 10, JSON.stringify(ax.campeoes[0]));
+check('separa o que traz view mas nao traz inscrito',
+  ax.soView.some((v) => v.id === 'viral'), JSON.stringify(ax.soView.map((v) => v.id)));
+check('inscritos por mil desconta quem deu unfollow', vidsX.length && ax.soView.find((v) => v.id === 'viral')?.inscritosPorMil === 0);
+check('acha a faixa de duracao que mais prende',
+  ax.melhorFaixa?.nome === 'até 1 min (Shorts)' && ax.melhorFaixa.retencaoMediana === 80, JSON.stringify(ax.melhorFaixa));
+check('faixa com menos de 3 videos nao vira conclusao', ax.faixas.filter((f) => f.suficiente).every((f) => f.videos >= 3));
+check('escreve conclusoes citando o numero que as sustenta',
+  ax.conclusoes.length >= 2 && ax.conclusoes.every((c) => /\d/.test(c)), JSON.stringify(ax.conclusoes).slice(0, 200));
+check('avisa que CTR e impressoes nao existem na API, em vez de inventar',
+  ax.avisos.some((a) => /CTR/.test(a) && /não entrega|nao entrega/.test(a)), JSON.stringify(ax.avisos).slice(0, 200));
+const vazio = analisarVideos([]);
+check('canal sem dados nao inventa conclusao', vazio.conclusoes.length === 0 && vazio.campeoes.length === 0 && vazio.avisos.some((a) => /ainda é pouco/.test(a)));
+const rx = await req('/api/channel/raiox', { token: t1 });
+check('o endpoint do raio-X responde para quem tem canal ligado', [200, 400, 403, 409].includes(rx.status), String(rx.status));
+check('periodo fora do limite e recusado', (await req('/api/channel/raiox?dias=5', { token: t1 })).status === 400);
+check('raio-X exige login', (await req('/api/channel/raiox')).status === 401);
+}
 
 // ---------- Encerrar sessoes (o botao de emergencia de verdade) ----------
 console.log('\n— Encerrar sessões —');
