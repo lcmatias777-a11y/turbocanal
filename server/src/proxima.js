@@ -13,6 +13,7 @@ import { HttpError, uid, now } from './util.js';
 const DIAS_DISPENSA = 14;
 const CACHE_MIN = 180; // 3 horas: ler o Analytics a cada visita queimaria a cota do YouTube
 const n = (v) => Number(v || 0).toLocaleString('pt-BR');
+const d1 = (v) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 
 /** Monta as candidatas a partir dos sinais já calculados. A ordem da lista é a
  *  prioridade: a primeira que sobreviver aos filtros é a que aparece. */
@@ -36,7 +37,7 @@ export function escolherAcoes({ canalLigado, xray, horarios, comentariosSemRespo
       chave: 'continuacao_' + camp.id, tipo: 'oportunidade',
       titulo: `Faça uma continuação de “${camp.titulo}”`,
       porque: 'Esse vídeo converte espectador em inscrito muito acima do resto do canal. Assunto que faz isso costuma repetir.',
-      dado: `${camp.inscritosPorMil} inscritos por mil views, contra ${xray.base.medianaInscritosPorMil} na mediana dos seus ${xray.base.analisados} vídeos comparados.`,
+      dado: `${d1(camp.inscritosPorMil)} inscritos por mil views, contra ${d1(xray.base.medianaInscritosPorMil)} na mediana dos seus ${xray.base.analisados} vídeos comparados.`,
       botao: { texto: 'Ver o raio-X dos meus vídeos', href: '#/ferramentas/raiox' }
     });
   }
@@ -48,7 +49,7 @@ export function escolherAcoes({ canalLigado, xray, horarios, comentariosSemRespo
       chave: 'formato_' + melhorF.id, tipo: 'oportunidade',
       titulo: `Seu próximo vídeo normal cabe melhor em ${melhorF.nome}`,
       porque: 'Nessa duração o seu público fica até bem mais tarde. Não é regra do YouTube, é o que o seu canal vem mostrando. (Shorts ficam de fora desta conta: eles repetem sozinhos.)',
-      dado: `${melhorF.retencaoMediana}% assistido em ${melhorF.videos} vídeos de ${melhorF.nome}, contra ${piorF.retencaoMediana}% em ${piorF.videos} de ${piorF.nome}.`,
+      dado: `${d1(melhorF.retencaoMediana)}% assistido em ${melhorF.videos} vídeos de ${melhorF.nome}, contra ${d1(piorF.retencaoMediana)}% em ${piorF.videos} de ${piorF.nome}.`,
       botao: { texto: 'Ver retenção por tamanho', href: '#/ferramentas/raiox' }
     });
   }
@@ -68,7 +69,7 @@ export function escolherAcoes({ canalLigado, xray, horarios, comentariosSemRespo
       chave: 'fora_nicho_' + soView.id, tipo: 'atencao',
       titulo: `“${soView.titulo}” traz gente que não fica`,
       porque: 'Zero inscrito não prova que o público é de fora do nicho, mas é o primeiro lugar onde eu olharia antes de repetir esse assunto.',
-      dado: `${n(soView.views)} views e ${soView.inscritosPorMil} inscrito por mil views.`,
+      dado: `${n(soView.views)} views e ${d1(soView.inscritosPorMil)} inscrito por mil views.`,
       botao: { texto: 'Comparar com os outros vídeos', href: '#/ferramentas/raiox' }
     });
   }

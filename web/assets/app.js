@@ -382,10 +382,13 @@ function toolCostLabel(hash) {
   const map = {
     palavras: 'keyword_research', video: 'video_analysis', canal: 'channel_analysis',
     tendencias: 'trends', titulos: 'title_ai', descricao: 'description_ai', busca: 'video_search',
-    insights: 'video_insights_ai', preparar: 'prep_ai', transformar: 'transform_ai', concorrentes: 'competitor_check', ideias: 'ideas_ai'
+    insights: 'video_insights_ai', preparar: 'prep_ai', transformar: 'transform_ai', concorrentes: 'competitor_check', ideias: 'ideas_ai',
+    auditoria: 'audit_ai', titulo: 'title_lab', horarios: 'best_time'
   };
   const last = hash.split('/').pop();
   if (last === 'editor' || last === 'criar-capa') return 'Grátis (roda no seu navegador)';
+  // leem o Analytics do próprio canal: não custam crédito nenhum
+  if (last === 'raiox' || last === 'experimentos') return 'Grátis (lê o Analytics do seu canal)';
   const key = map[last];
   const c = state.costs.find((x) => x.tool === key);
   if (!c) return '';
