@@ -2109,6 +2109,18 @@ async function contarPendentes() {
   try { pinta('chats', (await api('/admin/chats/novidades')).naoLidas); } catch { pinta('chats', 0); }
 }
 
+/** Ação administrativa que pode ter virado pedido em vez de ter sido executada.
+ *  Admin não principal recebe 202 com executado=false: a tela tem de dizer isso,
+ *  senão ele fecha achando que fez e nada mudou. Devolve true se foi feito. */
+function feitoOuPedido(r, feito) {
+  if (r && r.executado === false) {
+    alert(`Pedido enviado ao administrador principal.\n\nEle vai ver: "${r.frase || 'seu pedido'}".\nNada muda no site até ele responder Sim.`);
+    return false;
+  }
+  if (feito) alert(feito);
+  return true;
+}
+
 const adminTabs = {
 
   // ---------- Resultados dos criadores: regras, situação e recálculo ----------
@@ -2354,8 +2366,10 @@ const adminTabs = {
         };
         try {
           const id = $('#blform').dataset.id;
-          if (id) await api('/admin/blocks/' + id, { method: 'PUT', body: corpo });
-          else await api('/admin/blocks', { method: 'POST', body: corpo });
+          const r = id
+            ? await api('/admin/blocks/' + id, { method: 'PUT', body: corpo })
+            : await api('/admin/blocks', { method: 'POST', body: corpo });
+          feitoOuPedido(r);
           blocos.carregado = null;
           await adminTabs.blocos(el);
         } catch (e) { showErr($('#b_msg'), e); }
@@ -2368,13 +2382,13 @@ const adminTabs = {
       try {
         if (b.dataset.novo) return abrirForm({ tipo: b.dataset.novo, pagina: 'home', slot: b.dataset.novo === 'card' ? 'lateral-direita' : 'topo', publicado: true });
         if (b.dataset.editar) return abrirForm(d.itens.find((x) => x.id === b.dataset.editar));
-        if (b.dataset.mover) await api(`/admin/blocks/${b.dataset.id}/move`, { method: 'POST', body: { direcao: b.dataset.mover } });
+        if (b.dataset.mover) feitoOuPedido(await api(`/admin/blocks/${b.dataset.id}/move`, { method: 'POST', body: { direcao: b.dataset.mover } }));
         else if (b.dataset.pub) {
           const alvo = d.itens.find((x) => x.id === b.dataset.pub);
-          await api('/admin/blocks/' + alvo.id, { method: 'PUT', body: { ...alvo, publicado: b.dataset.valor === '1' } });
+          feitoOuPedido(await api('/admin/blocks/' + alvo.id, { method: 'PUT', body: { ...alvo, publicado: b.dataset.valor === '1' } }));
         } else if (b.dataset.excluir) {
           if (!confirm('Excluir este item? Isso não apaga mais nada do site.')) return;
-          await api('/admin/blocks/' + b.dataset.excluir, { method: 'DELETE' });
+          feitoOuPedido(await api('/admin/blocks/' + b.dataset.excluir, { method: 'DELETE' }));
         } else return;
         blocos.carregado = null;
         await adminTabs.blocos(el);
@@ -2507,11 +2521,12 @@ const adminTabs = {
       const id = b.dataset.save;
       const g = (f) => el.querySelector(`[data-p="${id}"][data-f="${f}"]`);
       try {
-        await api('/admin/plans/' + id, { method: 'PUT', body: {
+        const r = await api('/admin/plans/' + id, { method: 'PUT', body: {
           name: g('name').value, price_cents: parseInt(g('price_cents').value, 10),
           monthly_credits: parseInt(g('monthly_credits').value, 10), active: g('active').checked
         }});
-        b.textContent = 'Salvo ✓'; setTimeout(() => (b.textContent = 'Salvar'), 1500);
+        b.textContent = feitoOuPedido(r) ? 'Salvo ✓' : 'Pedido enviado';
+        setTimeout(() => (b.textContent = 'Salvar'), 1800);
       } catch (e) { alert(e.message); }
     };
   },
@@ -2525,7 +2540,11 @@ const adminTabs = {
         <td><button class="btn sm" data-save="${esc(c.tool)}">Salvar</button></td></tr>`).join('')}</table></div>`;
     for (const b of el.querySelectorAll('[data-save]')) b.onclick = async () => {
       const cost = parseInt(el.querySelector(`input[data-t="${b.dataset.save}"]`).value, 10);
-      try { await api('/admin/tools/' + b.dataset.save, { method: 'PUT', body: { cost } }); b.textContent = 'Salvo ✓'; setTimeout(() => (b.textContent = 'Salvar'), 1500); }
+      try {
+        const r = await api('/admin/tools/' + b.dataset.save, { method: 'PUT', body: { cost } });
+        b.textContent = feitoOuPedido(r) ? 'Salvo ✓' : 'Pedido enviado';
+        setTimeout(() => (b.textContent = 'Salvar'), 1800);
+      }
       catch (e) { alert(e.message); }
     };
   },
@@ -2541,14 +2560,21 @@ const adminTabs = {
     for (const b of el.querySelectorAll('[data-c]')) b.onclick = async () => {
       const note = prompt('Como você conferiu o recebimento? (obrigatório, vai para a auditoria)');
       if (!note) return;
-      try { await api(`/admin/payments/${b.dataset.c}/confirm`, { method: 'POST', body: { note } }); adminTabs.pagamentos(el); }
+      try {
+        feitoOuPedido(await api(`/admin/payments/${b.dataset.c}/confirm`, { method: 'POST', body: { note } }));
+        adminTabs.pagamentos(el);
+      }
       catch (e) { alert(e.message); }
     };
   },
 
   async config(el) {
     const { settings: s } = await api('/admin/settings');
+    // Configurações não vão para a fila de aprovação: o pedido guardaria o token
+    // do Mercado Pago e a chave da IA em texto. Aqui a porta é fechada de vez.
+    const soLeitura = state.user?.role !== 'owner';
     el.innerHTML = `
+      ${soLeitura ? alertBox('', '<b>Somente leitura.</b> Só o administrador principal muda as configurações. Isto não passa pela fila de pedidos porque o pedido teria de guardar chaves e tokens em texto, e eles não são copiados para lugar nenhum. Se algo precisa mudar aqui, fale com ele pelo chat do painel.') : ''}
       <div class="grid cols2">
       <div class="card"><h3>Geral</h3><div id="cmsg"></div>
         <label>Nome do site</label><input id="c_site" value="${esc(s.site_name)}">

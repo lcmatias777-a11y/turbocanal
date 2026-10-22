@@ -168,13 +168,10 @@ export function adminRoutes(app, db, auth) {
   }));
 
   app.post('/api/admin/users/:id/plan', ...auth.admin, wrap(async (req, res) => {
-    const planId = must(req.body?.plan_id, 'plano', { max: 40 });
-    if (!(await db.get('SELECT id FROM plans WHERE id=?', [planId]))) throw new HttpError(404, 'Plano não encontrado.');
-    const target = await db.get('SELECT id,email FROM users WHERE id=?', [req.params.id]);
-    if (!target) throw new HttpError(404, 'Usuário não encontrado.');
-    await db.run('UPDATE users SET plan_id=? WHERE id=?', [planId, target.id]);
-    await audit(db, req.user, 'admin.user_plan_set', target.email, planId);
-    res.json({ ok: true });
+    const r = await pedirOuFazer(db, req.user, 'plano_do_usuario', {
+      alvo_user: req.params.id, plan_id: req.body?.plan_id, motivo: req.body?.motivo
+    });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r });
   }));
 
   app.get('/api/admin/plans', ...auth.admin, wrap(async (req, res) => {
@@ -182,44 +179,18 @@ export function adminRoutes(app, db, auth) {
   }));
 
   app.post('/api/admin/plans', ...auth.admin, wrap(async (req, res) => {
-    const id = must(req.body?.id, 'id do plano', { max: 30 }).toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    if (!id) throw new HttpError(400, 'ID de plano inválido.');
-    if (await db.get('SELECT 1 AS x FROM plans WHERE id=?', [id])) throw new HttpError(409, 'Já existe um plano com esse ID.');
-    const name = must(req.body?.name, 'nome do plano', { max: 60 });
-    const price = parseInt(req.body?.price_cents, 10);
-    const credits = parseInt(req.body?.monthly_credits, 10);
-    if (!Number.isInteger(price) || price < 0) throw new HttpError(400, 'Preço inválido.');
-    if (!Number.isInteger(credits) || credits <= 0) throw new HttpError(400, 'Créditos mensais inválidos.');
-    await db.run('INSERT INTO plans(id,name,price_cents,monthly_credits,sort,active,description) VALUES(?,?,?,?,?,?,?)', [id, name, price, credits, parseInt(req.body?.sort, 10) || 99, 1, String(req.body?.description || '').slice(0, 400)]);
-    await audit(db, req.user, 'admin.plan_create', id, `${name} R$${(price / 100).toFixed(2)} ${credits}cr`);
-    res.json({ ok: true });
+    const r = await pedirOuFazer(db, req.user, 'criar_plano', { ...req.body, motivo: req.body?.motivo });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r });
   }));
 
   app.put('/api/admin/plans/:id', ...auth.admin, wrap(async (req, res) => {
-    const plan = await db.get('SELECT * FROM plans WHERE id=?', [req.params.id]);
-    if (!plan) throw new HttpError(404, 'Plano não encontrado.');
-    const name = req.body?.name !== undefined ? must(req.body.name, 'nome', { max: 60 }) : plan.name;
-    const price = req.body?.price_cents !== undefined ? parseInt(req.body.price_cents, 10) : plan.price_cents;
-    const credits = req.body?.monthly_credits !== undefined ? parseInt(req.body.monthly_credits, 10) : plan.monthly_credits;
-    const active = req.body?.active !== undefined ? (req.body.active ? 1 : 0) : plan.active;
-    const sort = req.body?.sort !== undefined ? parseInt(req.body.sort, 10) || 0 : plan.sort;
-    const description = req.body?.description !== undefined ? String(req.body.description).slice(0, 400) : plan.description;
-    if (!Number.isInteger(price) || price < 0) throw new HttpError(400, 'Preço inválido.');
-    if (!Number.isInteger(credits) || credits <= 0) throw new HttpError(400, 'Créditos mensais inválidos.');
-    if (plan.id === 'free' && price > 0) throw new HttpError(400, 'O plano Free precisa continuar com preço zero.');
-    await db.run('UPDATE plans SET name=?,price_cents=?,monthly_credits=?,active=?,sort=?,description=? WHERE id=?', [name, price, credits, active, sort, description, plan.id]);
-    await audit(db, req.user, 'admin.plan_update', plan.id, `R$${(price / 100).toFixed(2)} ${credits}cr ativo=${active}`);
-    res.json({ ok: true });
+    const r = await pedirOuFazer(db, req.user, 'editar_plano', { ...req.body, alvo_id: req.params.id, motivo: req.body?.motivo });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r });
   }));
 
   app.put('/api/admin/tools/:tool', ...auth.admin, wrap(async (req, res) => {
-    const row = await db.get('SELECT * FROM tool_costs WHERE tool=?', [req.params.tool]);
-    if (!row) throw new HttpError(404, 'Ferramenta não encontrada.');
-    const cost = parseInt(req.body?.cost, 10);
-    if (!Number.isInteger(cost) || cost < 0 || cost > 100000) throw new HttpError(400, 'Custo inválido.');
-    await db.run('UPDATE tool_costs SET cost=? WHERE tool=?', [cost, row.tool]);
-    await audit(db, req.user, 'admin.tool_cost', row.tool, String(cost));
-    res.json({ ok: true });
+    const r = await pedirOuFazer(db, req.user, 'custo_ferramenta', { alvo_id: req.params.tool, cost: req.body?.cost, motivo: req.body?.motivo });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r });
   }));
 
   app.get('/api/admin/payments', ...auth.admin, wrap(async (req, res) => {
@@ -229,13 +200,8 @@ export function adminRoutes(app, db, auth) {
 
   // Confirmação MANUAL auditada (só depois de conferir o recebimento de verdade)
   app.post('/api/admin/payments/:id/confirm', ...auth.admin, wrap(async (req, res) => {
-    const p = await db.get('SELECT * FROM payments WHERE id=?', [req.params.id]);
-    if (!p) throw new HttpError(404, 'Pagamento não encontrado.');
-    if (p.status === 'approved') return res.json({ ok: true, ja_aprovado: true });
-    const note = String(req.body?.note || '').slice(0, 300);
-    if (!note) throw new HttpError(400, 'Descreva como você conferiu o recebimento (ex.: comprovante Pix, extrato).');
-    const updated = await activatePayment(db, p, req.user, `confirmação manual do administrador: ${note}`);
-    res.json({ ok: true, status: updated.status });
+    const r = await pedirOuFazer(db, req.user, 'confirmar_pagamento', { alvo_id: req.params.id, note: req.body?.note, motivo: req.body?.note });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r, status: r.resultado?.status, ja_aprovado: r.resultado?.ja_aprovado });
   }));
 
   app.get('/api/admin/settings', ...auth.admin, wrap(async (req, res) => {
@@ -260,7 +226,7 @@ export function adminRoutes(app, db, auth) {
     res.json(r);
   }));
 
-  app.put('/api/admin/settings', ...auth.admin, wrap(async (req, res) => {
+  app.put('/api/admin/settings', ...auth.owner, wrap(async (req, res) => {
     const updates = req.body?.updates;
     if (!updates || typeof updates !== 'object') throw new HttpError(400, 'Nada para atualizar.');
     for (const [k, vRaw] of Object.entries(updates)) {

@@ -8,7 +8,7 @@
 import { HttpError, uid, now, audit } from './util.js';
 
 const MAX_TEXTO = 1000;
-const TIPOS = { avaliacao: 'reviews', comentario: 'site_comments', resposta: 'respostas' };
+export const TIPOS_MOD = { avaliacao: 'reviews', comentario: 'site_comments', resposta: 'respostas' };
 const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
 function lerEstrelas(v) {
@@ -24,7 +24,7 @@ function lerTexto(v, nome, obrigatorio = false, max = MAX_TEXTO) {
 }
 function lerTipo(v) {
   const t = String(v || '').trim();
-  if (!TIPOS[t]) throw new HttpError(400, 'Tipo de conteúdo inválido.');
+  if (!TIPOS_MOD[t]) throw new HttpError(400, 'Tipo de conteúdo inválido.');
   return t;
 }
 /** Nome que aparece na tela: o nome da conta do Google. Nunca o e-mail. */
@@ -99,6 +99,21 @@ async function respostasDe(db, chaves, userId) {
     });
   }
   return por;
+}
+
+/** A escrita da moderação, usada pela fila de aprovação (remover e restaurar). */
+export async function aplicarModeracao(db, quem, tipo, alvoId, remover, motivo = '') {
+  const alvo = await db.get(`SELECT * FROM ${TIPOS_MOD[tipo]} WHERE id=?`, [alvoId]);
+  if (!alvo) throw new HttpError(404, 'Conteúdo não encontrado.');
+  const campoMod = tipo === 'avaliacao' ? ', moderated_reason=?' : '';
+  const vals = tipo === 'avaliacao'
+    ? [remover ? 'removed' : 'active', quem.id, motivo, now(), alvo.id]
+    : [remover ? 'removed' : 'active', quem.id, now(), alvo.id];
+  await db.run(`UPDATE ${TIPOS_MOD[tipo]} SET status=?, moderated_by=?${campoMod}, updated_at=? WHERE id=?`, vals);
+  await db.run("UPDATE review_reports SET status='handled' WHERE target_type=? AND target_id=?", [tipo, alvo.id]);
+  await db.run('INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)',
+    [uid(), quem.id, quem.email, remover ? 'review.remove' : 'review.restore', alvo.id, `${tipo}: ${motivo || '(sem motivo)'}`, now()]);
+  return { ok: true };
 }
 
 export function reviewRoutes(app, db, auth) {
@@ -205,7 +220,7 @@ export function reviewRoutes(app, db, auth) {
     const tipo = lerTipo(req.body?.alvo_tipo);
     if (tipo === 'resposta') throw new HttpError(400, 'Não dá para responder a uma resposta.');
     const texto = lerTexto(req.body?.texto, 'A resposta', true);
-    const alvo = await db.get(`SELECT * FROM ${TIPOS[tipo]} WHERE id=? AND status='active'`, [req.body?.alvo_id]);
+    const alvo = await db.get(`SELECT * FROM ${TIPOS_MOD[tipo]} WHERE id=? AND status='active'`, [req.body?.alvo_id]);
     if (!alvo) throw new HttpError(404, 'Conteúdo não encontrado.');
     const papel = papelDe(req.user);
     const id = uid();
@@ -233,7 +248,7 @@ export function reviewRoutes(app, db, auth) {
     const tipo = lerTipo(req.body?.alvo_tipo);
     const valor = Number(req.body?.valor);
     if (![1, -1, 0].includes(valor)) throw new HttpError(400, 'Voto inválido (1 para gostei, -1 para não gostei, 0 para desfazer).');
-    const alvo = await db.get(`SELECT * FROM ${TIPOS[tipo]} WHERE id=? AND status='active'`, [req.body?.alvo_id]);
+    const alvo = await db.get(`SELECT * FROM ${TIPOS_MOD[tipo]} WHERE id=? AND status='active'`, [req.body?.alvo_id]);
     if (!alvo) throw new HttpError(404, 'Conteúdo não encontrado.');
     if (alvo.user_id === req.user.id) throw new HttpError(400, 'Você não pode votar no que escreveu.');
     await db.run('DELETE FROM review_votes WHERE target_type=? AND target_id=? AND user_id=?', [tipo, alvo.id, req.user.id]);
@@ -245,7 +260,7 @@ export function reviewRoutes(app, db, auth) {
   app.post('/api/reports', auth.required, wrap(async (req, res) => {
     const tipo = lerTipo(req.body?.alvo_tipo);
     const motivo = lerTexto(req.body?.motivo, 'O motivo', false, 300);
-    const alvo = await db.get(`SELECT * FROM ${TIPOS[tipo]} WHERE id=? AND status='active'`, [req.body?.alvo_id]);
+    const alvo = await db.get(`SELECT * FROM ${TIPOS_MOD[tipo]} WHERE id=? AND status='active'`, [req.body?.alvo_id]);
     if (!alvo) throw new HttpError(404, 'Conteúdo não encontrado.');
     const ja = await db.get('SELECT id FROM review_reports WHERE target_type=? AND target_id=? AND user_id=?', [tipo, alvo.id, req.user.id]);
     if (ja) return res.json({ ok: true, repetida: true });
@@ -260,7 +275,7 @@ export function reviewRoutes(app, db, auth) {
         WHERE d.status='open' ORDER BY d.created_at DESC LIMIT 100`);
     const itens = [];
     for (const d of linhas) {
-      const tabela = TIPOS[d.target_type];
+      const tabela = TIPOS_MOD[d.target_type];
       if (!tabela) continue;
       const campo = d.target_type === 'avaliacao' ? 'a.comment' : 'a.body';
       const alvo = await db.get(
@@ -275,21 +290,12 @@ export function reviewRoutes(app, db, auth) {
     const tipo = lerTipo(req.body?.alvo_tipo);
     const remover = req.body?.remover !== false;
     const motivo = lerTexto(req.body?.motivo, 'O motivo', false, 300);
-    const alvo = await db.get(`SELECT * FROM ${TIPOS[tipo]} WHERE id=?`, [req.body?.alvo_id]);
+    const alvo = await db.get(`SELECT * FROM ${TIPOS_MOD[tipo]} WHERE id=?`, [req.body?.alvo_id]);
     if (!alvo) throw new HttpError(404, 'Conteúdo não encontrado.');
-    if (remover && req.user.role !== 'owner') {
-      const { pedirOuFazer } = await import('./pedidos.js');
-      const r = await pedirOuFazer(db, req.user, 'remover_comentario', { alvo_tipo: tipo, alvo_id: alvo.id, motivo });
-      return res.status(202).json({ ok: true, ...r, resumo: await resumo(db) });
-    }
-    const campoMod = tipo === 'avaliacao' ? ', moderated_reason=?' : '';
-    const vals = tipo === 'avaliacao'
-      ? [remover ? 'removed' : 'active', req.user.id, motivo, now(), alvo.id]
-      : [remover ? 'removed' : 'active', req.user.id, now(), alvo.id];
-    await db.run(`UPDATE ${TIPOS[tipo]} SET status=?, moderated_by=?${campoMod}, updated_at=? WHERE id=?`, vals);
-    await db.run("UPDATE review_reports SET status='handled' WHERE target_type=? AND target_id=?", [tipo, alvo.id]);
-    await db.run('INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)',
-      [uid(), req.user.id, req.user.email, remover ? 'review.remove' : 'review.restore', alvo.id, `${tipo}: ${motivo || '(sem motivo)'}`, now()]);
-    res.json({ ok: true, resumo: await resumo(db) });
+    // Remover E restaurar passam pela fila: os dois mudam o que o público vê.
+    const { pedirOuFazer } = await import('./pedidos.js');
+    const r = await pedirOuFazer(db, req.user, remover ? 'remover_comentario' : 'restaurar_comentario',
+      { alvo_tipo: tipo, alvo_id: alvo.id, motivo });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r, resumo: await resumo(db) });
   }));
 }

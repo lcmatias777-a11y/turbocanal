@@ -1174,12 +1174,19 @@ const av = await req('/api/admin/blocks', { method: 'POST', token: tOwn, body: {
   titulo: 'Plataforma em fase de testes', texto: 'Se encontrar algum erro, fale com a gente.', estilo: 'aviso' } });
 check('o administrador principal cria um aviso', av.status === 200 && av.data.bloco.titulo === 'Plataforma em fase de testes', JSON.stringify(av.data).slice(0, 140));
 
-const card = await req('/api/admin/blocks', { method: 'POST', token: tEq, body: {
-  tipo: 'card', pagina: 'home', slot: 'lateral-direita', emoji: '🎬',
+// Admin NÃO principal não cria sozinho: o que ele faz vira pedido para o dono.
+const corpoCard = { tipo: 'card', pagina: 'home', slot: 'lateral-direita', emoji: '🎬',
   titulo: 'Canal oficial do TurboCanal', texto: 'Dicas toda semana',
-  link_url: 'https://www.youtube.com/@turbocanal', link_texto: 'Acessar' } });
-check('administrador adicionado por mim também cria (card com link)', card.status === 200 && card.data.bloco.link_url.includes('youtube.com'), JSON.stringify(card.data).slice(0, 140));
+  link_url: 'https://www.youtube.com/@turbocanal', link_texto: 'Acessar' };
+const pedidoCard = await req('/api/admin/blocks', { method: 'POST', token: tEq, body: corpoCard });
+check('administrador não principal NÃO cria card sozinho: vira pedido', pedidoCard.status === 202 && pedidoCard.data.executado === false && !!pedidoCard.data.pedido, JSON.stringify(pedidoCard.data).slice(0, 140));
+check('o pedido descreve exatamente o que ele quer criar', /criar o card "Canal oficial do TurboCanal"/.test(pedidoCard.data.frase || ''), pedidoCard.data.frase);
+check('e o card ainda NÃO existe no site', (await req('/api/blocks?pagina=home')).data.itens.filter((b) => b.slot === 'lateral-direita').length === 0);
+const okCard = await req(`/api/admin/pedidos/${pedidoCard.data.pedido}/decidir`, { method: 'POST', token: tOwn, body: { decisao: 'sim' } });
+check('depois do Sim do principal, o card é criado de verdade', okCard.status === 200 && okCard.data.status === 'aprovado', JSON.stringify(okCard.data).slice(0, 140));
+const card = { data: { bloco: (await req('/api/blocks?pagina=home')).data.itens.find((b) => b.slot === 'lateral-direita') } };
 check('o card guarda o nome escolhido e NÃO marca para mostrar o endereço', card.data.bloco.titulo === 'Canal oficial do TurboCanal' && card.data.bloco.mostrar_url === false);
+check('e guarda o link', String(card.data.bloco.link_url).includes('youtube.com'));
 
 const naPagina = await req('/api/blocks?pagina=home');
 check('o visitante recebe os dois, na posição escolhida', naPagina.data.itens.length === 2

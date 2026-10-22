@@ -3,6 +3,7 @@
 // o visitante só vê o que está publicado, e o endereço do link não aparece a não ser
 // que o administrador peça. Tudo fica no banco e sobrevive a recarregar e reiniciar.
 import { HttpError, uid, now } from './util.js';
+import { pedirOuFazer } from './pedidos.js';
 
 // Posições que EXISTEM mesmo no layout do site (não invento lugar que não dá para encaixar)
 export const SLOTS = [
@@ -52,7 +53,7 @@ function url(v, nome) {
   return u.href;
 }
 
-function lerBloco(body) {
+export function lerBloco(body) {
   const tipo = umDe(body?.tipo, TIPOS, 'Tipo');
   const b = {
     tipo,
@@ -74,13 +75,72 @@ function lerBloco(body) {
   return b;
 }
 
-const publico = (r) => ({
+export const publicoBloco = (r) => ({
   id: r.id, tipo: r.tipo, pagina: r.pagina, slot: r.slot, ordem: Number(r.ordem),
   titulo: r.titulo, texto: r.texto, emoji: r.emoji,
   imagem_url: r.imagem_url, link_url: r.link_url, link_texto: r.link_texto,
   mostrar_url: !!Number(r.mostrar_url), estilo: r.estilo, publicado: !!Number(r.publicado),
   criado_em: r.created_at, editado_em: r.updated_at
 });
+
+/* As quatro operacoes de bloco ficam em funcoes proprias porque elas tambem
+   sao executadas pela fila de aprovacao: admin nao principal PEDE, o dono faz. */
+export async function criarBloco(db, quem, b) {
+  const ultimo = await db.get('SELECT MAX(ordem) AS m FROM blocos WHERE pagina=? AND slot=?', [b.pagina, b.slot]);
+  const id = uid();
+  await db.run(
+    `INSERT INTO blocos(id,tipo,pagina,slot,ordem,titulo,texto,emoji,imagem_url,link_url,link_texto,mostrar_url,estilo,publicado,criado_por,created_at,updated_at)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, b.tipo, b.pagina, b.slot, Number(ultimo?.m ?? -1) + 1, b.titulo, b.texto, b.emoji, b.imagem_url, b.link_url, b.link_texto, b.mostrar_url, b.estilo, b.publicado, quem.id, now(), now()]
+  );
+  await db.run('INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)',
+    [uid(), quem.id, quem.email, 'bloco.criar', id, `${b.tipo} em ${b.pagina}/${b.slot}: ${b.titulo}`, now()]);
+  return publicoBloco(await db.get('SELECT * FROM blocos WHERE id=?', [id]));
+}
+
+export async function editarBloco(db, quem, id, b) {
+  const atual = await db.get('SELECT * FROM blocos WHERE id=?', [id]);
+  if (!atual) throw new HttpError(404, 'Aviso ou card não encontrado.');
+  const mudouLugar = b.pagina !== atual.pagina || b.slot !== atual.slot;
+  let ordem = Number(atual.ordem);
+  if (mudouLugar) {
+    const ultimo = await db.get('SELECT MAX(ordem) AS m FROM blocos WHERE pagina=? AND slot=?', [b.pagina, b.slot]);
+    ordem = Number(ultimo?.m ?? -1) + 1;
+  }
+  await db.run(
+    `UPDATE blocos SET tipo=?,pagina=?,slot=?,ordem=?,titulo=?,texto=?,emoji=?,imagem_url=?,link_url=?,link_texto=?,mostrar_url=?,estilo=?,publicado=?,updated_at=? WHERE id=?`,
+    [b.tipo, b.pagina, b.slot, ordem, b.titulo, b.texto, b.emoji, b.imagem_url, b.link_url, b.link_texto, b.mostrar_url, b.estilo, b.publicado, now(), atual.id]
+  );
+  await db.run('INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)',
+    [uid(), quem.id, quem.email, 'bloco.editar', atual.id, `${b.tipo} em ${b.pagina}/${b.slot}`, now()]);
+  return publicoBloco(await db.get('SELECT * FROM blocos WHERE id=?', [atual.id]));
+}
+
+export async function excluirBloco(db, quem, id) {
+  const atual = await db.get('SELECT * FROM blocos WHERE id=?', [id]);
+  if (!atual) throw new HttpError(404, 'Aviso ou card não encontrado.');
+  await db.run('DELETE FROM blocos WHERE id=?', [atual.id]);
+  await db.run('INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)',
+    [uid(), quem.id, quem.email, 'bloco.excluir', atual.id, `${atual.tipo}: ${atual.titulo}`, now()]);
+  return { ok: true };
+}
+
+export async function moverBloco(db, quem, id, direcao) {
+  const atual = await db.get('SELECT * FROM blocos WHERE id=?', [id]);
+  if (!atual) throw new HttpError(404, 'Aviso ou card não encontrado.');
+  const vizinho = await db.get(
+    direcao === 'cima'
+      ? 'SELECT * FROM blocos WHERE pagina=? AND slot=? AND ordem<? ORDER BY ordem DESC LIMIT 1'
+      : 'SELECT * FROM blocos WHERE pagina=? AND slot=? AND ordem>? ORDER BY ordem ASC LIMIT 1',
+    [atual.pagina, atual.slot, Number(atual.ordem)]
+  );
+  if (!vizinho) return { ok: true, semMudanca: true };
+  await db.run('UPDATE blocos SET ordem=?, updated_at=? WHERE id=?', [Number(vizinho.ordem), now(), atual.id]);
+  await db.run('UPDATE blocos SET ordem=?, updated_at=? WHERE id=?', [Number(atual.ordem), now(), vizinho.id]);
+  await db.run('INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)',
+    [uid(), quem.id, quem.email, 'bloco.mover', atual.id, direcao, now()]);
+  return { ok: true };
+}
 
 export function blockRoutes(app, db, auth) {
   // ---------- o que o visitante vê ----------
@@ -90,71 +150,33 @@ export function blockRoutes(app, db, auth) {
       'SELECT * FROM blocos WHERE publicado=1 AND (pagina=? OR pagina=?) ORDER BY slot, ordem, created_at',
       [pagina, 'todas']
     );
-    res.json({ itens: linhas.map(publico) });
+    res.json({ itens: linhas.map(publicoBloco) });
   }));
 
   // ---------- painel ----------
   app.get('/api/admin/blocks', ...auth.admin, wrap(async (req, res) => {
     const linhas = await db.all('SELECT * FROM blocos ORDER BY pagina, slot, ordem, created_at');
-    res.json({ itens: linhas.map(publico), slots: SLOTS, paginas: PAGINAS, estilos: ESTILOS });
+    res.json({ itens: linhas.map(publicoBloco), slots: SLOTS, paginas: PAGINAS, estilos: ESTILOS });
   }));
 
   app.post('/api/admin/blocks', ...auth.admin, wrap(async (req, res) => {
-    const b = lerBloco(req.body);
-    const ultimo = await db.get('SELECT MAX(ordem) AS m FROM blocos WHERE pagina=? AND slot=?', [b.pagina, b.slot]);
-    const id = uid();
-    await db.run(
-      `INSERT INTO blocos(id,tipo,pagina,slot,ordem,titulo,texto,emoji,imagem_url,link_url,link_texto,mostrar_url,estilo,publicado,criado_por,created_at,updated_at)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [id, b.tipo, b.pagina, b.slot, Number(ultimo?.m ?? -1) + 1, b.titulo, b.texto, b.emoji, b.imagem_url, b.link_url, b.link_texto, b.mostrar_url, b.estilo, b.publicado, req.user.id, now(), now()]
-    );
-    await db.run('INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)',
-      [uid(), req.user.id, req.user.email, 'bloco.criar', id, `${b.tipo} em ${b.pagina}/${b.slot}: ${b.titulo}`, now()]);
-    res.json({ ok: true, bloco: publico(await db.get('SELECT * FROM blocos WHERE id=?', [id])) });
+    const r = await pedirOuFazer(db, req.user, 'bloco_criar', { bloco: req.body, motivo: req.body?.motivo });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r, bloco: r.resultado?.bloco });
   }));
 
   app.put('/api/admin/blocks/:id', ...auth.admin, wrap(async (req, res) => {
-    const atual = await db.get('SELECT * FROM blocos WHERE id=?', [req.params.id]);
-    if (!atual) throw new HttpError(404, 'Aviso ou card não encontrado.');
-    const b = lerBloco({ ...publico(atual), ...req.body });
-    const mudouLugar = b.pagina !== atual.pagina || b.slot !== atual.slot;
-    let ordem = Number(atual.ordem);
-    if (mudouLugar) {
-      const ultimo = await db.get('SELECT MAX(ordem) AS m FROM blocos WHERE pagina=? AND slot=?', [b.pagina, b.slot]);
-      ordem = Number(ultimo?.m ?? -1) + 1;
-    }
-    await db.run(
-      `UPDATE blocos SET tipo=?,pagina=?,slot=?,ordem=?,titulo=?,texto=?,emoji=?,imagem_url=?,link_url=?,link_texto=?,mostrar_url=?,estilo=?,publicado=?,updated_at=? WHERE id=?`,
-      [b.tipo, b.pagina, b.slot, ordem, b.titulo, b.texto, b.emoji, b.imagem_url, b.link_url, b.link_texto, b.mostrar_url, b.estilo, b.publicado, now(), atual.id]
-    );
-    await db.run('INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)',
-      [uid(), req.user.id, req.user.email, 'bloco.editar', atual.id, `${b.tipo} em ${b.pagina}/${b.slot}`, now()]);
-    res.json({ ok: true, bloco: publico(await db.get('SELECT * FROM blocos WHERE id=?', [atual.id])) });
+    const r = await pedirOuFazer(db, req.user, 'bloco_editar', { alvo_id: req.params.id, bloco: req.body, motivo: req.body?.motivo });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r, bloco: r.resultado?.bloco });
   }));
 
   app.delete('/api/admin/blocks/:id', ...auth.admin, wrap(async (req, res) => {
-    const atual = await db.get('SELECT * FROM blocos WHERE id=?', [req.params.id]);
-    if (!atual) throw new HttpError(404, 'Aviso ou card não encontrado.');
-    await db.run('DELETE FROM blocos WHERE id=?', [atual.id]);
-    await db.run('INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)',
-      [uid(), req.user.id, req.user.email, 'bloco.excluir', atual.id, `${atual.tipo}: ${atual.titulo}`, now()]);
-    res.json({ ok: true });
+    const r = await pedirOuFazer(db, req.user, 'bloco_excluir', { alvo_id: req.params.id, motivo: req.body?.motivo });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r });
   }));
 
   // sobe ou desce um lugar dentro da mesma posição (troca a ordem com o vizinho)
   app.post('/api/admin/blocks/:id/move', ...auth.admin, wrap(async (req, res) => {
-    const direcao = umDe(req.body?.direcao, ['cima', 'baixo'], 'Direção');
-    const atual = await db.get('SELECT * FROM blocos WHERE id=?', [req.params.id]);
-    if (!atual) throw new HttpError(404, 'Aviso ou card não encontrado.');
-    const vizinho = await db.get(
-      direcao === 'cima'
-        ? 'SELECT * FROM blocos WHERE pagina=? AND slot=? AND ordem<? ORDER BY ordem DESC LIMIT 1'
-        : 'SELECT * FROM blocos WHERE pagina=? AND slot=? AND ordem>? ORDER BY ordem ASC LIMIT 1',
-      [atual.pagina, atual.slot, Number(atual.ordem)]
-    );
-    if (!vizinho) return res.json({ ok: true, semMudanca: true });
-    await db.run('UPDATE blocos SET ordem=?, updated_at=? WHERE id=?', [Number(vizinho.ordem), now(), atual.id]);
-    await db.run('UPDATE blocos SET ordem=?, updated_at=? WHERE id=?', [Number(atual.ordem), now(), vizinho.id]);
-    res.json({ ok: true });
+    const r = await pedirOuFazer(db, req.user, 'bloco_mover', { alvo_id: req.params.id, direcao: req.body?.direcao, motivo: req.body?.motivo });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r, semMudanca: r.resultado?.semMudanca });
   }));
 }

@@ -86,10 +86,10 @@ export const ACOES = {
     },
     descrever: (p) => `remover ${{ avaliacao: 'uma avaliação', comentario: 'um comentário', resposta: 'uma resposta' }[p.payload.alvo_tipo]}`,
     async executar(db, p, quem) {
-      const tabela = { avaliacao: 'reviews', comentario: 'site_comments', resposta: 'respostas' }[p.payload.alvo_tipo];
-      const alvo = await db.get(`SELECT * FROM ${tabela} WHERE id=?`, [p.alvo_id]);
-      if (!alvo) throw new HttpError(404, 'Esse conteúdo já não existe mais.');
-      await db.run(`UPDATE ${tabela} SET status='removed', updated_at=? WHERE id=?`, [now(), p.alvo_id]);
+      // Mesma escrita que a moderação direta do dono usa: sem isso o caminho da
+      // fila deixava a denúncia em aberto e não gravava quem moderou.
+      const { aplicarModeracao } = await import('./reviews.js');
+      await aplicarModeracao(db, quem, p.payload.alvo_tipo, p.alvo_id, true, p.payload.motivo);
       await audit(db, quem, 'moderacao.remover', p.alvo_id, `${p.payload.alvo_tipo} · ${p.payload.motivo}`);
       return { removido: true };
     }
@@ -154,6 +154,202 @@ export const ACOES = {
       const conv = await criarGrupo(db, p.pedido_por, p.payload.nome, p.payload.membros);
       await audit(db, quem, 'chat.grupo_criado', conv.id, p.payload.nome);
       return { conversa: conv.id };
+    }
+  },
+
+  // ---------- Dinheiro e preços ----------
+
+  confirmar_pagamento: {
+    rotulo: 'Confirmar pagamento à mão',
+    async validar(db, dados) {
+      const p = await db.get('SELECT * FROM payments WHERE id=?', [dados.alvo_id]);
+      if (!p) throw new HttpError(404, 'Pagamento não encontrado.');
+      if (p.status === 'approved') throw new HttpError(409, 'Esse pagamento já foi aprovado.');
+      const note = txt(dados.note, 300);
+      if (!note) throw new HttpError(400, 'Descreva como você conferiu o recebimento (ex.: comprovante Pix, extrato).');
+      const dono = await db.get('SELECT email FROM users WHERE id=?', [p.user_id]);
+      return { pagamento: p.id, note, valor: Number(p.amount_cents), plano: p.plan_id, email: dono?.email || '' };
+    },
+    descrever: (p) => `confirmar à mão o pagamento de R$ ${(Number(p.payload.valor) / 100).toFixed(2).replace('.', ',')} do plano ${p.payload.plano} de ${p.payload.email} (conferiu por: ${p.payload.note})`,
+    async executar(db, p, quem) {
+      const pag = await db.get('SELECT * FROM payments WHERE id=?', [p.payload.pagamento]);
+      if (!pag) throw new HttpError(404, 'Pagamento não encontrado.');
+      if (pag.status === 'approved') return { ja_aprovado: true };
+      const { activatePayment } = await import('./payments.js');
+      const upd = await activatePayment(db, pag, quem, `confirmação manual do administrador: ${p.payload.note}`);
+      return { status: upd.status };
+    }
+  },
+
+  criar_plano: {
+    rotulo: 'Criar plano',
+    async validar(db, dados) {
+      const id = txt(dados.id, 30).toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      if (!id) throw new HttpError(400, 'ID de plano inválido.');
+      if (await db.get('SELECT 1 AS x FROM plans WHERE id=?', [id])) throw new HttpError(409, 'Já existe um plano com esse ID.');
+      const name = txt(dados.name, 60);
+      if (!name) throw new HttpError(400, 'Dê um nome ao plano.');
+      const price = parseInt(dados.price_cents, 10);
+      const credits = parseInt(dados.monthly_credits, 10);
+      if (!Number.isInteger(price) || price < 0) throw new HttpError(400, 'Preço inválido.');
+      if (!Number.isInteger(credits) || credits <= 0) throw new HttpError(400, 'Créditos mensais inválidos.');
+      return { id, name, price, credits, sort: parseInt(dados.sort, 10) || 99, description: txt(dados.description, 400) };
+    },
+    descrever: (p) => `criar o plano "${p.payload.name}" a R$ ${(p.payload.price / 100).toFixed(2).replace('.', ',')} com ${n(p.payload.credits)} créditos por mês`,
+    async executar(db, p, quem) {
+      const v = p.payload;
+      await db.run('INSERT INTO plans(id,name,price_cents,monthly_credits,sort,active,description) VALUES(?,?,?,?,?,?,?)',
+        [v.id, v.name, v.price, v.credits, v.sort, 1, v.description]);
+      await audit(db, quem, 'admin.plan_create', v.id, `${v.name} R$${(v.price / 100).toFixed(2)} ${v.credits}cr`);
+      return { plano: v.id };
+    }
+  },
+
+  editar_plano: {
+    rotulo: 'Editar plano',
+    async validar(db, dados) {
+      const plan = await db.get('SELECT * FROM plans WHERE id=?', [dados.alvo_id]);
+      if (!plan) throw new HttpError(404, 'Plano não encontrado.');
+      const name = dados.name !== undefined ? txt(dados.name, 60) : plan.name;
+      const price = dados.price_cents !== undefined ? parseInt(dados.price_cents, 10) : Number(plan.price_cents);
+      const credits = dados.monthly_credits !== undefined ? parseInt(dados.monthly_credits, 10) : Number(plan.monthly_credits);
+      const active = dados.active !== undefined ? (dados.active ? 1 : 0) : Number(plan.active);
+      const sort = dados.sort !== undefined ? parseInt(dados.sort, 10) || 0 : Number(plan.sort);
+      const description = dados.description !== undefined ? txt(dados.description, 400) : plan.description;
+      if (!name) throw new HttpError(400, 'O plano precisa de um nome.');
+      if (!Number.isInteger(price) || price < 0) throw new HttpError(400, 'Preço inválido.');
+      if (!Number.isInteger(credits) || credits <= 0) throw new HttpError(400, 'Créditos mensais inválidos.');
+      if (plan.id === 'free' && price > 0) throw new HttpError(400, 'O plano Free precisa continuar com preço zero.');
+      return { plano: plan.id, name, price, credits, active, sort, description, antes: { name: plan.name, price: Number(plan.price_cents), credits: Number(plan.monthly_credits), active: Number(plan.active) } };
+    },
+    descrever: (p) => {
+      const v = p.payload, a = v.antes, m = [];
+      if (a.name !== v.name) m.push(`nome "${a.name}" → "${v.name}"`);
+      if (a.price !== v.price) m.push(`preço R$ ${(a.price / 100).toFixed(2).replace('.', ',')} → R$ ${(v.price / 100).toFixed(2).replace('.', ',')}`);
+      if (a.credits !== v.credits) m.push(`créditos mensais ${n(a.credits)} → ${n(v.credits)}`);
+      if (a.active !== v.active) m.push(v.active ? 'reativar o plano' : 'desativar o plano');
+      return `mudar o plano ${v.plano}: ${m.length ? m.join(', ') : 'ajustes de ordem ou descrição'}`;
+    },
+    async executar(db, p, quem) {
+      const v = p.payload;
+      await db.run('UPDATE plans SET name=?,price_cents=?,monthly_credits=?,active=?,sort=?,description=? WHERE id=?',
+        [v.name, v.price, v.credits, v.active, v.sort, v.description, v.plano]);
+      await audit(db, quem, 'admin.plan_update', v.plano, `R$${(v.price / 100).toFixed(2)} ${v.credits}cr ativo=${v.active}`);
+      return { plano: v.plano };
+    }
+  },
+
+  custo_ferramenta: {
+    rotulo: 'Mudar o preço de uma ferramenta',
+    async validar(db, dados) {
+      const row = await db.get('SELECT * FROM tool_costs WHERE tool=?', [dados.alvo_id]);
+      if (!row) throw new HttpError(404, 'Ferramenta não encontrada.');
+      const cost = parseInt(dados.cost, 10);
+      if (!Number.isInteger(cost) || cost < 0 || cost > 100000) throw new HttpError(400, 'Custo inválido.');
+      return { tool: row.tool, rotulo: row.label || row.tool, cost, antes: Number(row.cost) };
+    },
+    descrever: (p) => `mudar o preço de "${p.payload.rotulo}" de ${n(p.payload.antes)} para ${n(p.payload.cost)} créditos`,
+    async executar(db, p, quem) {
+      await db.run('UPDATE tool_costs SET cost=? WHERE tool=?', [p.payload.cost, p.payload.tool]);
+      await audit(db, quem, 'admin.tool_cost', p.payload.tool, String(p.payload.cost));
+      return { tool: p.payload.tool, cost: p.payload.cost };
+    }
+  },
+
+  plano_do_usuario: {
+    rotulo: 'Trocar o plano de um usuário',
+    async validar(db, dados) {
+      const plano = await db.get('SELECT id,name,monthly_credits FROM plans WHERE id=?', [txt(dados.plan_id, 40)]);
+      if (!plano) throw new HttpError(404, 'Plano não encontrado.');
+      const alvo = await usuario(db, dados.alvo_user);
+      if (alvo.plan_id === plano.id) throw new HttpError(409, 'Essa conta já está nesse plano.');
+      return { plan_id: plano.id, plano: plano.name, creditos: Number(plano.monthly_credits), antes: alvo.plan_id };
+    },
+    descrever: (p, alvo) => `trocar o plano de ${alvo} de ${p.payload.antes} para ${p.payload.plano} (${n(p.payload.creditos)} créditos por mês)`,
+    async executar(db, p, quem) {
+      await db.run('UPDATE users SET plan_id=? WHERE id=?', [p.payload.plan_id, p.alvo_user]);
+      const alvo = await db.get('SELECT email FROM users WHERE id=?', [p.alvo_user]);
+      await audit(db, quem, 'admin.user_plan_set', alvo?.email || p.alvo_user, p.payload.plan_id);
+      return { plan_id: p.payload.plan_id };
+    }
+  },
+
+  // ---------- Avisos e cards (o que aparece no site público) ----------
+
+  bloco_criar: {
+    rotulo: 'Criar aviso ou card',
+    async validar(db, dados) {
+      const { lerBloco } = await import('./blocks.js');
+      return { bloco: lerBloco(dados.bloco || {}) };
+    },
+    descrever: (p) => `criar o ${p.payload.bloco.tipo} "${p.payload.bloco.titulo || '(sem título)'}" em ${p.payload.bloco.pagina}/${p.payload.bloco.slot}`,
+    async executar(db, p, quem) {
+      const { criarBloco } = await import('./blocks.js');
+      return { bloco: await criarBloco(db, quem, p.payload.bloco) };
+    }
+  },
+
+  bloco_editar: {
+    rotulo: 'Editar aviso ou card',
+    async validar(db, dados) {
+      const atual = await db.get('SELECT * FROM blocos WHERE id=?', [dados.alvo_id]);
+      if (!atual) throw new HttpError(404, 'Aviso ou card não encontrado.');
+      const { lerBloco, publicoBloco } = await import('./blocks.js');
+      return { id: atual.id, antes: atual.titulo, bloco: lerBloco({ ...publicoBloco(atual), ...(dados.bloco || {}) }) };
+    },
+    descrever: (p) => `editar o ${p.payload.bloco.tipo} "${p.payload.antes || '(sem título)'}" (fica em ${p.payload.bloco.pagina}/${p.payload.bloco.slot})`,
+    async executar(db, p, quem) {
+      const { editarBloco } = await import('./blocks.js');
+      return { bloco: await editarBloco(db, quem, p.payload.id, p.payload.bloco) };
+    }
+  },
+
+  bloco_excluir: {
+    rotulo: 'Excluir aviso ou card',
+    async validar(db, dados) {
+      const atual = await db.get('SELECT * FROM blocos WHERE id=?', [dados.alvo_id]);
+      if (!atual) throw new HttpError(404, 'Aviso ou card não encontrado.');
+      return { id: atual.id, tipo: atual.tipo, titulo: atual.titulo, onde: `${atual.pagina}/${atual.slot}` };
+    },
+    descrever: (p) => `excluir o ${p.payload.tipo} "${p.payload.titulo || '(sem título)'}" de ${p.payload.onde}`,
+    async executar(db, p, quem) {
+      const { excluirBloco } = await import('./blocks.js');
+      await excluirBloco(db, quem, p.payload.id);
+      return { excluido: true };
+    }
+  },
+
+  bloco_mover: {
+    rotulo: 'Mudar a ordem de um aviso ou card',
+    async validar(db, dados) {
+      const atual = await db.get('SELECT * FROM blocos WHERE id=?', [dados.alvo_id]);
+      if (!atual) throw new HttpError(404, 'Aviso ou card não encontrado.');
+      const direcao = txt(dados.direcao, 10);
+      if (!['cima', 'baixo'].includes(direcao)) throw new HttpError(400, 'Direção inválida.');
+      return { id: atual.id, direcao, titulo: atual.titulo, onde: `${atual.pagina}/${atual.slot}` };
+    },
+    descrever: (p) => `mover "${p.payload.titulo || '(sem título)'}" para ${p.payload.direcao} em ${p.payload.onde}`,
+    async executar(db, p, quem) {
+      const { moverBloco } = await import('./blocks.js');
+      return await moverBloco(db, quem, p.payload.id, p.payload.direcao);
+    }
+  },
+
+  restaurar_comentario: {
+    rotulo: 'Restaurar comentário removido',
+    async validar(db, dados) {
+      const { TIPOS_MOD } = await import('./reviews.js');
+      const tipo = String(dados.alvo_tipo || '');
+      if (!TIPOS_MOD[tipo]) throw new HttpError(400, 'Tipo de conteúdo inválido.');
+      const alvo = await db.get(`SELECT * FROM ${TIPOS_MOD[tipo]} WHERE id=?`, [dados.alvo_id]);
+      if (!alvo) throw new HttpError(404, 'Conteúdo não encontrado.');
+      return { alvo_tipo: tipo, alvo_id: alvo.id, motivo: txt(dados.motivo, 300) };
+    },
+    descrever: (p) => `restaurar um ${p.payload.alvo_tipo} que estava removido`,
+    async executar(db, p, quem) {
+      const { aplicarModeracao } = await import('./reviews.js');
+      await aplicarModeracao(db, quem, p.payload.alvo_tipo, p.payload.alvo_id, false, p.payload.motivo);
+      return { restaurado: true };
     }
   }
 };
