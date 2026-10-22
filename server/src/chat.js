@@ -209,6 +209,14 @@ export function chatRoutes(app, db, auth) {
     const dados = JSON.stringify(corpo).slice(0, 20000);
     await db.run('INSERT INTO sinais(id,conversa_id,de_user,para_user,tipo,dados,created_at) VALUES(?,?,?,?,?,?,?)',
       [uid(), req.params.id, req.user.id, para, tipo, dados, now()]);
+    // Só "chamando" vira aviso no aparelho: oferta, resposta e candidatos de
+    // rede são conversa entre navegadores, não interessam a ninguém.
+    if (tipo === 'chamando') {
+      try {
+        const { avisarChamada } = await import('./push.js');
+        await avisarChamada(db, para, req.user.name || req.user.email, req.params.id);
+      } catch (e) { console.error('[push] aviso de chamada:', e.message); }
+    }
     // limpeza: sinal velho não serve para nada
     await db.run('DELETE FROM sinais WHERE created_at < ?', [new Date(Date.now() - VALIDADE_SINAL * 1000).toISOString()]);
     res.json({ ok: true });

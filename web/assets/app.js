@@ -1740,6 +1740,84 @@ async function toquePedirPermissao() {
   try { return await Notification.requestPermission(); } catch { return 'denied'; }
 }
 
+/* ---------- Aviso de chamada com o SITE FECHADO (Web Push) ----------
+   O Service Worker fica registrado no navegador e recebe o aviso mesmo sem
+   nenhuma aba aberta. Limite honesto: com o navegador inteiro fechado no
+   computador não chega; no Android chega, e no iPhone só com o site na tela
+   de início. */
+
+const push = { pronto: false, inscricao: null };
+
+function pushSuportado() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+const base64ParaBytes = (b64) => {
+  const limpo = (b64 + '='.repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(limpo);
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+};
+
+/** Registra o Service Worker e inscreve este aparelho. Devolve o que
+ *  aconteceu, em palavras, para a tela poder dizer a verdade. */
+async function pushLigar() {
+  if (!pushSuportado()) return { ok: false, motivo: 'Este navegador não tem aviso com o site fechado.' };
+  if (Notification.permission !== 'granted') {
+    const r = await toquePedirPermissao();
+    if (r !== 'granted') return { ok: false, motivo: 'Sem a autorização de notificação, o aviso com o site fechado não existe.' };
+  }
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    const { chave } = await api('/push/chave');
+    if (!chave) return { ok: false, motivo: 'O servidor ainda não tem a chave de avisos.' };
+    let sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      // Chave trocada no servidor invalida a inscrição antiga: refaz.
+      const atual = new Uint8Array(sub.options?.applicationServerKey || []);
+      const nova = base64ParaBytes(chave);
+      if (atual.length !== nova.length || !atual.every((v, i) => v === nova[i])) { await sub.unsubscribe(); sub = null; }
+    }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64ParaBytes(chave) });
+    await api('/push/assinar', { method: 'POST', body: { inscricao: sub.toJSON() } });
+    push.pronto = true; push.inscricao = sub;
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, motivo: 'Não deu para ligar o aviso neste aparelho: ' + (e.message || e) };
+  }
+}
+
+async function pushDesligar() {
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = await reg?.pushManager.getSubscription();
+    if (sub) { await api('/push/assinar', { method: 'DELETE', body: { endpoint: sub.endpoint } }); await sub.unsubscribe(); }
+  } catch {}
+  push.pronto = false; push.inscricao = null;
+}
+
+/** Este aparelho já está inscrito? Pergunta ao navegador, não ao servidor:
+ *  é o navegador que manda aqui. */
+async function pushEstado() {
+  if (!pushSuportado()) return 'sem-suporte';
+  if (Notification.permission === 'denied') return 'bloqueado';
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = await reg?.pushManager.getSubscription();
+    return sub ? 'ligado' : 'desligado';
+  } catch { return 'desligado'; }
+}
+
+// O Service Worker avisa quando a pessoa clicou na notificação
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (ev) => {
+    if (ev.data?.tipo === 'abrir') {
+      const l = String(ev.data.link || '').replace(/^.*#/, '#');
+      if (l.startsWith('#')) location.hash = l.slice(1);
+    }
+  });
+}
+
 function ligPainel() {
   let el = $('#ligCaixa');
   if (!el) {
@@ -2598,14 +2676,21 @@ const adminTabs = {
 
   // ---------- Chats entre administradores ----------
   async chats(el) {
+    const estPush = await pushEstado();
     const perm = toqueEstado();
-    const avisoPerm = perm === 'granted'
-      ? '<div class="ch-perm ok">🔔 Avisos de chamada ligados. Com a aba aberta em segundo plano, você recebe notificação do sistema, toque e o título piscando.</div>'
-      : perm === 'denied'
-        ? '<div class="ch-perm no">🔕 Você bloqueou as notificações para este site no navegador. O toque e o título piscando continuam funcionando; a notificação do sistema só volta se você liberar nas permissões do site, no cadeado da barra de endereço.</div>'
-        : perm === 'sem-suporte'
-          ? '<div class="ch-perm no">Este navegador não tem notificações do sistema. O toque e o título piscando continuam funcionando.</div>'
-          : '<div class="ch-perm"><span>Quer receber chamada com o site em segundo plano? Precisa autorizar a notificação uma vez. Não custa nada e não manda nada para ninguém.</span><button class="btn sm" id="chPerm">🔔 Autorizar avisos</button></div>';
+    const linha = (classe, texto, botoes = '') => `<div class="ch-perm ${classe}"><span>${texto}</span><span class="ch-perm-bts">${botoes}</span></div>`;
+    let avisoPerm;
+    if (estPush === 'ligado') {
+      avisoPerm = linha('ok', '🔔 <b>Avisos ligados neste aparelho.</b> Você recebe chamada com o site em segundo plano e também com ele fechado (o navegador precisa estar rodando).',
+        '<button class="btn sm secondary" id="chTestePush">Testar agora</button><button class="btn sm ghost" id="chPushOff">Desligar</button>');
+    } else if (estPush === 'bloqueado' || perm === 'denied') {
+      avisoPerm = linha('no', '🔕 Você bloqueou as notificações deste site no navegador. O toque e o título piscando continuam funcionando com a aba aberta. Para voltar, libere no cadeado da barra de endereço.');
+    } else if (estPush === 'sem-suporte') {
+      avisoPerm = linha('no', 'Este navegador não recebe aviso com o site fechado. Com a aba aberta, o toque e o título piscando continuam funcionando.');
+    } else {
+      avisoPerm = linha('', 'Quer receber chamada mesmo com o site fechado? Precisa autorizar uma vez. Não custa nada: o aviso vai pelo serviço do próprio navegador.',
+        '<button class="btn sm" id="chPerm">🔔 Ligar avisos</button>');
+    }
     el.innerHTML = avisoPerm + `<div class="ch-tela">
         <aside class="ch-lado"><div class="ch-topo"><b>Conversas</b><button class="btn sm ghost" id="chNovo">+ grupo</button></div>
           <div id="chLista"><span class="spin"></span></div></aside>
@@ -2613,10 +2698,24 @@ const adminTabs = {
       </div>`;
     const bp = $('#chPerm');
     if (bp) bp.onclick = async () => {
-      const r = await toquePedirPermissao();
-      if (r === 'granted') toqueNotificar('Teste do TurboCanal');
+      bp.disabled = true; bp.textContent = 'Ligando…';
+      const r = await pushLigar();
+      if (!r.ok) alert(r.motivo);
       adminTabs.chats(el);
     };
+    const bt = $('#chTestePush');
+    if (bt) bt.onclick = async () => {
+      bt.disabled = true; bt.textContent = 'Mandando…';
+      try {
+        const r = await api('/push/testar', { method: 'POST' });
+        alert(r.enviados
+          ? `Mandei para ${r.enviados} aparelho(s). Se o aviso não aparecer em alguns segundos, o navegador não entregou — e aí eu preciso saber.`
+          : 'Nenhum aparelho inscrito respondeu. Ligue os avisos de novo neste aparelho.');
+      } catch (e) { alert(e.message); }
+      bt.disabled = false; bt.textContent = 'Testar agora';
+    };
+    const bo = $('#chPushOff');
+    if (bo) bo.onclick = async () => { await pushDesligar(); adminTabs.chats(el); };
     await chPintarLista();
     $('#chNovo').onclick = chNovoGrupo;
     if (ch.aberta) await chAbrir(ch.aberta);
@@ -2810,14 +2909,17 @@ const adminTabs = {
   },
 
   async usuarios(el) {
+    // Banir e encerrar sessão só valem para conta comum. Administrador perde
+    // acesso tirando o cargo, não levando banimento de outro administrador.
+    const comum = (u) => u.role === 'user';
     const load = async (q = '') => {
       const r = await api('/admin/users' + (q ? '?q=' + encodeURIComponent(q) : ''));
       $('#ulist').innerHTML = `<table><tr><th>E-mail</th><th>Nome</th><th>Papel</th><th>Plano</th><th>Créditos</th><th>Ações</th></tr>
         ${r.items.map((u) => `<tr><td>${esc(u.email)}</td><td>${esc(u.name || '')}</td><td>${esc(u.role)}</td><td>${esc(u.plan_id)}</td>
           <td>${u.role === 'owner' ? '∞' : fmt(u.credits)}</td>
           <td class="small"><button class="btn sm ghost" data-cr="${u.id}">± créditos</button>
-            ${state.user?.role === 'owner' ? `<button class="btn sm ghost" data-sess="${u.id}" title="Derruba todos os acessos desta conta agora">🔒 encerrar sessões</button>` : ''}
-            <button class="btn sm ghost" data-ban="${u.id}" data-banido="${u.banido ? 1 : 0}">${u.banido ? '♻️ tirar banimento' : '🚫 banir'}</button></td></tr>`).join('')}</table>`;
+            ${comum(u) && state.user?.role === 'owner' ? `<button class="btn sm ghost" data-sess="${u.id}" title="Derruba todos os acessos desta conta agora">🔒 encerrar sessões</button>` : ''}
+            ${comum(u) ? `<button class="btn sm ghost" data-ban="${u.id}" data-banido="${u.banido ? 1 : 0}">${u.banido ? '♻️ tirar banimento' : '🚫 banir'}</button>` : '<span class="muted small">cargo gerenciado em Administradores</span>'}</td></tr>`).join('')}</table>`;
       for (const b of el.querySelectorAll('[data-sess]')) b.onclick = async () => {
         if (!confirm('Derrubar todos os acessos desta conta agora? A pessoa precisa entrar de novo com o Google.')) return;
         try { await api(`/admin/users/${b.dataset.sess}/encerrar-sessoes`, { method: 'POST' }); alert('Acessos encerrados.'); }

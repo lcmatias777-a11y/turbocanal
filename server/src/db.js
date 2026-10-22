@@ -295,6 +295,20 @@ CREATE TABLE IF NOT EXISTS experimentos (
 );
 CREATE INDEX IF NOT EXISTS idx_exp_user ON experimentos(user_id, status, revisar_em);
 
+-- Inscricoes de aviso com o site fechado (Web Push). Uma por aparelho.
+CREATE TABLE IF NOT EXISTS push_subs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  agente TEXT NOT NULL DEFAULT '',
+  criado_em TEXT NOT NULL,
+  atualizado_em TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_push_endpoint ON push_subs(endpoint);
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_subs(user_id);
+
 CREATE TABLE IF NOT EXISTS cache_resposta (
   chave TEXT PRIMARY KEY,
   dados TEXT NOT NULL,

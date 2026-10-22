@@ -18,6 +18,7 @@ import { xrayRoutes } from './xray.js';
 import { proximaRoutes } from './proxima.js';
 import { experimentoRoutes } from './experimentos.js';
 import { estatisticaRoutes } from './estatisticas.js';
+import { pushRoutes } from './push.js';
 import { blockRoutes } from './blocks.js';
 import { geminiKey } from './gemini.js';
 
@@ -58,6 +59,7 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
   proximaRoutes(app, db, auth);
   experimentoRoutes(app, db, auth);
   estatisticaRoutes(app, db, auth);
+  pushRoutes(app, db, auth);
 
   app.get('/api/plans', async (req, res, next) => {
     try {

@@ -191,6 +191,34 @@ check('depois do Sim ela é removida', (await db.get('SELECT status FROM reviews
 await pede('restaurar avaliação TAMBÉM vira pedido', '/api/admin/moderate', { body: { alvo_tipo: 'avaliacao', alvo_id: rev, remover: false, motivo: 'voltar' } });
 check('ela continua removida antes do Sim', (await db.get('SELECT status FROM reviews WHERE id=?', [rev])).status === 'removed');
 
+console.log('\n== Banir e encerrar sessão só valem para conta comum ==');
+const outroAdm = await criar('adm2@example.com', 'admin');
+const banAdmin = await req(`/api/admin/users/${outroAdm.id}/banir`, { method: 'POST', token: adm.token, body: { motivo: 'x' } });
+check('admin não consegue nem PEDIR para banir outro admin', banAdmin.status === 403, `(${banAdmin.status}) ${JSON.stringify(banAdmin.data).slice(0, 90)}`);
+const banDono = await req(`/api/admin/users/${dono.id}/banir`, { method: 'POST', token: adm.token, body: { motivo: 'x' } });
+check('nem o administrador principal', banDono.status === 403, String(banDono.status));
+const banSi = await req(`/api/admin/users/${adm.id}/banir`, { method: 'POST', token: adm.token, body: { motivo: 'x' } });
+check('nem a própria conta dele', banSi.status === 403, String(banSi.status));
+const donoBanAdmin = await req(`/api/admin/users/${outroAdm.id}/banir`, { method: 'POST', token: dono.token, body: { motivo: 'x' } });
+check('nem o DONO bani um administrador (tira o cargo, não bani)', donoBanAdmin.status === 403, String(donoBanAdmin.status));
+check('e nenhum deles ficou banido', Number((await db.get('SELECT banido FROM users WHERE id=?', [outroAdm.id])).banido) === 0);
+
+const sessAdmin = await req(`/api/admin/users/${outroAdm.id}/encerrar-sessoes`, { method: 'POST', token: dono.token });
+check('encerrar sessões de um administrador é recusado', sessAdmin.status === 403, String(sessAdmin.status));
+const sessSi = await req(`/api/admin/users/${dono.id}/encerrar-sessoes`, { method: 'POST', token: dono.token });
+check('o dono não encerra as próprias sessões por aqui', sessSi.status === 400, String(sessSi.status));
+// Conta descartável: encerrar a sessão invalida o token, e usar a mesma conta
+// depois faria os testes seguintes falharem por 401 em vez de 403.
+const cobaia = await criar('cobaia@example.com');
+const vComum = Number((await db.get('SELECT sessao_v FROM users WHERE id=?', [cobaia.id])).sessao_v);
+const sessComum = await req(`/api/admin/users/${cobaia.id}/encerrar-sessoes`, { method: 'POST', token: dono.token });
+check('mas em conta comum funciona', sessComum.status === 200, String(sessComum.status));
+check('e a versão de sessão subiu de verdade', Number((await db.get('SELECT sessao_v FROM users WHERE id=?', [cobaia.id])).sessao_v) === vComum + 1);
+const tokenMorto = await req('/api/me', { token: cobaia.token });
+check('o acesso antigo daquela conta para de valer na hora', tokenMorto.status === 401, String(tokenMorto.status));
+const banComum = await req(`/api/admin/users/${cobaia.id}/banir`, { method: 'POST', token: dono.token, body: { motivo: 'teste' } });
+check('banir conta comum continua funcionando', banComum.status === 200 && Number((await db.get('SELECT banido FROM users WHERE id=?', [cobaia.id])).banido) === 1, String(banComum.status));
+
 console.log('\n== O que nem com autorização o admin comum faz ==');
 for (const [rota, porque] of SO_DONO) {
   const [m, caminho] = rota.split(' ');

@@ -7,7 +7,7 @@ import { googleConfigured } from './auth.js';
 import { testGemini } from './gemini.js';
 
 const SETTING_KEYS = ['site_name', 'free_monthly_topup', 'yt_api_key', 'gemini_api_key', 'mp_access_token', 'payments_enabled', 'pix_key_value', 'pix_key_type', 'pix_key_confirmed'];
-const SECRET_KEYS = new Set(['yt_api_key', 'gemini_api_key', 'mp_access_token']);
+const SECRET_KEYS = new Set(['yt_api_key', 'gemini_api_key', 'mp_access_token', 'vapid_private']);
 const PIX_TYPES = new Set(['phone', 'cpf', 'cnpj', 'email', 'random']);
 
 function maskSecret(v) {
@@ -276,8 +276,12 @@ export function adminRoutes(app, db, auth) {
   // Derrubar as sessões de outra conta (só o administrador principal).
   // Serve para cortar o acesso de uma conta de administrador invadida.
   app.post('/api/admin/users/:id/encerrar-sessoes', ...auth.owner, wrap(async (req, res) => {
-    const alvo = await db.get('SELECT id,email FROM users WHERE id=?', [req.params.id]);
+    const alvo = await db.get('SELECT id,email,role FROM users WHERE id=?', [req.params.id]);
     if (!alvo) throw new HttpError(404, 'Usuário não encontrado.');
+    // Nem a própria conta, nem a de outro administrador: derrubar o acesso de
+    // quem administra é briga entre administradores, não moderação.
+    if (alvo.id === req.user.id) throw new HttpError(400, 'Para sair das suas próprias sessões, use Sair em cada aparelho.');
+    if (alvo.role !== 'user') throw new HttpError(403, 'Não dá para encerrar as sessões de um administrador. Tire o cargo dele na aba Administradores, que isso já derruba o acesso ao painel.');
     await db.run('UPDATE users SET sessao_v=sessao_v+1 WHERE id=?', [alvo.id]);
     await audit(db, req.user, 'auth.sessoes_encerradas', alvo.id, `pelo administrador principal · ${alvo.email}`);
     const { notificar } = await import('./notify.js');

@@ -320,3 +320,5 @@ a.bl-card:hover { border-color: var(--accent2); text-decoration: none; }
   background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 10px; font-size: .9rem; }
 .ch-perm.ok { border-color: var(--ok); }
 .ch-perm.no { border-color: var(--line); color: var(--muted); }
+
+.ch-perm-bts { display: flex; gap: 8px; flex-wrap: wrap; }

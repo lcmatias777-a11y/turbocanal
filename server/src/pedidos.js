@@ -47,7 +47,9 @@ export const ACOES = {
     rotulo: 'Banir conta',
     async validar(db, dados) {
       const alvo = await usuario(db, dados.alvo_user);
-      if (alvo.role === 'owner') throw new HttpError(403, 'O administrador principal não pode ser banido.');
+      // Banir só vale para conta comum. Administrador se tira do cargo pela aba
+      // Administradores; banir um deles seria um admin derrubando o outro.
+      if (alvo.role !== 'user') throw new HttpError(403, 'Conta de administrador não é banida. Para tirar o acesso, remova o cargo na aba Administradores.');
       if (alvo.banido) throw new HttpError(409, 'Essa conta já está banida.');
       return { motivo: txt(dados.motivo) || 'Não informado' };
     },
@@ -63,6 +65,7 @@ export const ACOES = {
     rotulo: 'Tirar o banimento',
     async validar(db, dados) {
       const alvo = await usuario(db, dados.alvo_user);
+      if (alvo.role !== 'user') throw new HttpError(403, 'Conta de administrador não entra nessa lista.');
       if (!alvo.banido) throw new HttpError(409, 'Essa conta não está banida.');
       return { motivo: txt(dados.motivo) };
     },
