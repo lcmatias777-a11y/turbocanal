@@ -338,6 +338,62 @@ export const ACOES = {
     }
   },
 
+  criar_postagem: {
+    rotulo: 'Publicar postagem',
+    async validar(db, dados) {
+      const { lerArea } = await import('./postagens.js');
+      return { area: lerArea(dados.area), titulo: txt(dados.titulo, 140), texto: txt(dados.texto, 6000), imagem: dados.imagem || null };
+    },
+    descrever: (p) => `publicar "${p.payload.titulo}" na área ${p.payload.area === 'admin' ? 'dos administradores' : 'pública'}${p.payload.imagem ? ' (com imagem)' : ''}`,
+    async executar(db, p, quem) {
+      const { criarPostagem } = await import('./postagens.js');
+      return criarPostagem(db, quem, p.payload);
+    }
+  },
+
+  editar_postagem: {
+    rotulo: 'Editar postagem',
+    async validar(db, dados) {
+      const atual = await db.get('SELECT id, titulo FROM postagens WHERE id=? AND status=?', [dados.alvo_id, 'ativa']);
+      if (!atual) throw new HttpError(404, 'Postagem não encontrada.');
+      return { id: atual.id, antes: atual.titulo, titulo: txt(dados.titulo, 140), texto: txt(dados.texto, 6000), imagem: dados.imagem || null, trocarImagem: !!dados.trocarImagem };
+    },
+    descrever: (p) => `editar a postagem "${p.payload.antes}"`,
+    async executar(db, p, quem) {
+      const { editarPostagem } = await import('./postagens.js');
+      return editarPostagem(db, quem, p.payload.id, p.payload);
+    }
+  },
+
+  excluir_postagem: {
+    rotulo: 'Excluir postagem',
+    async validar(db, dados) {
+      const atual = await db.get('SELECT id, titulo, area FROM postagens WHERE id=? AND status=?', [dados.alvo_id, 'ativa']);
+      if (!atual) throw new HttpError(404, 'Postagem não encontrada.');
+      return { id: atual.id, titulo: atual.titulo, area: atual.area, motivo: txt(dados.motivo) };
+    },
+    descrever: (p) => `excluir a postagem "${p.payload.titulo}"`,
+    async executar(db, p, quem) {
+      const { excluirPostagem } = await import('./postagens.js');
+      return excluirPostagem(db, quem, p.payload.id, p.payload.motivo);
+    }
+  },
+
+  apagar_comentario_postagem: {
+    rotulo: 'Apagar comentário de postagem',
+    async validar(db, dados) {
+      const c = await db.get('SELECT id, user_id FROM post_comentarios WHERE id=? AND status=?', [dados.alvo_id, 'ativo']);
+      if (!c) throw new HttpError(404, 'Comentário não encontrado.');
+      const autor = await db.get('SELECT email FROM users WHERE id=?', [c.user_id]);
+      return { id: c.id, autor: autor?.email || '', motivo: txt(dados.motivo) || 'Moderação' };
+    },
+    descrever: (p) => `apagar um comentário de ${p.payload.autor} numa postagem`,
+    async executar(db, p, quem) {
+      const { apagarComentarioPostagem } = await import('./postagens.js');
+      return apagarComentarioPostagem(db, quem, p.payload.id, p.payload.motivo);
+    }
+  },
+
   apagar_mensagem_publica: {
     rotulo: 'Apagar mensagem do bate-papo',
     async validar(db, dados) {

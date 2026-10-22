@@ -296,6 +296,58 @@ CREATE TABLE IF NOT EXISTS experimentos (
 );
 CREATE INDEX IF NOT EXISTS idx_exp_user ON experimentos(user_id, status, revisar_em);
 
+-- Postagens: area publica (todo mundo) e area de administradores.
+CREATE TABLE IF NOT EXISTS postagens (
+  id TEXT PRIMARY KEY,
+  autor_id TEXT NOT NULL,
+  area TEXT NOT NULL DEFAULT 'publica',
+  titulo TEXT NOT NULL,
+  texto TEXT NOT NULL,
+  imagem TEXT,
+  status TEXT NOT NULL DEFAULT 'ativa',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_post_area ON postagens(area, status, created_at);
+
+CREATE TABLE IF NOT EXISTS post_reacoes (
+  post_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  valor INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (post_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS post_comentarios (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  texto TEXT NOT NULL,
+  imagem TEXT,
+  status TEXT NOT NULL DEFAULT 'ativo',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pc_post ON post_comentarios(post_id, status, created_at);
+
+-- Enquetes entre administradores. Podem nascer a partir de um pedido da fila.
+CREATE TABLE IF NOT EXISTS enquetes (
+  id TEXT PRIMARY KEY,
+  criada_por TEXT NOT NULL,
+  pergunta TEXT NOT NULL,
+  opcoes TEXT NOT NULL,
+  pedido_id TEXT,
+  status TEXT NOT NULL DEFAULT 'aberta',
+  fecha_em TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS enquete_votos (
+  enquete_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  opcao INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (enquete_id, user_id)
+);
+
 -- Bate-papo publico: UM canal so, para todo mundo que entrou no site.
 CREATE TABLE IF NOT EXISTS chat_publico (
   id TEXT PRIMARY KEY,
@@ -314,6 +366,7 @@ CREATE TABLE IF NOT EXISTS chat_bloqueios (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   motivos TEXT NOT NULL DEFAULT '',
+  onde TEXT NOT NULL DEFAULT 'bate-papo',
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cb_user ON chat_bloqueios(user_id, created_at);
@@ -590,6 +643,9 @@ async function seed(db) {
   try { await db.run("ALTER TABLE users ADD COLUMN banido_motivo TEXT NOT NULL DEFAULT ''"); } catch {}
   try { await db.run('ALTER TABLE users ADD COLUMN sessao_v INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { await db.run('ALTER TABLE users ADD COLUMN foto_url TEXT'); } catch {}
+  // De onde veio o bloqueio do filtro: o bate-papo ou um comentário de postagem.
+  // Sem isso o dono via só metade do que o filtro barrou.
+  try { await db.run("ALTER TABLE chat_bloqueios ADD COLUMN onde TEXT NOT NULL DEFAULT 'bate-papo'"); } catch {}
   // review_replies virou 'respostas' (que serve também para comentários); só sai se estiver vazia
   try {
     const r = await db.get('SELECT COUNT(*) AS n FROM review_replies');

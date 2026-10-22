@@ -135,5 +135,35 @@ for (const t of [null, undefined, '', '   ', '😀😀😀', 'a'.repeat(5000), '
   check(`aguenta entrada "${String(t).slice(0, 14)}"`, ok);
 }
 
+console.log('\n== Endereço disfarçado NO MEIO da frase ==');
+// Juntar tudo ("colado") apaga a borda de palavra de que a regra de site
+// precisa: "meucanal ponto com que tem" virava "meucanal.comquetem" e o
+// endereço passava batido. Sozinho era pego; no meio da frase, não.
+for (const t of [
+  'entra em meucanal ponto com que tem promocao',
+  'meucanal ponto com',
+  'fulano arroba gmail ponto com me manda',
+  'manda no w w w . m e u s i t e . c o m agora',
+  'olha esse t i k t o k ponto com barra eu',
+  'segue no insta: m e u . i n s t a . c o m'
+]) check(`bloqueia disfarce: "${t.slice(0, 34)}…"`, corta(t).bloqueado === true, JSON.stringify(corta(t).motivos));
+
+console.log('\n== E a palavra "ponto" na frase normal continua passando ==');
+for (const t of [
+  'meu canal e muito bom, e ponto final',
+  'o ponto de encontro foi otimo',
+  'obrigado ponto comecei a usar hoje',
+  'vou ponto comprar o plano pro',
+  'a b c d e primeira vez aqui',
+  'achei o video otimo, da pra ver que deu trabalho'
+]) check(`não bloqueia sem motivo: "${t.slice(0, 34)}…"`, corta(t).bloqueado === false, JSON.stringify(corta(t).motivos));
+
+const nd = normalizar('W W W (ponto) m e u s i t e (ponto) c o m');
+check('a versão "dedo" junta o endereço soletrado sem colar as outras palavras',
+  /www\.meusite\.com/.test(nd.dedo), nd.dedo);
+check('a versão "justo" cola só o ponto e o arroba',
+  normalizar('fulano arroba gmail ponto com e amanha').justo === 'fulano@gmail.com e amanha',
+  normalizar('fulano arroba gmail ponto com e amanha').justo);
+
 console.log(`\nRESULTADO: ${pass} passaram, ${fail} falharam.`);
 process.exit(fail ? 1 : 0);

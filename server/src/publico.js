@@ -72,8 +72,8 @@ export function publicoRoutes(app, db, auth) {
       // Não guarda o texto. Guarda só que houve bloqueio e por quê, para o
       // dono conseguir ver padrão de abuso sem eu criar um arquivo do que foi
       // barrado.
-      await db.run('INSERT INTO chat_bloqueios(id,user_id,motivos,created_at) VALUES(?,?,?,?)',
-        [uid(), req.user.id, r.motivos.join(', '), now()]);
+      await db.run('INSERT INTO chat_bloqueios(id,user_id,motivos,onde,created_at) VALUES(?,?,?,?,?)',
+        [uid(), req.user.id, r.motivos.join(', '), 'bate-papo', now()]);
       const quantos = Number((await db.get(
         "SELECT COUNT(*) AS n FROM chat_bloqueios WHERE user_id=? AND created_at > ?",
         [req.user.id, new Date(Date.now() - 24 * 3600e3).toISOString()]
@@ -136,7 +136,7 @@ export function publicoRoutes(app, db, auth) {
         ORDER BY c.created_at DESC LIMIT 120`
     );
     const bloqueios = await db.all(
-      `SELECT b.motivos, b.created_at, u.email FROM chat_bloqueios b JOIN users u ON u.id=b.user_id
+      `SELECT b.motivos, b.onde, b.created_at, u.email FROM chat_bloqueios b JOIN users u ON u.id=b.user_id
         ORDER BY b.created_at DESC LIMIT 60`
     );
     const top = await db.all(

@@ -67,6 +67,7 @@ function renderNav() {
         ${u ? link('#/dashboard', 'Painel') + link('#/ferramentas/palavras', 'Ferramentas') + link('#/canal', '📺 Meu canal') + link('#/historico', 'Histórico') : ''}
         ${link('#/planos', 'Planos')}
         ${link('#/extensao', 'Extensão')}
+        ${u ? link('#/postagens', '📣 Postagens') : ''}
         ${u ? link('#/bate-papo', '💬 Bate-papo') : ''}
         ${link('#/resultados', '📊 Resultados')}
         ${link('#/avaliacoes', '⭐ Avaliações')}
@@ -2327,7 +2328,7 @@ async function chNovoGrupo() {
 
 const ADMIN_TABS = [
   ['geral', 'Visão geral'], ['usuarios', 'Usuários'], ['planos', 'Planos'], ['custos', 'Custos'],
-  ['pagamentos', 'Pagamentos'], ['estatisticas', '📊 Resultados'], ['pedidos', '🙋 Pedidos'], ['chats', '💬 Chats'], ['avaliacoes', 'Avaliações'], ['blocos', 'Avisos e cards'], ['config', 'Configurações'], ['admins', 'Administradores'], ['auditoria', 'Auditoria']
+  ['pagamentos', 'Pagamentos'], ['estatisticas', '📊 Resultados'], ['postagens', '📣 Postagens'], ['enquetes', '🗳 Enquetes'], ['batepapo', '💬 Moderação'], ['pedidos', '🙋 Pedidos'], ['chats', '💬 Chats'], ['avaliacoes', 'Avaliações'], ['blocos', 'Avisos e cards'], ['config', 'Configurações'], ['admins', 'Administradores'], ['auditoria', 'Auditoria']
 ];
 
 // Mostra a versão atual no botão de baixar, para dar para comparar com a instalada
@@ -2652,6 +2653,217 @@ async function bpPintar() {
   };
 }
 
+/* ---------- Postagens: área pública e área dos administradores ---------- */
+
+/** Reduz a imagem no navegador antes de subir. Sem isso, foto de celular de
+ *  8 MB viaja inteira para ser jogada fora no servidor. */
+function imgPreparar(arquivo, ladoMax = 1280, limiteKB = 680) {
+  return new Promise((ok, erro) => {
+    if (!/^image\//.test(arquivo.type)) return erro(new Error('Escolha um arquivo de imagem.'));
+    const leitor = new FileReader();
+    leitor.onerror = () => erro(new Error('Não consegui ler o arquivo.'));
+    leitor.onload = () => {
+      const img = new Image();
+      img.onerror = () => erro(new Error('Esse arquivo não abriu como imagem.'));
+      img.onload = () => {
+        const escala = Math.min(1, ladoMax / Math.max(img.width, img.height));
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(img.width * escala);
+        cv.height = Math.round(img.height * escala);
+        const cx = cv.getContext('2d');
+        cx.imageSmoothingQuality = 'high';
+        cx.drawImage(img, 0, 0, cv.width, cv.height);
+        let q = 0.85, saida = cv.toDataURL('image/jpeg', q);
+        while (saida.length > limiteKB * 1024 && q > 0.35) { q -= 0.1; saida = cv.toDataURL('image/jpeg', q); }
+        ok(saida);
+      };
+      img.src = leitor.result;
+    };
+    leitor.readAsDataURL(arquivo);
+  });
+}
+
+const po = { area: 'publica', abertos: new Set(), imagem: null, editando: null };
+
+function poData(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function poCartao(p, d) {
+  const souDono = d.souDono;
+  const aberto = po.abertos.has(p.id);
+  return `<article class="po-card" data-post="${esc(p.id)}">
+      <header class="po-cab">
+        ${ava(p.autor, 38)}
+        <div><b>${esc(p.autor.nome)}</b>${p.autor.papel ? `<span class="pill ${p.autor.papel === 'dono' ? 'ok' : ''}">${p.autor.papel === 'dono' ? '👑 dono' : 'equipe'}</span>` : ''}
+          <div class="muted small">${poData(p.criado_em)}${p.editado_em ? ' · editado' : ''}</div></div>
+        ${d.podePublicar ? `<div class="po-acoes-top">
+          <button class="btn sm ghost" data-editar="${esc(p.id)}">✏️</button>
+          <button class="btn sm ghost" data-excluir="${esc(p.id)}">🗑</button></div>` : ''}
+      </header>
+      <h3>${esc(p.titulo)}</h3>
+      ${p.imagem ? `<img class="po-img" src="${esc(p.imagem)}" alt="">` : ''}
+      <p class="po-texto">${esc(p.texto)}</p>
+      <div class="po-reacoes">
+        <button class="btn sm ${p.minhaReacao === 1 ? '' : 'ghost'}" data-curtir="${esc(p.id)}">👍 ${fmt(p.curtidas)}</button>
+        <button class="btn sm ${p.minhaReacao === -1 ? 'secondary' : 'ghost'}" data-descurtir="${esc(p.id)}">👎 ${fmt(p.descurtidas)}</button>
+        <button class="btn sm ghost" data-coment="${esc(p.id)}">💬 ${fmt(p.comentarios)} comentário${p.comentarios === 1 ? '' : 's'}</button>
+      </div>
+      <div class="po-coments" id="poc-${esc(p.id)}" ${aberto ? '' : 'hidden'}></div>
+    </article>`;
+}
+
+async function poComentarios(postId, area) {
+  const alvo = $('#poc-' + postId);
+  if (!alvo) return;
+  alvo.innerHTML = '<span class="spin"></span>';
+  let d;
+  try { d = await api(`/postagens/${postId}/comentarios`); } catch (e) { alvo.innerHTML = alertBox('err', esc(e.message)); return; }
+  alvo.innerHTML = `
+    ${d.itens.map((c) => `<div class="po-com" data-com="${esc(c.id)}">
+        ${ava(c.autor, 28)}
+        <div><div class="po-com-cab"><b>${esc(c.autor.nome)}</b>
+          ${c.autor.papel ? `<span class="pill ${c.autor.papel === 'dono' ? 'ok' : ''}">${c.autor.papel === 'dono' ? '👑' : 'equipe'}</span>` : ''}
+          <span class="muted small">${poData(c.criado_em)}</span></div>
+          <p>${esc(c.texto)}</p>
+          ${c.imagem ? `<img class="po-com-img" src="${esc(c.imagem)}" alt="">` : ''}</div>
+        <button class="btn sm ghost" data-apagarcom="${esc(c.id)}" title="Apagar">🗑</button>
+      </div>`).join('') || '<p class="muted small">Nenhum comentário ainda.</p>'}
+    <form class="po-escrever" data-post="${esc(postId)}">
+      ${ava(state.user, 28)}
+      <input class="po-com-txt" maxlength="1500" placeholder="Escreva um comentário…">
+      ${d.aceitaImagem ? `<label class="btn sm ghost" title="Anexar imagem">🖼<input type="file" accept="image/*" hidden class="po-com-img-in"></label>` : ''}
+      <button class="btn sm" type="submit">Enviar</button>
+    </form>
+    <div class="po-com-msg"></div>`;
+}
+
+/** Liga os cliques de uma lista de postagens. Serve para a área pública e
+ *  para a dos administradores: a diferença está só nos dados. */
+function poLigar(el, d, recarregar) {
+  el.onclick = async (ev) => {
+    const b = ev.target.closest('button');
+    if (!b) return;
+    const id = b.dataset.curtir || b.dataset.descurtir || b.dataset.coment || b.dataset.editar || b.dataset.excluir;
+    try {
+      if (b.dataset.curtir || b.dataset.descurtir) {
+        const r = await api(`/postagens/${id}/reagir`, { method: 'POST', body: { valor: b.dataset.curtir ? 1 : -1 } });
+        const card = el.querySelector(`[data-post="${id}"]`);
+        const bc = card.querySelector('[data-curtir]'), bd = card.querySelector('[data-descurtir]');
+        bc.textContent = `👍 ${fmt(r.curtidas)}`; bd.textContent = `👎 ${fmt(r.descurtidas)}`;
+        bc.className = `btn sm ${r.minhaReacao === 1 ? '' : 'ghost'}`;
+        bd.className = `btn sm ${r.minhaReacao === -1 ? 'secondary' : 'ghost'}`;
+      } else if (b.dataset.coment) {
+        const cx = $('#poc-' + id);
+        if (po.abertos.has(id)) { po.abertos.delete(id); cx.hidden = true; }
+        else { po.abertos.add(id); cx.hidden = false; await poComentarios(id, d.area); }
+      } else if (b.dataset.apagarcom) {
+        if (!confirm('Apagar este comentário?')) return;
+        const r = await api('/postagens/comentarios/' + b.dataset.apagarcom, { method: 'DELETE', body: { motivo: 'moderação' } });
+        if (r.executado === false) alert('Pedido enviado ao administrador principal.');
+        const post = b.closest('[data-post]')?.dataset.post;
+        if (post) await poComentarios(post, d.area);
+      } else if (b.dataset.editar) {
+        const p = d.itens.find((x) => x.id === id);
+        po.editando = p;
+        poFormulario(d.area, recarregar);
+      } else if (b.dataset.excluir) {
+        if (!confirm('Excluir esta postagem?')) return;
+        const r = await api('/postagens/' + id, { method: 'DELETE', body: { motivo: 'decisão do administrador' } });
+        if (r.executado === false) alert('Pedido enviado ao administrador principal. A postagem só sai depois do Sim dele.');
+        await recarregar();
+      } else return;
+    } catch (e) { alert(e.message); }
+  };
+
+  el.onsubmit = async (ev) => {
+    const f = ev.target.closest('.po-escrever');
+    if (!f) return;
+    ev.preventDefault();
+    const postId = f.dataset.post;
+    const campo = f.querySelector('.po-com-txt');
+    const texto = campo.value.trim();
+    if (!texto) return;
+    const msg = f.parentElement.querySelector('.po-com-msg');
+    try {
+      const corpo = { texto };
+      const arq = f.querySelector('.po-com-img-in')?.files?.[0];
+      if (arq) corpo.imagem = await imgPreparar(arq, 1024, 650);
+      const r = await api(`/postagens/${postId}/comentarios`, { method: 'POST', body: corpo });
+      campo.value = '';
+      if (msg) msg.innerHTML = r.aviso ? alertBox('', esc(r.aviso)) : '';
+      await poComentarios(postId, d.area);
+    } catch (e) { if (msg) msg.innerHTML = alertBox('err', esc(e.message)); }
+  };
+}
+
+function poFormulario(area, recarregar) {
+  const p = po.editando;
+  const cx = $('#poForm');
+  if (!cx) return;
+  po.imagem = null;
+  cx.hidden = false;
+  cx.innerHTML = `<form id="poF">
+      <h3>${p ? 'Editar postagem' : 'Nova postagem'}</h3>
+      <label>Título</label><input name="titulo" maxlength="140" required value="${esc(p?.titulo || '')}">
+      <label>Texto</label><textarea name="texto" rows="5" maxlength="6000" required>${esc(p?.texto || '')}</textarea>
+      <label class="btn sm ghost" for="poImg">🖼 ${p?.imagem ? 'Trocar imagem' : 'Adicionar imagem'}</label>
+      <input id="poImg" type="file" accept="image/*" hidden>
+      <div id="poPrevia">${p?.imagem ? `<img class="po-img" src="${esc(p.imagem)}" alt="">` : ''}</div>
+      <p><button class="btn" type="submit">${p ? 'Salvar' : 'Publicar'}</button>
+        <button class="btn secondary" type="button" id="poCancelar">Cancelar</button></p>
+      <div id="poMsg"></div>
+    </form>`;
+  $('#poImg').onchange = async () => {
+    const f = $('#poImg').files?.[0];
+    if (!f) return;
+    try {
+      po.imagem = await imgPreparar(f);
+      $('#poPrevia').innerHTML = `<img class="po-img" src="${po.imagem}" alt="">`;
+    } catch (e) { $('#poMsg').innerHTML = alertBox('err', esc(e.message)); }
+  };
+  $('#poCancelar').onclick = () => { po.editando = null; cx.hidden = true; cx.innerHTML = ''; };
+  $('#poF').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const corpo = { area, titulo: fd.get('titulo'), texto: fd.get('texto') };
+    if (po.imagem) corpo.imagem = po.imagem;
+    try {
+      const r = p
+        ? await api('/postagens/' + p.id, { method: 'PUT', body: corpo })
+        : await api('/postagens', { method: 'POST', body: corpo });
+      po.editando = null; cx.hidden = true; cx.innerHTML = '';
+      if (r.executado === false) alert('Pedido enviado ao administrador principal. A postagem aparece depois do Sim dele.');
+      else if (r.aviso) alert(r.aviso);
+      await recarregar();
+    } catch (e) { $('#poMsg').innerHTML = alertBox('err', esc(e.message)); }
+  };
+}
+
+async function poPintar(alvo, area) {
+  const recarregar = () => poPintar(alvo, area);
+  let d;
+  try { d = await api('/postagens?area=' + area); } catch (e) { alvo.innerHTML = alertBox('err', esc(e.message)); return; }
+  alvo.innerHTML = `
+    ${d.podePublicar ? `<p><button class="btn sm" id="poNova">✍️ Nova postagem</button>
+      ${d.souDono ? '' : '<span class="muted small">Sua postagem vai para a aprovação do administrador principal.</span>'}</p>` : ''}
+    <div id="poForm" hidden></div>
+    <div id="poLista">${d.itens.map((p) => poCartao(p, d)).join('') || '<p class="muted">Nenhuma postagem ainda.</p>'}</div>`;
+  const nova = $('#poNova');
+  if (nova) nova.onclick = () => { po.editando = null; poFormulario(area, recarregar); };
+  poLigar($('#poLista'), d, recarregar);
+  for (const id of po.abertos) if ($('#poc-' + id)) await poComentarios(id, area);
+}
+
+views.postagens = async () => {
+  if (!state.user) return needLogin();
+  appEl().innerHTML = `<h1>📣 Postagens</h1>
+    <p class="muted">Avisos e novidades do TurboCanal. Dá para curtir, não curtir e comentar.</p>
+    <div id="poArea"><span class="spin"></span></div>`;
+  await poPintar($('#poArea'), 'publica');
+};
+
 views.admin = async (params, sub) => {
   if (!state.user) return needLogin();
   if (!['owner', 'admin'].includes(state.user.role)) {
@@ -2698,6 +2910,120 @@ function feitoOuPedido(r, feito) {
 }
 
 const adminTabs = {
+
+  // ---------- Postagens da área dos administradores ----------
+  async postagens(el) {
+    el.innerHTML = `<p class="muted">Área fechada: só administradores leem, curtem e comentam aqui. Nesta área o comentário aceita imagem, e o texto não passa pelo filtro do bate-papo.</p>
+      <p><a class="btn sm ghost" href="#/postagens">Ver a área pública</a></p>
+      <div id="poArea"><span class="spin"></span></div>`;
+    await poPintar($('#poArea'), 'admin');
+  },
+
+  // ---------- Enquetes entre administradores ----------
+  async enquetes(el) {
+    const d = await api('/admin/enquetes');
+    const souDono = d.souDono;
+    const barra = (o, total) => `<div class="bt-linha"><span class="bt-nome">${esc(o.nome)}</span>
+        <span class="bt-trilho"><span class="bt-barra" style="width:${o.percentual || 0}%;background:${o.votos ? 'var(--accent)' : 'var(--line)'}"></span></span>
+        <span class="bt-val muted small">${o.percentual || 0}% · ${fmt(o.votos || 0)} voto${o.votos === 1 ? '' : 's'}</span></div>`;
+    const cartao = (e) => `<div class="card" style="margin-top:12px" data-enq="${esc(e.id)}">
+        <div class="rv-cab"><span class="pill ${e.status === 'aberta' ? 'ok' : ''}">${e.status}</span>
+          <b>${esc(e.pergunta)}</b></div>
+        ${e.pedido_id ? '<p class="small muted">🙋 Esta enquete é sobre um pedido que está na fila. Ela informa a decisão, não decide por ela: quem responde Sim ou Não continua sendo o administrador principal.</p>' : ''}
+        ${e.resultado.escondido
+          ? `<p class="muted small">O resultado aparece depois que você votar: ver o placar antes muda o voto. ${fmt(e.resultado.total)} de ${fmt(d.administradores)} já votaram.</p>
+             <div class="rv-acoes">${e.resultado.opcoes.map((o) => `<button class="btn sm" data-votar="${esc(e.id)}" data-op="${o.i}">${esc(o.nome)}</button>`).join('')}</div>`
+          : `${e.resultado.opcoes.map((o) => barra(o, e.resultado.total)).join('')}
+             <p class="muted small">${fmt(e.resultado.total)} de ${fmt(d.administradores)} administradores votaram.${e.meuVoto !== null ? ' Você votou em <b>' + esc(e.resultado.opcoes[e.meuVoto]?.nome || '') + '</b>.' : ''}</p>
+             ${e.status === 'aberta' ? `<div class="rv-acoes">${e.resultado.opcoes.map((o) => `<button class="btn sm ${e.meuVoto === o.i ? '' : 'ghost'}" data-votar="${esc(e.id)}" data-op="${o.i}">${esc(o.nome)}</button>`).join('')}</div>` : ''}`}
+        ${e.quemVotou?.length ? `<p class="small muted" style="margin-top:8px">Quem votou: ${e.quemVotou.map((v) => `${esc(v.nome)} (${esc(e.resultado.opcoes[v.opcao]?.nome || '?')})`).join(', ')}</p>` : ''}
+        ${souDono ? `<div class="rv-acoes">${e.status === 'aberta' ? `<button class="btn sm secondary" data-fechar="${esc(e.id)}">Fechar</button>` : ''}
+          <button class="btn sm ghost" data-apagar="${esc(e.id)}">apagar</button></div>` : ''}
+        <p class="muted small">Aberta em ${new Date(e.criada_em).toLocaleDateString('pt-BR')}${e.fecha_em ? ` · fecha sozinha em ${new Date(e.fecha_em).toLocaleDateString('pt-BR')}` : ''}</p>
+      </div>`;
+
+    const pendentes = souDono ? (await api('/admin/pedidos')).itens.filter((p) => p.status === 'pendente') : [];
+    el.innerHTML = `
+      ${souDono ? `<div class="card"><h3>Abrir enquete</h3>
+        <p class="muted small">A enquete consulta a equipe. Ela não decide pedido: quem decide continua sendo você.</p>
+        <form id="enqF">
+          <label>Pergunta</label><input name="pergunta" maxlength="300" required placeholder="ex.: mudamos o preço da auditoria?">
+          <label>Opções (uma por linha, de 2 a 8)</label><textarea name="opcoes" rows="4" required placeholder="Sim&#10;Não&#10;Depois"></textarea>
+          <div class="row">
+            <div><label>Fecha sozinha em</label>
+              <select name="dias"><option value="3">3 dias</option><option value="7" selected>7 dias</option><option value="14">14 dias</option><option value="30">30 dias</option></select></div>
+            <div><label>Sobre um pedido da fila (opcional)</label>
+              <select name="pedido_id"><option value="">Nenhum</option>${pendentes.map((p) => `<option value="${esc(p.id)}">${esc(p.pedido_por)} quer ${esc(String(p.frase).slice(0, 60))}</option>`).join('')}</select></div>
+          </div>
+          <p><button class="btn" type="submit">Abrir enquete</button></p>
+        </form><div id="enqMsg"></div></div>`
+        : alertBox('', 'Só o administrador principal abre enquete. Você vota nas que ele abrir.')}
+      <div id="enqLista">${d.itens.length ? d.itens.map(cartao).join('') : '<p class="muted" style="margin-top:12px">Nenhuma enquete ainda.</p>'}</div>`;
+
+    const f = $('#enqF');
+    if (f) f.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const fd = new FormData(ev.target);
+      try {
+        const r = await api('/admin/enquetes', { method: 'POST', body: {
+          pergunta: fd.get('pergunta'), opcoes: String(fd.get('opcoes')).split('\n'),
+          dias: fd.get('dias'), pedido_id: fd.get('pedido_id') || undefined
+        } });
+        $('#enqMsg').innerHTML = alertBox('ok', `Enquete aberta. ${fmt(r.avisados)} administrador(es) avisado(s).`);
+        setTimeout(() => adminTabs.enquetes(el), 900);
+      } catch (e) { $('#enqMsg').innerHTML = alertBox('err', esc(e.message)); }
+    };
+    $('#enqLista').onclick = async (ev) => {
+      const b = ev.target.closest('button');
+      if (!b) return;
+      try {
+        if (b.dataset.votar) await api(`/admin/enquetes/${b.dataset.votar}/votar`, { method: 'POST', body: { opcao: Number(b.dataset.op) } });
+        else if (b.dataset.fechar) await api(`/admin/enquetes/${b.dataset.fechar}/fechar`, { method: 'POST' });
+        else if (b.dataset.apagar) { if (!confirm('Apagar a enquete e os votos dela?')) return; await api('/admin/enquetes/' + b.dataset.apagar, { method: 'DELETE' }); }
+        else return;
+        await adminTabs.enquetes(el);
+      } catch (e) { alert(e.message); }
+    };
+  },
+
+  // ---------- Moderação do bate-papo público ----------
+  async batepapo(el) {
+    const d = await api('/admin/chat-publico');
+    const souDono = state.user?.role === 'owner';
+    el.innerHTML = `
+      <div class="card"><h3>Quem mais apanhou do filtro (7 dias)</h3>
+        <p class="muted small">Conta o bate-papo público e os comentários das postagens públicas.</p>
+        ${d.maisBarrados.length
+          ? `<ul class="checklist">${d.maisBarrados.map((m) => `<li class="no">${esc(m.email)}: ${fmt(m.vezes)} mensagem(ns) barrada(s)</li>`).join('')}</ul>`
+          : '<p class="muted">Ninguém foi barrado nos últimos 7 dias.</p>'}
+        <p class="muted small">O site guarda só o motivo do bloqueio, nunca o texto barrado.</p></div>
+      <div class="card" style="margin-top:12px"><h3>Últimos bloqueios</h3>
+        ${d.bloqueios.length ? `<table><tr><th>Quando</th><th>Quem</th><th>Onde</th><th>Motivo</th></tr>
+          ${d.bloqueios.map((b) => `<tr><td class="small">${new Date(b.created_at).toLocaleString('pt-BR')}</td><td class="small">${esc(b.email)}</td><td class="small">${esc(b.onde || 'bate-papo')}</td><td class="small">${esc(b.motivos)}</td></tr>`).join('')}</table>`
+          : '<p class="muted">Nenhum bloqueio registrado.</p>'}</div>
+      <div class="card" style="margin-top:12px"><h3>Mensagens</h3>
+        ${d.itens.map((m) => `<div class="rv-item">
+          <div class="rv-cab"><span class="pill ${m.status === 'ativo' ? 'ok' : m.status === 'oculta' ? 'warn' : 'err'}">${esc(m.status)}</span>
+            <b>${esc(m.autor)}</b> <span class="muted small">${esc(m.email)} · ${new Date(m.criado_em).toLocaleString('pt-BR')}</span>
+            ${m.denuncias ? `<span class="pill warn">⚑ ${fmt(m.denuncias)}</span>` : ''}</div>
+          <p>${esc(m.texto)}</p>
+          <div class="rv-acoes">
+            ${m.status === 'ativo' ? `<button class="btn sm ghost" data-apagar="${esc(m.id)}">apagar</button>` : ''}
+            ${m.status !== 'ativo' && souDono ? `<button class="btn sm secondary" data-restaurar="${esc(m.id)}">devolver ao ar</button>` : ''}
+          </div></div>`).join('') || '<p class="muted">Nenhuma mensagem ainda.</p>'}</div>`;
+    el.onclick = async (ev) => {
+      const b = ev.target.closest('button');
+      if (!b) return;
+      try {
+        if (b.dataset.apagar) {
+          const r = await api('/chat-publico/' + b.dataset.apagar, { method: 'DELETE', body: { motivo: 'moderação' } });
+          if (r.executado === false) alert('Pedido enviado ao administrador principal.');
+        } else if (b.dataset.restaurar) await api(`/admin/chat-publico/${b.dataset.restaurar}/restaurar`, { method: 'POST' });
+        else return;
+        await adminTabs.batepapo(el);
+      } catch (e) { alert(e.message); }
+    };
+  },
 
   // ---------- Resultados dos criadores: regras, situação e recálculo ----------
   async estatisticas(el) {

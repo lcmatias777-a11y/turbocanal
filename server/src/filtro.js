@@ -28,7 +28,18 @@ export function normalizar(txt) {
        .replace(/5\$?/g, 's').replace(/7/g, 't').replace(/\$/g, 's');
   t = t.replace(/[^a-z0-9.@+-]+/g, ' ');                            // separadores viram espaço
   const semEspaco = t.replace(/\s+/g, '');                          // "w h a t s" -> "whats"
-  return { solto: t, colado: semEspaco, coladoA: semEspaco.replace(/@/g, 'a') };
+  // "justo": cola SÓ em volta do ponto e do arroba. Colar tudo ("colado")
+  // apaga as bordas de palavra de que a regra de site precisa: "meucanal
+  // ponto com que tem promocao" virava "...meucanal.comquetem...", e aí o
+  // \b depois de "com" não fecha e o endereço passava batido no meio da
+  // frase, mesmo sendo pego quando vinha sozinho.
+  const justo = t.replace(/\s*([.@])\s*/g, '$1');
+  // "dedo": junta SÓ as sequências escritas letra por letra ("w w w . m e u
+  // s i t e . c o m" -> "www.meusite.com"), deixando as palavras normais em
+  // paz. Sem isso o truque de soletrar o endereço passava no meio da frase:
+  // o "colado" junta tudo e some com a borda de palavra que a regra precisa.
+  const dedo = t.replace(/\b(?:[a-z0-9.@+-] ){2,}[a-z0-9.@+-]\b/g, (m) => m.replace(/ /g, ''));
+  return { solto: t, colado: semEspaco, justo, dedo, coladoA: semEspaco.replace(/@/g, 'a') };
 }
 
 /** Cada regra sabe o que procura e o que dizer. A ordem importa: o que é mais
@@ -79,7 +90,7 @@ export function filtrar(texto, { limiteBloqueio = 3 } = {}) {
     });
   }
 
-  const { solto, colado, coladoA } = normalizar(saida);
+  const { solto, colado, justo, dedo, coladoA } = normalizar(saida);
 
   // Disfarce escrito por extenso ("meucanal ponto com", "fulano arroba gmail
   // ponto com") só aparece depois de normalizar. Aqui não dá para tapar o
@@ -88,9 +99,12 @@ export function filtrar(texto, { limiteBloqueio = 3 } = {}) {
   for (const r of REGRAS) {
     if (!['link', 'email'].includes(r.id)) continue;
     const alvo = new RegExp(r.re.source, 'i');
-    // Testa também a versão sem espaço nenhum: "meucanal ponto com" vira
-    // "meucanal.com" só depois de colar as palavras.
-    if ((alvo.test(solto) || alvo.test(colado)) && !achados.some((a) => a.regra === r.id)) {
+    // Quatro versões, porque o disfarce aparece em cada uma de um jeito:
+    // "solto" pega o que já estava escrito normal; "justo" pega "meucanal
+    // ponto com" no meio de uma frase (cola só o ponto e o arroba, mantendo
+    // as bordas de palavra); "dedo" pega o endereço soletrado; e "colado"
+    // pega o resto. Qualquer uma que bata bloqueia a mensagem inteira.
+    if ([solto, justo, dedo, colado].some((v) => alvo.test(v)) && !achados.some((a) => a.regra === r.id)) {
       achados.push({ regra: r.id, rotulo: r.rotulo, trecho: '(escrito por extenso)' });
     }
   }

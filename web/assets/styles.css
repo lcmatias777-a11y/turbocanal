@@ -350,3 +350,27 @@ a.bl-card:hover { border-color: var(--accent2); text-decoration: none; }
   .bp-acoes { opacity: 1; }
   .bp-msgs { max-height: 62vh; }
 }
+
+
+/* Postagens */
+.po-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
+.po-cab { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-bottom: 10px; }
+.po-cab .pill { font-size: .72rem; padding: 1px 7px; margin-left: 6px; }
+.po-acoes-top { display: flex; gap: 4px; }
+.po-card h3 { margin: 6px 0 10px; }
+.po-img { width: 100%; max-height: 420px; object-fit: contain; border-radius: 10px; background: var(--bg2); display: block; margin-bottom: 10px; }
+.po-texto { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 12px; }
+.po-reacoes { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 10px; }
+.po-coments { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; display: grid; gap: 10px; }
+.po-com { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: start; }
+.po-com p { margin: 2px 0 0; overflow-wrap: anywhere; }
+.po-com-cab { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.po-com-cab .pill { font-size: .68rem; padding: 0 6px; }
+.po-com-img { max-width: 100%; max-height: 260px; border-radius: 8px; margin-top: 6px; display: block; }
+.po-escrever { display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; }
+.po-escrever input.po-com-txt { margin: 0; }
+.po-escrever label.btn { cursor: pointer; margin: 0; }
+@media (max-width: 620px) {
+  .po-escrever { grid-template-columns: auto 1fr; }
+  .po-escrever button, .po-escrever label.btn { grid-column: span 1; }
+}

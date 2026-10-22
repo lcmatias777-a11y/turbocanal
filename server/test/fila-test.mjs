@@ -66,7 +66,10 @@ const SO_DONO = new Map([
   ['POST /api/admin/users/:id/encerrar-sessoes', 'derrubar sessão alheia é poder de dono'],
   ['POST /api/admin/pedidos/:id/decidir', 'quem decide o pedido é o principal'],
   ['POST /api/admin/estatisticas/regras', 'muda o critério do que o site publica como resultado'],
-  ['POST /api/admin/chat-publico/:id/restaurar', 'devolver ao ar o que a denúncia tirou é decisão do principal']
+  ['POST /api/admin/chat-publico/:id/restaurar', 'devolver ao ar o que a denúncia tirou é decisão do principal'],
+  ['POST /api/admin/enquetes', 'a enquete é a consulta do principal à equipe'],
+  ['POST /api/admin/enquetes/:id/fechar', 'quem abriu encerra'],
+  ['DELETE /api/admin/enquetes/:id', 'apagar a enquete apaga os votos dos outros junto']
 ]);
 // Admin comum faz direto, e o porquê de cada uma ser inofensiva.
 const LIVRE = new Map([
@@ -76,7 +79,8 @@ const LIVRE = new Map([
   ['POST /api/admin/chats/:id/mensagens', 'mandar mensagem no chat'],
   ['DELETE /api/admin/chats/:id/mensagens/:msg', 'apagar mensagem (o próprio autor ou o dono, conferido dentro)'],
   ['POST /api/admin/chats/:id/fixar', 'fixar conversa, muda só a lateral de quem fixou'],
-  ['POST /api/admin/chats/:id/sinal', 'recado de ligação: o dono dispensou autorização para chamadas']
+  ['POST /api/admin/chats/:id/sinal', 'recado de ligação: o dono dispensou autorização para chamadas'],
+  ['POST /api/admin/enquetes/:id/votar', 'votar é o que se espera do administrador; um voto não muda nada sozinho']
 ]);
 
 // Express 4 guarda em _router; o getter app.router foi aposentado e lança.
