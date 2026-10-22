@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 import { getSetting, setSetting } from './db.js';
+import { corDoId, inicialDe } from './perfil.js';
 import { HttpError, audit, isEmail, must, now, uid, ym } from './util.js';
 import { ensureRefill, getUser } from './credits.js';
 
@@ -54,6 +55,11 @@ export async function publicUser(db, user) {
     plan,
     credits: user.credits,
     unlimited: user.role === 'owner',
+    // Avatar: a foto quando existe, senão a inicial sobre uma cor fixa, para a
+    // tela não precisar decidir isso em cada lugar que mostra uma pessoa.
+    foto: user.foto_url || null,
+    inicial: inicialDe(user.name, user.email),
+    cor: corDoId(user.id),
     created_at: user.created_at,
     youtube: yt && isManageScope(yt.scopes)
       ? { connected: true, channel_id: yt.channel_id, channel_title: yt.channel_title }

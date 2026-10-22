@@ -67,6 +67,7 @@ function renderNav() {
         ${u ? link('#/dashboard', 'Painel') + link('#/ferramentas/palavras', 'Ferramentas') + link('#/canal', '📺 Meu canal') + link('#/historico', 'Histórico') : ''}
         ${link('#/planos', 'Planos')}
         ${link('#/extensao', 'Extensão')}
+        ${u ? link('#/bate-papo', '💬 Bate-papo') : ''}
         ${link('#/resultados', '📊 Resultados')}
         ${link('#/avaliacoes', '⭐ Avaliações')}
         ${link('#/ajuda', 'Ajuda')}
@@ -1539,6 +1540,7 @@ views.conta = async () => {
     <h1>Configurações da conta</h1>
     <section class="grid cols2">
       <div class="card"><h3>Seus dados</h3>
+        ${fotoCampo('pf')}
         <p>E-mail: <b>${esc(u.email)}</b><br>Plano: <b>${esc(u.plan?.name)}</b> · Papel: <b>${esc(u.role)}</b></p>
         <p class="muted small">Login feito com o Google: não há senha para gerenciar aqui.</p>
         <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
@@ -1584,6 +1586,7 @@ views.conta = async () => {
       location.reload();
     } catch (e) { alert(e.message); st.disabled = false; }
   };
+  fotoLigar('pf', () => views.conta());
 };
 
 /* ------------------------------ Ajuda ------------------------------ */
@@ -2484,6 +2487,170 @@ views.resultados = async () => {
 
     ${blocoMeu}`;
 };
+
+/* ---------- Avatar: foto, ou a inicial sobre cor fixa, como o YouTube ---------- */
+function ava(p, tam = 34) {
+  const s = `width:${tam}px;height:${tam}px;font-size:${Math.round(tam * 0.42)}px`;
+  if (p?.foto) return `<img class="ava" style="${s}" src="${esc(p.foto)}" alt="">`;
+  return `<span class="ava ini" style="${s};background:${esc(p?.cor || '#4a79c9')}">${esc(p?.inicial || '?')}</span>`;
+}
+
+/* ---------- Foto de perfil: recorte quadrado feito no navegador ---------- */
+const FOTO_LADO = 256;
+
+/** Lê o arquivo, recorta o quadrado do meio e devolve JPEG pequeno. Fazer isso
+ *  aqui, e não no servidor, evita subir 8 MB de foto de celular para depois
+ *  jogar fora 99% dela. */
+function fotoPreparar(arquivo) {
+  return new Promise((ok, erro) => {
+    if (!/^image\//.test(arquivo.type)) return erro(new Error('Escolha um arquivo de imagem.'));
+    const leitor = new FileReader();
+    leitor.onerror = () => erro(new Error('Não consegui ler o arquivo.'));
+    leitor.onload = () => {
+      const img = new Image();
+      img.onerror = () => erro(new Error('Esse arquivo não abriu como imagem.'));
+      img.onload = () => {
+        const lado = Math.min(img.width, img.height);
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = FOTO_LADO;
+        const cx = cv.getContext('2d');
+        cx.imageSmoothingQuality = 'high';
+        cx.drawImage(img, (img.width - lado) / 2, (img.height - lado) / 2, lado, lado, 0, 0, FOTO_LADO, FOTO_LADO);
+        let q = 0.85, saida = cv.toDataURL('image/jpeg', q);
+        // Vai baixando a qualidade até caber no limite do servidor
+        while (saida.length > 170 * 1024 && q > 0.35) { q -= 0.1; saida = cv.toDataURL('image/jpeg', q); }
+        ok(saida);
+      };
+      img.src = leitor.result;
+    };
+    leitor.readAsDataURL(arquivo);
+  });
+}
+
+function fotoCampo(idPrefixo = 'pf') {
+  const u = state.user;
+  const atual = u?.foto ? `<img class="ava" style="width:84px;height:84px" src="${esc(u.foto)}" alt="">`
+    : `<span class="ava ini" style="width:84px;height:84px;font-size:34px;background:${esc(u?.cor || '#4a79c9')}">${esc(u?.inicial || '?')}</span>`;
+  return `<div class="pf-foto">
+      <div id="${idPrefixo}Previa">${atual}</div>
+      <div>
+        <label class="btn sm" for="${idPrefixo}Arq">📷 Escolher foto</label>
+        <input id="${idPrefixo}Arq" type="file" accept="image/*" hidden>
+        ${u?.foto ? `<button class="btn sm ghost" id="${idPrefixo}Tirar">Tirar foto</button>` : ''}
+        <p class="muted small">Quadrada, recortada pelo meio aqui mesmo antes de subir. Sem foto, aparece a inicial do seu nome.</p>
+        <div id="${idPrefixo}Msg"></div>
+      </div>
+    </div>`;
+}
+
+function fotoLigar(idPrefixo = 'pf', aoTrocar) {
+  const arq = $('#' + idPrefixo + 'Arq');
+  if (arq) arq.onchange = async () => {
+    const f = arq.files?.[0];
+    if (!f) return;
+    const msg = $('#' + idPrefixo + 'Msg');
+    msg.innerHTML = '<span class="spin"></span>';
+    try {
+      const imagem = await fotoPreparar(f);
+      const r = await api('/me/foto', { method: 'POST', body: { imagem } });
+      state.user.foto = r.foto;
+      msg.innerHTML = alertBox('ok', 'Foto trocada.');
+      renderNav();
+      aoTrocar?.();
+    } catch (e) { msg.innerHTML = alertBox('err', esc(e.message)); }
+  };
+  const tira = $('#' + idPrefixo + 'Tirar');
+  if (tira) tira.onclick = async () => {
+    try {
+      await api('/me/foto', { method: 'DELETE' });
+      state.user.foto = null;
+      renderNav();
+      aoTrocar?.();
+    } catch (e) { alert(e.message); }
+  };
+}
+
+/* ---------- Bate-papo público: um canal só, para todo mundo ---------- */
+const bp = { timer: null, ultimo: null };
+
+views['bate-papo'] = async () => {
+  if (!state.user) return needLogin();
+  appEl().innerHTML = `<h1>💬 Bate-papo</h1>
+    <p class="muted">Um canal só, para todo mundo que usa o TurboCanal. Não existe conversa privada aqui.</p>
+    <div id="bpAviso"></div>
+    <div class="card bp-caixa">
+      <div class="bp-msgs" id="bpMsgs"><span class="spin"></span></div>
+      <form class="bp-escrever" id="bpForm">
+        ${ava(state.user, 30)}
+        <input id="bpTexto" maxlength="400" autocomplete="off" placeholder="Escreva aqui…">
+        <button class="btn sm" type="submit">Enviar</button>
+      </form>
+      <div id="bpMsg"></div>
+    </div>
+    <p class="muted small">Link, telefone, e-mail, endereço, combinar por fora e compra não passam: a mensagem é barrada na hora, antes de qualquer pessoa ler. Isso vale para todo mundo, inclusive para mim.</p>`;
+
+  await bpPintar();
+  $('#bpForm').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const campo = $('#bpTexto');
+    const texto = campo.value.trim();
+    if (!texto) return;
+    const msg = $('#bpMsg');
+    msg.innerHTML = '';
+    try {
+      const r = await api('/chat-publico', { method: 'POST', body: { texto } });
+      campo.value = '';
+      if (r.aviso) msg.innerHTML = alertBox('', esc(r.aviso));
+      await bpPintar();
+    } catch (e) {
+      msg.innerHTML = alertBox('err', esc(e.message));
+    }
+  };
+  if (bp.timer) clearInterval(bp.timer);
+  bp.timer = setInterval(() => { if (location.hash.startsWith('#/bate-papo')) bpPintar(); else { clearInterval(bp.timer); bp.timer = null; } }, 6000);
+};
+
+async function bpPintar() {
+  const alvo = $('#bpMsgs');
+  if (!alvo) return;
+  let d;
+  try { d = await api('/chat-publico'); } catch (e) { alvo.innerHTML = alertBox('err', esc(e.message)); return; }
+  const hora = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const colado = alvo.scrollTop + alvo.clientHeight >= alvo.scrollHeight - 40;
+  alvo.innerHTML = d.itens.length ? d.itens.map((m) => `<div class="bp-msg${m.autor_id === d.sou.id ? ' minha' : ''}" data-m="${esc(m.id)}">
+      ${ava(m, 30)}
+      <div class="bp-corpo">
+        <div class="bp-cab"><b>${esc(m.autor)}</b>${m.papel ? `<span class="pill ${m.papel === 'dono' ? 'ok' : ''}">${m.papel === 'dono' ? '👑 dono' : 'equipe'}</span>` : ''}
+          <span class="muted small">${hora(m.criado_em)}</span></div>
+        <p>${esc(m.texto)}</p>
+        ${m.filtrada ? '<span class="muted small">parte escondida pelo filtro</span>' : ''}
+      </div>
+      <div class="bp-acoes">
+        ${m.autor_id === d.sou.id || d.sou.papel !== 'user' ? `<button class="btn sm ghost" data-apagar="${esc(m.id)}" title="Apagar">🗑</button>` : ''}
+        ${m.autor_id !== d.sou.id ? `<button class="btn sm ghost" data-denunciar="${esc(m.id)}" title="Denunciar">⚑</button>` : ''}
+      </div>
+    </div>`).join('') : '<p class="muted" style="padding:16px">Ninguém falou ainda. Comece você.</p>';
+  if (colado) alvo.scrollTop = alvo.scrollHeight;
+
+  alvo.onclick = async (ev) => {
+    const b = ev.target.closest('button');
+    if (!b) return;
+    try {
+      if (b.dataset.apagar) {
+        if (!confirm('Apagar esta mensagem?')) return;
+        const r = await api('/chat-publico/' + b.dataset.apagar, { method: 'DELETE', body: { motivo: 'moderação' } });
+        if (r.executado === false) alert('Pedido enviado ao administrador principal. A mensagem só sai depois do Sim dele.');
+      } else if (b.dataset.denunciar) {
+        const motivo = prompt('O que tem de errado nesta mensagem? (opcional)') ?? '';
+        const r = await api('/chat-publico/' + b.dataset.denunciar + '/denunciar', { method: 'POST', body: { motivo } });
+        alert(r.repetida ? 'Você já tinha denunciado esta mensagem.'
+          : r.escondida ? 'Denúncia registrada. A mensagem saiu do ar e o administrador foi avisado.'
+            : `Denúncia registrada (${r.denuncias} de 3 para sair do ar automaticamente).`);
+      } else return;
+      await bpPintar();
+    } catch (e) { alert(e.message); }
+  };
+}
 
 views.admin = async (params, sub) => {
   if (!state.user) return needLogin();

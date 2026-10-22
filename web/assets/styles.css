@@ -322,3 +322,31 @@ a.bl-card:hover { border-color: var(--accent2); text-decoration: none; }
 .ch-perm.no { border-color: var(--line); color: var(--muted); }
 
 .ch-perm-bts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+
+/* Avatar: foto ou inicial sobre cor fixa */
+.ava { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; object-fit: cover;
+  flex: 0 0 auto; border: 1px solid var(--line); overflow: hidden; }
+.ava.ini { color: #fff; font-weight: 700; letter-spacing: .5px; border-color: transparent; }
+.pf-foto { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.pf-foto label.btn { cursor: pointer; }
+.pf-foto p { margin: 6px 0 0; max-width: 42ch; }
+
+/* Bate-papo publico */
+.bp-caixa { padding: 0; overflow: hidden; }
+.bp-msgs { max-height: 56vh; overflow-y: auto; padding: 12px 14px; display: grid; gap: 10px; }
+.bp-msg { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; }
+.bp-msg .bp-corpo { min-width: 0; }
+.bp-msg p { margin: 2px 0 0; overflow-wrap: anywhere; }
+.bp-cab { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.bp-cab .pill { font-size: .72rem; padding: 1px 7px; }
+.bp-acoes { display: flex; gap: 4px; opacity: 0; transition: opacity .15s; }
+.bp-msg:hover .bp-acoes, .bp-msg:focus-within .bp-acoes { opacity: 1; }
+.bp-msg.minha .bp-corpo { background: var(--bg2); border-radius: 10px; padding: 6px 10px; }
+.bp-escrever { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center;
+  border-top: 1px solid var(--line); padding: 10px 14px; }
+.bp-escrever input { margin: 0; }
+@media (max-width: 620px) {
+  .bp-acoes { opacity: 1; }
+  .bp-msgs { max-height: 62vh; }
+}

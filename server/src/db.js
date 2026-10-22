@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
   banido INTEGER NOT NULL DEFAULT 0,
   banido_motivo TEXT NOT NULL DEFAULT '',
   sessao_v INTEGER NOT NULL DEFAULT 0,
+  foto_url TEXT,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS plans (
@@ -295,6 +296,37 @@ CREATE TABLE IF NOT EXISTS experimentos (
 );
 CREATE INDEX IF NOT EXISTS idx_exp_user ON experimentos(user_id, status, revisar_em);
 
+-- Bate-papo publico: UM canal so, para todo mundo que entrou no site.
+CREATE TABLE IF NOT EXISTS chat_publico (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  texto TEXT NOT NULL,
+  filtrada INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'ativo',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cp_tempo ON chat_publico(created_at);
+CREATE INDEX IF NOT EXISTS idx_cp_user ON chat_publico(user_id, created_at);
+
+-- O que foi BARRADO nao e guardado: so o motivo, para dar para ver padrao de
+-- abuso sem criar um deposito do que eu nao quero que exista.
+CREATE TABLE IF NOT EXISTS chat_bloqueios (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  motivos TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cb_user ON chat_bloqueios(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS chat_denuncias (
+  id TEXT PRIMARY KEY,
+  mensagem_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  motivo TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cd_unica ON chat_denuncias(mensagem_id, user_id);
+
 -- Inscricoes de aviso com o site fechado (Web Push). Uma por aparelho.
 CREATE TABLE IF NOT EXISTS push_subs (
   id TEXT PRIMARY KEY,
@@ -557,6 +589,7 @@ async function seed(db) {
   try { await db.run('ALTER TABLE users ADD COLUMN banido INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { await db.run("ALTER TABLE users ADD COLUMN banido_motivo TEXT NOT NULL DEFAULT ''"); } catch {}
   try { await db.run('ALTER TABLE users ADD COLUMN sessao_v INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { await db.run('ALTER TABLE users ADD COLUMN foto_url TEXT'); } catch {}
   // review_replies virou 'respostas' (que serve também para comentários); só sai se estiver vazia
   try {
     const r = await db.get('SELECT COUNT(*) AS n FROM review_replies');

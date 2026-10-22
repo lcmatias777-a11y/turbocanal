@@ -338,6 +338,21 @@ export const ACOES = {
     }
   },
 
+  apagar_mensagem_publica: {
+    rotulo: 'Apagar mensagem do bate-papo',
+    async validar(db, dados) {
+      const m = await db.get('SELECT id, user_id FROM chat_publico WHERE id=? AND status=?', [dados.alvo_id, 'ativo']);
+      if (!m) throw new HttpError(404, 'Mensagem não encontrada.');
+      const autor = await db.get('SELECT email FROM users WHERE id=?', [m.user_id]);
+      return { mensagem: m.id, autor: autor?.email || '', motivo: txt(dados.motivo) || 'Moderação' };
+    },
+    descrever: (p) => `apagar uma mensagem de ${p.payload.autor} no bate-papo público`,
+    async executar(db, p, quem) {
+      const { apagarMensagemPublica } = await import('./publico.js');
+      return apagarMensagemPublica(db, quem, p.payload.mensagem, p.payload.motivo);
+    }
+  },
+
   restaurar_comentario: {
     rotulo: 'Restaurar comentário removido',
     async validar(db, dados) {

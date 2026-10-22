@@ -65,7 +65,8 @@ const SO_DONO = new Map([
   ['PUT /api/admin/settings', 'guardaria o token do Mercado Pago e a chave da IA dentro do pedido'],
   ['POST /api/admin/users/:id/encerrar-sessoes', 'derrubar sessão alheia é poder de dono'],
   ['POST /api/admin/pedidos/:id/decidir', 'quem decide o pedido é o principal'],
-  ['POST /api/admin/estatisticas/regras', 'muda o critério do que o site publica como resultado']
+  ['POST /api/admin/estatisticas/regras', 'muda o critério do que o site publica como resultado'],
+  ['POST /api/admin/chat-publico/:id/restaurar', 'devolver ao ar o que a denúncia tirou é decisão do principal']
 ]);
 // Admin comum faz direto, e o porquê de cada uma ser inofensiva.
 const LIVRE = new Map([
