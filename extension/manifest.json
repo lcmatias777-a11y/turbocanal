@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TurboCanal para YouTube",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "VPH, outliers, SEO e tags em qualquer vídeo do YouTube, com painel no vídeo, na busca, no canal e no Studio.",
   "icons": {
     "16": "icons/icon16.png",

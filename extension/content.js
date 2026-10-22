@@ -20,6 +20,12 @@
     return el;
   }
   const clear = (el) => { while (el && el.firstChild) el.firstChild.remove(); return el; };
+  /** Acrescenta filhos pulando null e false. O append do proprio navegador, se receber
+   *  null, escreve a palavra "null" na tela: foi assim que apareceu um "null" solto. */
+  const poe = (el, ...kids) => {
+    for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(String(c)));
+    return el;
+  };
   const fmt = (n) => (n == null || Number.isNaN(n) ? '—' : Number(n).toLocaleString('pt-BR'));
   const dec = (n, d = 1) => (n == null ? '—' : Number(n).toLocaleString('pt-BR', { maximumFractionDigits: d }));
   const short = (n) => {
@@ -404,7 +410,7 @@
             clear(msg).append(h('p', { class: 'tc-ok' }, '✅ Adicionado aos seus concorrentes.'), h('p', { class: 'tc-muted' }, creditLine(x.credits)));
           } catch (e) { clear(msg).append(errBox(e)); add.disabled = false; }
         };
-        clear(box).append(
+        poe(clear(box),
           h('div', { class: 'tc-chan' }, ch.thumb ? h('img', { src: ch.thumb, alt: '' }) : null,
             h('div', null, h('b', null, ch.title || v.channel), h('div', { class: 'tc-muted' }, [ch.handle, anos != null ? (anos >= 1 ? `${Math.floor(anos)} ano${Math.floor(anos) === 1 ? '' : 's'} no YouTube` : 'canal novo') : null].filter(Boolean).join(' · ')))),
           h('div', { class: 'tc-grid' },
@@ -436,7 +442,7 @@
       try {
         const r = await api('/tools/coach_ai', { method: 'POST', body: { video: vid } });
         const x = r.result;
-        clear(out).append(
+        poe(clear(out),
           h('div', { class: 'tc-sec' }, h('b', null, '📝 Resumo'), h('p', null, x.resumo)),
           h('div', { class: 'tc-sec' }, h('b', null, `🎣 Gancho: ${x.gancho.nota}/10`), h('p', null, x.gancho.analise), x.gancho.sugestao ? h('p', { class: 'tc-muted' }, '💡 ' + x.gancho.sugestao) : null),
           h('div', { class: 'tc-sec' }, h('b', null, '📊 Desempenho: ' + (x.desempenho.veredito || '')), h('p', null, x.desempenho.porque)),

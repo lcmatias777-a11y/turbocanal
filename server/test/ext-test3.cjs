@@ -110,10 +110,17 @@ const PAGES = {
     route.fulfill({ status: 200, headers: { 'content-type': 'text/html; charset=utf-8', ...TT }, body: PAGES[key] });
   });
   await ctx.route('https://studio.youtube.com/**', (route) => route.fulfill({ status: 200, headers: { 'content-type': 'text/html; charset=utf-8', ...TT }, body: PAGES.studio }));
-  let travarMe = false;
+  let travarMe = false, canalSemTags = false;
   await ctx.route(PUBLIC + '/**', async (route) => {
     const url = route.request().url();
     if (travarMe && /\/api\/me$/.test(url)) return new Promise(() => {}); // nunca responde
+    if (canalSemTags && /\/api\/tools\/video_panel$/.test(url)) {
+      // canal sem tags: já apareceu um "null" solto na tela nesse caso
+      const resp = await route.fetch({ url: url.replace(PUBLIC, LOCAL) });
+      const d = await resp.json();
+      if (d?.result?.channel) d.result.channel.keywords = [];
+      return route.fulfill({ status: resp.status(), contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(d) });
+    }
 
     if (versionOverride && url.includes('/api/extension/version')) return route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ version: versionOverride, download: '/turbocanal-extensao.zip' }) });
     const resp = await route.fetch({ url: url.replace(PUBLIC, LOCAL) });
@@ -295,6 +302,17 @@ const PAGES = {
   const ct = await p2.textContent('#tc-panel .tc-pane');
   check('aba Canal: inscritos, views, vídeos, mediana recente e outlier', /Inscritos/.test(ct) && /Mediana recente/.test(ct) && /Outlier/.test(ct), ct.replace(/\s+/g, ' ').slice(0, 300));
   check('painel do canal custou 1 crédito', c1 - (await credits()) === 1, String(c1 - (await credits())));
+  // canal sem tags não pode escrever "null" na tela (o append do navegador faz isso com null)
+  canalSemTags = true;
+  const semTags = watch(await ctx.newPage());
+  await semTags.goto('https://www.youtube.com/watch?v=' + VID);
+  await semTags.waitForSelector('#tc-panel .tc-tab', { timeout: 20000 });
+  await semTags.click('#tc-panel .tc-tab:nth-child(3)');
+  await semTags.waitForSelector('#tc-panel .tc-chan', { timeout: 20000 });
+  const txtSemTags = await semTags.textContent('#tc-panel');
+  check('canal sem tags não imprime "null" solto no painel', !/(^|\s)null(\s|$)/.test(txtSemTags), txtSemTags.replace(/\s+/g, ' ').slice(-120));
+  await semTags.close();
+  canalSemTags = false;
   const c2 = await credits();
   await p2.click('#tc-panel .tc-tab:nth-child(4)');
   await p2.waitForSelector('#tc-panel .tc-pane .tc-btn', { timeout: 10000 });
