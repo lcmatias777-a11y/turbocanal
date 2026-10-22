@@ -114,7 +114,10 @@ check('owner promove João a admin', promo.status === 200);
 const admByJoao = await req('/api/admin/users', { token: t2 });
 check('novo admin acessa o painel', admByJoao.status === 200);
 const promoByAdmin = await req('/api/admin/admins', { method: 'POST', token: t2, body: { email: 'maria@example.com' } });
-check('admin comum NÃO promove outros admins (só o principal)', promoByAdmin.status === 403);
+check('admin comum NÃO promove ninguém: vira pedido para o principal (202)', promoByAdmin.status === 202 && promoByAdmin.data.executado === false && promoByAdmin.data.pedido);
+check('e a pessoa continua SEM ser admin enquanto o principal não disser sim',
+  (await db.get('SELECT role FROM users WHERE email=?', ['maria@example.com'])).role === 'user');
+const pedidoPromo = promoByAdmin.data.pedido;
 const ownerId = (await db.get('SELECT id FROM users WHERE email=?', ['lcmatias777@gmail.com'])).id;
 const demoteOwnerByAdmin = await req(`/api/admin/admins/${ownerId}`, { method: 'DELETE', token: t2 });
 check('admin não consegue remover/rebaixar o administrador principal', demoteOwnerByAdmin.status === 403);
@@ -621,6 +624,143 @@ check('título é obrigatório', (await req('/api/tools/title_lab', { method: 'P
 const custos = (await req('/api/tools/costs')).data.costs;
 check('as duas ferramentas novas aparecem na tabela de preços',
   custos.find((c) => c.tool === 'audit_ai')?.cost === 200 && custos.find((c) => c.tool === 'title_lab')?.cost === 100);
+
+// ---------- Notificações ----------
+console.log('\n— Notificações —');
+const nMaria = await req('/api/notifications', { token: t1 });
+check('quem se cadastra recebe a notificação de boas-vindas',
+  nMaria.status === 200 && nMaria.data.itens.some((x) => x.tipo === 'boas_vindas'), JSON.stringify(nMaria.data.itens.map((x) => x.tipo)));
+check('a de boas-vindas diz quantos créditos a conta tem',
+  /\d/.test(nMaria.data.itens.find((x) => x.tipo === 'boas_vindas')?.corpo || ''));
+check('o contador de não lidas bate com a lista', nMaria.data.naoLidas >= 1);
+
+// recarga mensal: força o mês anterior e usa uma ferramenta
+await db.run("UPDATE users SET last_refill='2020-01', credits=10 WHERE email='maria@example.com'");
+await req('/api/me', { token: t1 });
+const nRecarga = (await req('/api/notifications', { token: t1 })).data.itens.find((x) => x.tipo === 'creditos_recarregados');
+check('ao virar o mês, a pessoa é avisada de que os créditos foram restaurados', !!nRecarga, 'não veio');
+check('o aviso de recarga diz quanto entrou e até quanto completa', /\d/.test(nRecarga?.corpo || '') && /limite mensal/.test(nRecarga?.corpo || ''), nRecarga?.corpo);
+
+// ajuste de créditos pelo dono: avisa com o motivo
+await req('/api/admin/users/' + u2.data.user.id + '/credits', { method: 'POST', token: tOwn, body: { delta: 500, note: 'bônus de teste' } });
+const nAjuste = (await req('/api/notifications', { token: t2 })).data.itens.find((x) => x.tipo === 'creditos_aumentados');
+check('quem recebe créditos é avisado, com o motivo', !!nAjuste && /bônus de teste/.test(nAjuste.corpo), JSON.stringify(nAjuste));
+await req('/api/admin/users/' + u2.data.user.id + '/credits', { method: 'POST', token: tOwn, body: { delta: -100, note: 'estorno de teste' } });
+check('tirar créditos também avisa, e diz que foi retirada',
+  (await req('/api/notifications', { token: t2 })).data.itens.some((x) => x.tipo === 'creditos_diminuidos' && /estorno de teste/.test(x.corpo)));
+
+// resposta a comentário
+const cmtN = await req('/api/comments', { method: 'POST', token: t1, body: { texto: 'Comentário que vai ser respondido.' } });
+await req('/api/replies', { method: 'POST', token: tOwn, body: { alvo_tipo: 'comentario', alvo_id: cmtN.data.comentario.id, texto: 'Obrigado pelo retorno!' } });
+const nResp = (await req('/api/notifications', { token: t1 })).data.itens.find((x) => x.tipo === 'resposta_recebida');
+check('quem comentou é avisado quando alguém responde', !!nResp && /Obrigado pelo retorno/.test(nResp.corpo), JSON.stringify(nResp));
+check('ninguém é notificado por responder a si mesmo',
+  !(await req('/api/notifications', { token: tOwn })).data.itens.some((x) => x.tipo === 'resposta_recebida' && /Obrigado pelo retorno/.test(x.corpo)));
+
+const umaNotif = (await req('/api/notifications', { token: t1 })).data.itens[0];
+const antes = (await req('/api/notifications', { token: t1 })).data.naoLidas;
+check('marcar uma como lida baixa o contador',
+  (await req(`/api/notifications/${umaNotif.id}/lida`, { method: 'POST', token: t1 })).data.naoLidas === antes - 1);
+check('marcar todas como lidas zera o contador',
+  (await req('/api/notifications/todas-lidas', { method: 'POST', token: t1 })).data.naoLidas === 0);
+check('ninguém lê a notificação de outra pessoa',
+  (await req(`/api/notifications/${umaNotif.id}/lida`, { method: 'POST', token: t2 })).status === 404);
+check('notificação exige login', (await req('/api/notifications')).status === 401);
+
+// ---------- Aprovação do administrador principal ----------
+console.log('\n— Pedidos ao administrador principal —');
+// João foi rebaixado lá em cima; aqui ele volta a ser admin comum para testar a fila
+await req('/api/admin/admins', { method: 'POST', token: tOwn, body: { email: 'joao@example.com' } });
+check('o principal promove direto, sem fila', (await db.get('SELECT role FROM users WHERE email=?', ['joao@example.com'])).role === 'admin');
+const pedCred = await req('/api/admin/users/' + u1.data.user.id + '/credits', { method: 'POST', token: t2, body: { delta: 9999, note: 'quero dar um presente' } });
+check('admin comum pedindo crédito recebe 202 (pedido), não 200', pedCred.status === 202 && pedCred.data.executado === false, JSON.stringify(pedCred));
+const saldoAntes = (await req('/api/me', { token: t1 })).data.user.credits;
+check('o crédito NÃO entrou enquanto o pedido está pendente', saldoAntes < 9999);
+const avisoDono = (await req('/api/notifications', { token: tOwn })).data.itens.find((x) => x.tipo === 'pedido_admin');
+check('o administrador principal é notificado do pedido, com quem pediu e o que quer',
+  !!avisoDono && /joao@example.com/.test(avisoDono.titulo) && /aumentar/.test(avisoDono.titulo), avisoDono?.titulo);
+const listaPed = await req('/api/admin/pedidos', { token: tOwn });
+check('o pedido aparece na lista do principal',
+  listaPed.data.itens?.some((x) => x.id === pedCred.data.pedido && x.status === 'pendente'), JSON.stringify(listaPed).slice(0, 200));
+check('o admin comum vê só os pedidos dele', (await req('/api/admin/pedidos', { token: t2 })).data.itens.every((x) => x.pedido_por === 'joao@example.com'));
+check('admin comum não decide pedido',
+  (await req(`/api/admin/pedidos/${pedCred.data.pedido}/decidir`, { method: 'POST', token: t2, body: { decisao: 'sim' } })).status === 403);
+const aprova = await req(`/api/admin/pedidos/${pedCred.data.pedido}/decidir`, { method: 'POST', token: tOwn, body: { decisao: 'sim', resposta: 'pode sim' } });
+check('o principal aprova e só então o crédito entra',
+  aprova.status === 200 && (await req('/api/me', { token: t1 })).data.user.credits === saldoAntes + 9999, String((await req('/api/me', { token: t1 })).data.user.credits));
+check('quem pediu é avisado da aprovação',
+  (await req('/api/notifications', { token: t2 })).data.itens.some((x) => x.tipo === 'pedido_decidido' && /aprovado/i.test(x.titulo)));
+check('não dá para decidir duas vezes o mesmo pedido',
+  (await req(`/api/admin/pedidos/${pedCred.data.pedido}/decidir`, { method: 'POST', token: tOwn, body: { decisao: 'sim' } })).status === 409);
+
+const pedRec = await req('/api/admin/users/' + u1.data.user.id + '/credits', { method: 'POST', token: t2, body: { delta: -50000, note: 'tirar tudo' } });
+const saldoPre = (await req('/api/me', { token: t1 })).data.user.credits;
+const recusa = await req(`/api/admin/pedidos/${pedRec.data.pedido}/decidir`, { method: 'POST', token: tOwn, body: { decisao: 'nao', resposta: 'não concordo' } });
+check('recusar não executa nada', recusa.status === 200 && (await req('/api/me', { token: t1 })).data.user.credits === saldoPre);
+check('quem pediu recebe a recusa com o motivo escrito pelo principal',
+  (await req('/api/notifications', { token: t2 })).data.itens.some((x) => x.tipo === 'pedido_decidido' && /não concordo/.test(x.corpo)));
+
+// banir também passa pela fila, e banido não entra
+const pedBan = await req('/api/admin/users/' + u1.data.user.id + '/banir', { method: 'POST', token: t2, body: { motivo: 'teste' } });
+check('banir pedido por admin comum vira pedido', pedBan.status === 202);
+check('a conta continua entrando enquanto o pedido não for aprovado', (await req('/api/me', { token: t1 })).status === 200);
+await req(`/api/admin/pedidos/${pedBan.data.pedido}/decidir`, { method: 'POST', token: tOwn, body: { decisao: 'sim' } });
+const barrada = await req('/api/me', { token: t1 });
+check('depois do sim, a conta banida é barrada com o motivo', barrada.status === 403 && /suspensa/i.test(barrada.data.error || ''), JSON.stringify(barrada.data));
+const desban = await req('/api/admin/users/' + u1.data.user.id + '/banir', { method: 'POST', token: tOwn, body: { desfazer: true } });
+check('o principal desfaz o banimento na hora (sem fila)', desban.status === 200 && (await req('/api/me', { token: t1 })).status === 200);
+
+// promoção pendente lá de cima: aprovar agora
+const decPromo = await req(`/api/admin/pedidos/${pedidoPromo}/decidir`, { method: 'POST', token: tOwn, body: { decisao: 'sim' } });
+check('aprovar o pedido de promoção torna a pessoa admin de verdade',
+  decPromo.status === 200 && (await db.get('SELECT role FROM users WHERE email=?', ['maria@example.com'])).role === 'admin');
+check('e a pessoa promovida é avisada',
+  (await req('/api/notifications', { token: t1 })).data.itens.some((x) => x.tipo === 'virou_admin'));
+
+// ---------- Chat entre administradores ----------
+console.log('\n— Chat entre administradores —');
+const chats = await req('/api/admin/chats', { token: tOwn });
+check('existe a conversa geral com todos os administradores',
+  chats.status === 200 && chats.data.itens.some((c) => c.tipo === 'geral' && c.membros.length >= 3), JSON.stringify(chats.data.itens.map((c) => [c.tipo, c.membros.length])));
+const pessoas = await req('/api/admin/chats/pessoas', { token: t2 });
+check('a lista de pessoas traz os outros administradores e não eu mesmo',
+  pessoas.data.itens.length >= 2 && pessoas.data.itens.every((p) => p.email !== 'joao@example.com'));
+const dm = await req('/api/admin/chats/dm', { method: 'POST', token: t2, body: { com: (await db.get('SELECT id FROM users WHERE email=?', ['lcmatias777@gmail.com'])).id } });
+check('abre conversa de um a um sem precisar de aprovação', dm.status === 200 && dm.data.nova === true);
+const dm2 = await req('/api/admin/chats/dm', { method: 'POST', token: t2, body: { com: (await db.get('SELECT id FROM users WHERE email=?', ['lcmatias777@gmail.com'])).id } });
+check('abrir de novo reaproveita a mesma conversa, não cria outra', dm2.data.conversa === dm.data.conversa && dm2.data.nova === false);
+await req(`/api/admin/chats/${dm.data.conversa}/mensagens`, { method: 'POST', token: t2, body: { texto: 'Chefe, pode olhar meu pedido?' } });
+const msgs = await req(`/api/admin/chats/${dm.data.conversa}/mensagens`, { token: tOwn });
+check('a mensagem chega para o outro lado', msgs.data.itens.some((m) => /pode olhar meu pedido/.test(m.texto)));
+check('quem recebe mensagem é notificado',
+  (await req('/api/notifications', { token: tOwn })).data.itens.some((x) => x.tipo === 'mensagem_chat'));
+const terceiro = await req('/api/auth/register', { method: 'POST', body: { email: 'forade.fora@example.com', password: 'senha12345', name: 'Fora' } });
+check('quem não é administrador não entra no chat', (await req('/api/admin/chats', { token: terceiro.data.token })).status === 403);
+check('admin que não participa da conversa não lê as mensagens dela',
+  (await req(`/api/admin/chats/${dm.data.conversa}/mensagens`, { token: t1 })).status === 403);
+check('fixar vale só para quem fixou',
+  (await req(`/api/admin/chats/${dm.data.conversa}/fixar`, { method: 'POST', token: t2, body: { fixado: true } })).data.fixado === true
+  && (await req('/api/admin/chats', { token: t2 })).data.itens.find((c) => c.id === dm.data.conversa)?.fixado === true
+  && (await req('/api/admin/chats', { token: tOwn })).data.itens.find((c) => c.id === dm.data.conversa)?.fixado === false);
+const pedGrupo = await req('/api/admin/pedidos', { token: tOwn });
+const grupoPedido = await (async () => {
+  const ids = (await db.all("SELECT id FROM users WHERE role IN ('owner','admin') AND email<>'joao@example.com'")).map((r) => r.id);
+  return req('/api/admin/chats/grupo', { method: 'POST', token: t2, body: { nome: 'Força-tarefa', membros: ids } });
+})();
+check('admin comum criando grupo vira pedido ao principal', grupoPedido.status === 202 && grupoPedido.data.executado === false, JSON.stringify(grupoPedido.data).slice(0, 160));
+check('o grupo ainda não existe antes do sim', !(await req('/api/admin/chats', { token: t2 })).data.itens.some((c) => c.nome === 'Força-tarefa'));
+await req(`/api/admin/pedidos/${grupoPedido.data.pedido}/decidir`, { method: 'POST', token: tOwn, body: { decisao: 'sim' } });
+check('depois do sim o grupo existe para todos os membros',
+  (await req('/api/admin/chats', { token: t2 })).data.itens.some((c) => c.nome === 'Força-tarefa')
+  && (await req('/api/admin/chats', { token: tOwn })).data.itens.some((c) => c.nome === 'Força-tarefa'));
+
+// Maria foi promovida no teste da fila; volta a ser usuária comum para os testes seguintes
+await req(`/api/admin/admins/${u1.data.user.id}`, { method: 'DELETE', token: tOwn });
+check('o principal rebaixa direto, e a pessoa perde o painel na hora',
+  (await db.get('SELECT role FROM users WHERE email=?', ['maria@example.com'])).role === 'user'
+  && (await req('/api/admin/users', { token: t1 })).status === 403);
+check('e ela é avisada de que perdeu o acesso',
+  (await req('/api/notifications', { token: t1 })).data.itens.some((x) => x.tipo === 'deixou_admin'));
 
 // ---------- O que falta configurar (sem vazar chave nenhuma) ----------
 console.log('\n— Checklist de configuração —');

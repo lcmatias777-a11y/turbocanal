@@ -80,6 +80,7 @@ export function makeAuth(db) {
       // Papel e saldo sempre lidos do banco (nunca confiar no que o navegador manda)
       const user = await getUser(db, payload.uid);
       if (!user) throw new HttpError(401, 'Conta não encontrada. Entre novamente.');
+      if (user.banido) throw new HttpError(403, `Esta conta está suspensa.${user.banido_motivo ? ` Motivo: ${user.banido_motivo}` : ''} Se achar que é engano, fale com o administrador do site.`);
       req.user = await ensureRefill(db, user);
       next();
     } catch (e) {
@@ -130,7 +131,12 @@ async function createUser(db, { email, passHash = null, name = '', googleSub = n
       [uid(), id, free.monthly_credits, free.monthly_credits, null, 'Créditos iniciais do plano Free', null, now()]
     );
   });
-  return getUser(db, id);
+  const novo = await getUser(db, id);
+  try {
+    const { avisos } = await import('./notify.js');
+    await avisos.boasVindas(db, novo);
+  } catch {}
+  return novo;
 }
 
 async function grantOwnerIfVerified(db, user, email, via) {

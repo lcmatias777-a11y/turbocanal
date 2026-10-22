@@ -43,6 +43,7 @@ function mapStatus(mpStatus) {
 }
 
 export async function activatePayment(db, payment, actor = null, viaLabel = 'webhook do provedor') {
+  let aviso = null;
   return db.tx(async (q) => {
     const fresh = await q.get('SELECT * FROM payments WHERE id=?', [payment.id]);
     if (!fresh || fresh.status === 'approved') return fresh; // idempotente
@@ -59,7 +60,14 @@ export async function activatePayment(db, payment, actor = null, viaLabel = 'web
     await q.run('INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)', [
       uid(), actor?.id || null, actor?.email || 'sistema', 'payment.approved', fresh.id, `plano ${plan.id}, via ${viaLabel}`, now()
     ]);
+    aviso = { user: fresh.user_id, plano: plan.name, creditos: plan.monthly_credits, valorCentavos: fresh.amount_cents };
     return q.get('SELECT * FROM payments WHERE id=?', [fresh.id]);
+  }).then(async (r) => {
+    if (aviso) {
+      const { avisos } = await import('./notify.js');
+      await avisos.pagamento(db, aviso.user, aviso);
+    }
+    return r;
   });
 }
 

@@ -211,6 +211,10 @@ export function reviewRoutes(app, db, auth) {
     const id = uid();
     await db.run('INSERT INTO respostas(id,alvo_tipo,alvo_id,user_id,body,papel,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
       [id, tipo, alvo.id, req.user.id, texto, papel, 'active', now(), now()]);
+    if (alvo.user_id && alvo.user_id !== req.user.id) {
+      const { avisos } = await import('./notify.js');
+      await avisos.resposta(db, alvo.user_id, { autor: autor(req.user.name), trecho: texto, alvo: tipo });
+    }
     res.json({ ok: true, resposta: { id, autor: autor(req.user.name), papel, doDesenvolvedor: papel === 'owner', daEquipe: papel === 'admin', texto, criado_em: now(), minha: true, gostei: 0, naoGostei: 0, meuVoto: 0 } });
   }));
 
@@ -273,6 +277,11 @@ export function reviewRoutes(app, db, auth) {
     const motivo = lerTexto(req.body?.motivo, 'O motivo', false, 300);
     const alvo = await db.get(`SELECT * FROM ${TIPOS[tipo]} WHERE id=?`, [req.body?.alvo_id]);
     if (!alvo) throw new HttpError(404, 'Conteúdo não encontrado.');
+    if (remover && req.user.role !== 'owner') {
+      const { pedirOuFazer } = await import('./pedidos.js');
+      const r = await pedirOuFazer(db, req.user, 'remover_comentario', { alvo_tipo: tipo, alvo_id: alvo.id, motivo });
+      return res.status(202).json({ ok: true, ...r, resumo: await resumo(db) });
+    }
     const campoMod = tipo === 'avaliacao' ? ', moderated_reason=?' : '';
     const vals = tipo === 'avaliacao'
       ? [remover ? 'removed' : 'active', req.user.id, motivo, now(), alvo.id]

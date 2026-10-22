@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS users (
   credits INTEGER NOT NULL DEFAULT 0,
   last_refill TEXT,
   google_sub TEXT,
+  banido INTEGER NOT NULL DEFAULT 0,
+  banido_motivo TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS plans (
@@ -196,6 +198,65 @@ CREATE TABLE IF NOT EXISTS blocos (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_blocos_pos ON blocos(pagina, slot, ordem);
+
+CREATE TABLE IF NOT EXISTS notificacoes (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  tipo TEXT NOT NULL,
+  titulo TEXT NOT NULL,
+  corpo TEXT NOT NULL DEFAULT '',
+  link TEXT NOT NULL DEFAULT '',
+  dados TEXT NOT NULL DEFAULT '{}',
+  lida INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notif_user ON notificacoes(user_id, lida, created_at);
+
+CREATE TABLE IF NOT EXISTS pedidos_admin (
+  id TEXT PRIMARY KEY,
+  acao TEXT NOT NULL,
+  pedido_por TEXT NOT NULL,
+  alvo_user TEXT,
+  alvo_id TEXT,
+  payload TEXT NOT NULL DEFAULT '{}',
+  motivo TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pendente',
+  decidido_por TEXT,
+  resposta TEXT NOT NULL DEFAULT '',
+  erro TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pedidos_status ON pedidos_admin(status, created_at);
+
+CREATE TABLE IF NOT EXISTS conversas (
+  id TEXT PRIMARY KEY,
+  tipo TEXT NOT NULL,
+  nome TEXT NOT NULL DEFAULT '',
+  criado_por TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS conversa_membros (
+  conversa_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  fixado INTEGER NOT NULL DEFAULT 0,
+  ordem INTEGER NOT NULL DEFAULT 0,
+  lido_em TEXT NOT NULL DEFAULT '',
+  entrou_em TEXT NOT NULL,
+  PRIMARY KEY (conversa_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS mensagens (
+  id TEXT PRIMARY KEY,
+  conversa_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  texto TEXT NOT NULL,
+  sistema INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_msg_conv ON mensagens(conversa_id, created_at);
 `;
 
 const PLAN_SEED = [
@@ -368,6 +429,9 @@ async function seed(db) {
     ['video_insights_ai', 40, 300, 'IA assiste o vídeo (insights)', 'IA do vídeo: assiste e sugere título, descrição e tags']
   ];
   await db.run("DELETE FROM tool_costs WHERE tool='thumbnail_ai'"); // capa com IA foi retirada do site
+  // Banimento de conta (pedido do dono): coluna nova nas contas já existentes
+  try { await db.run('ALTER TABLE users ADD COLUMN banido INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { await db.run("ALTER TABLE users ADD COLUMN banido_motivo TEXT NOT NULL DEFAULT ''"); } catch {}
   // review_replies virou 'respostas' (que serve também para comentários); só sai se estiver vazia
   try {
     const r = await db.get('SELECT COUNT(*) AS n FROM review_replies');

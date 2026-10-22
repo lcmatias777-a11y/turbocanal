@@ -22,13 +22,19 @@ export async function ensureRefill(db, user) {
   const m = ym();
   if (user.last_refill === m) return user;
   const topup = parseInt((await getSetting(db, 'free_monthly_topup')) || '5000', 10);
+  let recarregou = 0;
   await db.tx(async (q) => {
     const u = await q.get('SELECT credits,last_refill FROM users WHERE id=?', [user.id]);
     if (!u || u.last_refill === m) return;
     const delta = Math.max(0, topup - u.credits);
     await q.run('UPDATE users SET last_refill=?, credits=credits+? WHERE id=?', [m, delta, user.id]);
     if (delta > 0) await insertTx(q, user.id, delta, u.credits + delta, null, 'Recarga mensal do plano Free');
+    recarregou = delta;
   });
+  if (recarregou > 0) {
+    const { avisos } = await import('./notify.js');
+    await avisos.recarga(db, user.id, recarregou, topup);
+  }
   return getUser(db, user.id);
 }
 

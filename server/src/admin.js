@@ -1,6 +1,7 @@
 import { getSetting, setSetting } from './db.js';
 import { HttpError, audit, isEmail, must, now } from './util.js';
 import { grant } from './credits.js';
+import { pedirOuFazer } from './pedidos.js';
 import { activatePayment, providerReady } from './payments.js';
 import { googleConfigured } from './auth.js';
 import { testGemini } from './gemini.js';
@@ -132,12 +133,17 @@ export function adminRoutes(app, db, auth) {
   }));
 
   app.post('/api/admin/users/:id/credits', ...auth.admin, wrap(async (req, res) => {
-    const delta = parseInt(req.body?.delta, 10);
-    if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 100000000) throw new HttpError(400, 'Informe um ajuste de créditos válido (inteiro diferente de zero).');
-    const note = String(req.body?.note || '').slice(0, 200) || 'Ajuste manual pelo administrador';
-    const bal = await grant(db, req.params.id, delta, note);
-    await audit(db, req.user, 'admin.credits_adjust', req.params.id, `${delta >= 0 ? '+' : ''}${delta} (${note})`);
-    res.json({ ok: true, balance: bal });
+    const r = await pedirOuFazer(db, req.user, 'creditos', {
+      alvo_user: req.params.id, delta: req.body?.delta, motivo: req.body?.note
+    });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r, balance: r.resultado?.balance });
+  }));
+
+  app.post('/api/admin/users/:id/banir', ...auth.admin, wrap(async (req, res) => {
+    const r = await pedirOuFazer(db, req.user, req.body?.desfazer ? 'desbanir' : 'banir', {
+      alvo_user: req.params.id, motivo: req.body?.motivo
+    });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r });
   }));
 
   app.post('/api/admin/users/:id/plan', ...auth.admin, wrap(async (req, res) => {
@@ -268,26 +274,16 @@ export function adminRoutes(app, db, auth) {
     res.json({ items: rows, voce: { id: req.user.id, role: req.user.role } });
   }));
 
-  app.post('/api/admin/admins', ...auth.owner, wrap(async (req, res) => {
+  app.post('/api/admin/admins', ...auth.admin, wrap(async (req, res) => {
     const email = must(req.body?.email, 'e-mail', { max: 190 }).toLowerCase();
     if (!isEmail(email)) throw new HttpError(400, 'E-mail inválido.');
-    const target = await db.get('SELECT * FROM users WHERE email=?', [email]);
-    if (!target) throw new HttpError(404, 'Não existe conta cadastrada com esse e-mail. A pessoa precisa criar a conta primeiro (conta autenticada).');
-    if (target.role === 'owner') throw new HttpError(400, 'Essa conta já é o administrador principal.');
-    if (target.role === 'admin') throw new HttpError(409, 'Essa conta já é administradora.');
-    await db.run("UPDATE users SET role='admin' WHERE id=?", [target.id]);
-    await audit(db, req.user, 'admin.promote', email);
-    res.json({ ok: true });
+    const r = await pedirOuFazer(db, req.user, 'adicionar_admin', { email, motivo: req.body?.motivo });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r });
   }));
 
-  app.delete('/api/admin/admins/:id', ...auth.owner, wrap(async (req, res) => {
-    const target = await db.get('SELECT * FROM users WHERE id=?', [req.params.id]);
-    if (!target) throw new HttpError(404, 'Usuário não encontrado.');
-    if (target.role === 'owner') throw new HttpError(403, 'O administrador principal não pode ser removido nem rebaixado.');
-    if (target.role !== 'admin') throw new HttpError(400, 'Essa conta não é administradora.');
-    await db.run("UPDATE users SET role='user' WHERE id=?", [target.id]);
-    await audit(db, req.user, 'admin.demote', target.email);
-    res.json({ ok: true });
+  app.delete('/api/admin/admins/:id', ...auth.admin, wrap(async (req, res) => {
+    const r = await pedirOuFazer(db, req.user, 'remover_admin', { alvo_user: req.params.id, motivo: req.body?.motivo });
+    res.status(r.executado ? 200 : 202).json({ ok: true, ...r });
   }));
 
   app.get('/api/admin/audit', ...auth.admin, wrap(async (req, res) => {
