@@ -21,8 +21,15 @@ async function ehAdmin(db, userId) {
   return ['owner', 'admin'].includes(u?.role);
 }
 
-/** Garante que a conversa geral existe e que todo administrador está nela. */
-export async function sincronizarGeral(db) {
+let ultimaSync = 0;
+
+/** Garante que a conversa geral existe e que todo administrador está nela.
+ *  A aba de chats recarrega a cada 8s; sem este freio isso viraria escrita no
+ *  banco a cada 8 segundos para sempre. Roda no máximo uma vez por minuto, ou
+ *  na hora quando o pedido vem de quem ainda não está na conversa. */
+export async function sincronizarGeral(db, { forcar = false } = {}) {
+  if (!forcar && Date.now() - ultimaSync < 60000) return GERAL;
+  ultimaSync = Date.now();
   const j = await db.get('SELECT id FROM conversas WHERE id=?', [GERAL]);
   if (!j) {
     await db.run('INSERT INTO conversas(id,tipo,nome,criado_por,created_at,updated_at) VALUES(?,?,?,?,?,?)',
@@ -80,7 +87,8 @@ export function chatRoutes(app, db, auth) {
     !!(await db.get('SELECT 1 AS x FROM conversa_membros WHERE conversa_id=? AND user_id=?', [convId, userId]));
 
   async function montarLista(userId) {
-    await sincronizarGeral(db);
+    const jaEstou = await db.get('SELECT 1 AS x FROM conversa_membros WHERE conversa_id=? AND user_id=?', [GERAL, userId]);
+    await sincronizarGeral(db, { forcar: !jaEstou });
     const rows = await db.all(
       `SELECT c.*, m.fixado, m.ordem, m.lido_em
          FROM conversas c JOIN conversa_membros m ON m.conversa_id=c.id
