@@ -278,6 +278,22 @@ CREATE TABLE IF NOT EXISTS sinais (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sinais ON sinais(para_user, created_at);
+
+CREATE TABLE IF NOT EXISTS experimentos (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  hipotese TEXT NOT NULL,
+  mudanca TEXT NOT NULL,
+  metrica TEXT NOT NULL DEFAULT 'views',
+  status TEXT NOT NULL DEFAULT 'rodando',
+  revisar_em TEXT NOT NULL,
+  resultado TEXT NOT NULL DEFAULT '',
+  conclusao TEXT NOT NULL DEFAULT '',
+  avisado INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_exp_user ON experimentos(user_id, status, revisar_em);
 `;
 
 const PLAN_SEED = [

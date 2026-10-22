@@ -42,6 +42,7 @@ const TOOL_LINKS = [
   ['#/ferramentas/auditoria', '🩺 Auditoria do meu canal (IA)'],
   ['#/ferramentas/horarios', '⏰ Melhor horário para publicar'],
   ['#/ferramentas/raiox', '🔬 Raio-X dos meus vídeos'],
+  ['#/ferramentas/experimentos', '🧪 Diário de experimentos'],
   ['#/ferramentas/titulo', '🧲 Laboratório de título'],
   ['#/ferramentas/insights', '✨ IA do vídeo (assiste e sugere)'],
   ['#/ferramentas/ideias', '💡 Ideias de vídeos'],
@@ -944,6 +945,74 @@ views['ferramentas/raiox'] = async (params) => {
     <div class="card" style="margin-top:12px"><h3>De onde vêm esses números</h3>
       <p class="small muted">${esc(r.canal)} · ${r.periodo.de} a ${r.periodo.ate} · ${r.base.analisados} de ${r.base.total} vídeos entraram na comparação.</p>
       <ul class="small muted">${r.avisos.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div>`;
+};
+
+views['ferramentas/experimentos'] = async () => {
+  if (!state.user) return needLogin();
+  const d = await api('/experimentos');
+  const dataBr = (iso) => (iso ? new Date(iso).toLocaleDateString('pt-BR') : '—');
+  const venceu = (e) => e.status === 'rodando' && new Date(e.revisar_em) <= new Date();
+  appEl().innerHTML = `<h1>🧪 Diário de experimentos</h1>
+    <p class="muted">Escreva uma coisa que você quer testar, o que vai mudar e qual número vai olhar. Na data que você marcar, eu comparo os vídeos publicados depois com os de antes, no mesmo número. <b>Antes e depois não é prova</b>, mas é como você aprende com o seu próprio canal em vez de copiar regra de internet. Não custa crédito.</p>
+    <div class="card"><h3>Começar um experimento</h3>
+      <form id="expForm">
+        <label>O que você acha que vai acontecer? (hipótese)</label>
+        <input name="hipotese" required maxlength="300" placeholder="ex.: títulos com número no começo trazem mais cliques">
+        <label>O que você vai mudar nos próximos vídeos?</label>
+        <input name="mudanca" required maxlength="300" placeholder="ex.: começar todo título com um número">
+        <div class="row">
+          <div><label>Número que você vai olhar</label>
+            <select name="metrica">${d.metricas.map((m) => `<option value="${esc(m.id)}">${esc(m.rotulo)}</option>`).join('')}</select></div>
+          <div><label>Revisar em quantos dias</label>
+            <select name="dias"><option value="14">14 dias</option><option value="21" selected>21 dias</option><option value="30">30 dias</option><option value="60">60 dias</option></select></div>
+        </div>
+        <p><button class="btn" type="submit">Começar</button></p>
+      </form>
+      <div id="expMsg"></div></div>
+    <div class="card" style="margin-top:12px"><h3>Seus experimentos</h3>
+      ${d.itens.length ? d.itens.map((e) => `<div class="rv-item" data-exp="${esc(e.id)}">
+        <div class="rv-cab"><span class="pill ${e.status === 'concluido' ? 'ok' : venceu(e) ? 'warn' : ''}">${e.status === 'concluido' ? 'concluído' : venceu(e) ? 'pronto para revisar' : 'rodando'}</span>
+          <b>${esc(e.hipotese)}</b></div>
+        <p class="small">Mudança: ${esc(e.mudanca)} · Olhando: ${esc(e.rotulo)} · Começou ${dataBr(e.criado_em)}${e.status === 'rodando' ? ` · revisar em ${dataBr(e.revisar_em)}` : ''}</p>
+        ${e.conclusao ? `<p class="prox-dado">✍️ Sua conclusão: ${esc(e.conclusao)}</p>` : ''}
+        <div class="rv-acoes">
+          ${e.status === 'rodando' ? `<button class="btn sm" data-medir="${esc(e.id)}">📊 Ver antes e depois</button>
+            <button class="btn sm secondary" data-concluir="${esc(e.id)}">Concluir</button>` : ''}
+          <button class="btn sm ghost" data-apagar="${esc(e.id)}">apagar</button>
+        </div>
+        <div id="exp-res-${esc(e.id)}"></div>
+      </div>`).join('') : '<p class="muted">Nenhum experimento ainda. Comece um acima: uma coisa de cada vez.</p>'}
+      ${d.emAberto >= 3 ? '<p class="small muted">Você está no limite de 3 experimentos ao mesmo tempo. Testar tudo junto não deixa saber o que funcionou.</p>' : ''}</div>`;
+
+  $('#expForm').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    try {
+      const r = await api('/experimentos', { method: 'POST', body: { hipotese: fd.get('hipotese'), mudanca: fd.get('mudanca'), metrica: fd.get('metrica'), dias: Number(fd.get('dias')) } });
+      $('#expMsg').innerHTML = alertBox('ok', `Experimento começado. Eu te aviso em ${r.dias} dias para olhar o resultado.`);
+      setTimeout(() => views['ferramentas/experimentos'](), 900);
+    } catch (e) { showErr($('#expMsg'), e); }
+  };
+  for (const b of document.querySelectorAll('[data-medir]')) b.onclick = async () => {
+    const alvo = $('#exp-res-' + b.dataset.medir);
+    alvo.innerHTML = '<p class="center"><span class="spin"></span></p>';
+    try {
+      const r = await api(`/experimentos/${b.dataset.medir}/medir`);
+      alvo.innerHTML = `<div class="prox-dado" style="margin-top:8px">📊 ${esc(r.leitura)}</div>
+        <p class="small muted">${esc(r.aviso)}</p>`;
+    } catch (e) { showErr(alvo, e); }
+  };
+  for (const b of document.querySelectorAll('[data-concluir]')) b.onclick = async () => {
+    const conclusao = prompt('O que você concluiu? (isso é o que vai te servir na próxima vez)');
+    if (!conclusao) return;
+    try { await api(`/experimentos/${b.dataset.concluir}/concluir`, { method: 'POST', body: { conclusao } }); views['ferramentas/experimentos'](); }
+    catch (e) { alert(e.message); }
+  };
+  for (const b of document.querySelectorAll('[data-apagar]')) b.onclick = async () => {
+    if (!confirm('Apagar este experimento?')) return;
+    try { await api(`/experimentos/${b.dataset.apagar}`, { method: 'DELETE' }); views['ferramentas/experimentos'](); }
+    catch (e) { alert(e.message); }
+  };
 };
 
 views['ferramentas/preparar'] = toolPage({

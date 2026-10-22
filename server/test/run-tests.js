@@ -862,6 +862,65 @@ console.log('\n— KPI de créditos gastos —');
     dep2.creditsSpent30d > dep.creditsSpent30d && (await req('/api/me', { token: t2 })).data.user.credits < saldoAntes);
 }
 
+// ---------- Diario de experimentos ----------
+console.log('\n— Diário de experimentos —');
+{
+  const { compararAntesDepois, mediana: medExp } = await import('../src/experimentos.js');
+  check('mediana do experimento funciona', medExp([1, 2, 3]) === 2 && medExp([]) === 0);
+
+  const inicio = '2026-06-01T00:00:00Z';
+  const antesDepois = (vsAntes, vsDepois) => [
+    ...vsAntes.map((n, i) => ({ titulo: 'antes ' + i, views: n, publicado: '2026-05-0' + ((i % 9) + 1) + 'T12:00:00Z' })),
+    ...vsDepois.map((n, i) => ({ titulo: 'depois ' + i, views: n, publicado: '2026-06-0' + ((i % 9) + 1) + 'T12:00:00Z' }))
+  ];
+  const sobe = compararAntesDepois(antesDepois([100, 110, 120, 130], [200, 210, 220, 230]), { inicio, metrica: 'views' });
+  check('compara antes e depois e calcula a diferenca',
+    sobe.antes.videos === 4 && sobe.depois.videos === 4 && sobe.antes.mediana === 115 && sobe.depois.mediana === 215 && sobe.diferenca === 87, JSON.stringify([sobe.antes, sobe.depois, sobe.diferenca]));
+  check('a leitura cita os dois lados e em quantos videos se baseia',
+    /antes contra/.test(sobe.leitura) && /4 e 4 vídeos/.test(sobe.leitura), sobe.leitura);
+  check('e avisa, sempre, que antes e depois NAO e prova', /não é prova/.test(sobe.aviso));
+
+  const poucos = compararAntesDepois(antesDepois([100, 110], [200]), { inicio, metrica: 'views' });
+  check('com menos de 3 videos de cada lado, nao compara e diz por que',
+    poucos.suficiente === false && /pelo menos 3 de cada lado/.test(poucos.leitura), poucos.leitura);
+
+  // a diferenca que depende de um video so tem de ser denunciada
+  const umPuxa = compararAntesDepois(antesDepois([100, 100, 100], [100, 100, 100, 10000]), { inicio, metrica: 'views' });
+  check('quando a diferenca depende do video mais extremo, o texto denuncia isso',
+    umPuxa.mesmoSentido === false && /pendurado em um vídeo só/.test(umPuxa.leitura), umPuxa.leitura);
+
+  const exp1 = await req('/api/experimentos', { method: 'POST', token: t1, body: { hipotese: 'titulos com numero rendem mais', mudanca: 'comecar com numero', metrica: 'views', dias: 14 } });
+  check('cria o experimento e diz quando revisar', exp1.status === 200 && exp1.data.dias === 14 && exp1.data.revisar_em, JSON.stringify(exp1.data));
+  check('hipotese vazia e recusada', (await req('/api/experimentos', { method: 'POST', token: t1, body: { mudanca: 'x' } })).status === 400);
+  check('mudanca vazia e recusada', (await req('/api/experimentos', { method: 'POST', token: t1, body: { hipotese: 'x' } })).status === 400);
+  await req('/api/experimentos', { method: 'POST', token: t1, body: { hipotese: 'b', mudanca: 'b' } });
+  await req('/api/experimentos', { method: 'POST', token: t1, body: { hipotese: 'c', mudanca: 'c' } });
+  const quarto = await req('/api/experimentos', { method: 'POST', token: t1, body: { hipotese: 'd', mudanca: 'd' } });
+  check('no maximo 3 experimentos ao mesmo tempo, e explica por que',
+    quarto.status === 400 && /ao mesmo tempo/.test(quarto.data.error || ''), quarto.data.error);
+
+  const lista = await req('/api/experimentos', { token: t1 });
+  check('a lista traz os 3 em aberto e as metricas disponiveis', lista.data.emAberto === 3 && lista.data.metricas.length === 3);
+  const conc = await req(`/api/experimentos/${exp1.data.id}/concluir`, { method: 'POST', token: t1, body: { conclusao: 'funcionou, vou manter' } });
+  check('concluir exige escrever a conclusao e salva', conc.status === 200
+    && (await req('/api/experimentos', { token: t1 })).data.itens.find((x) => x.id === exp1.data.id)?.conclusao === 'funcionou, vou manter');
+  check('concluir sem escrever nada e recusado',
+    (await req(`/api/experimentos/${(await req('/api/experimentos', { token: t1 })).data.itens.find((x) => x.status === 'rodando').id}/concluir`, { method: 'POST', token: t1, body: {} })).status === 400);
+  check('nao da para concluir duas vezes',
+    (await req(`/api/experimentos/${exp1.data.id}/concluir`, { method: 'POST', token: t1, body: { conclusao: 'de novo' } })).status === 409);
+  check('ninguem mexe no experimento de outra pessoa',
+    (await req(`/api/experimentos/${exp1.data.id}`, { method: 'DELETE', token: t2 })).status === 404);
+  check('experimento exige login', (await req('/api/experimentos')).status === 401);
+
+  // o aviso da data de revisao
+  const { avisarExperimentos } = await import('../src/experimentos.js');
+  await db.run("UPDATE experimentos SET revisar_em='2020-01-01T00:00:00Z' WHERE user_id=? AND status='rodando'", [u1.data.user.id]);
+  const avisados = await avisarExperimentos(db);
+  check('quando chega a data, a pessoa e avisada', avisados >= 1
+    && (await req('/api/notifications', { token: t1 })).data.itens.some((x) => /experimento/i.test(x.titulo)));
+  check('e nao avisa duas vezes pelo mesmo', (await avisarExperimentos(db)) === 0);
+}
+
 // ---------- Sua proxima acao ----------
 console.log('\n— Sua próxima ação —');
 {

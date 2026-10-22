@@ -16,6 +16,7 @@ import { pedidoRoutes } from './pedidos.js';
 import { chatRoutes } from './chat.js';
 import { xrayRoutes } from './xray.js';
 import { proximaRoutes } from './proxima.js';
+import { experimentoRoutes } from './experimentos.js';
 import { blockRoutes } from './blocks.js';
 import { geminiKey } from './gemini.js';
 
@@ -54,6 +55,7 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
   chatRoutes(app, db, auth);
   xrayRoutes(app, db, auth);
   proximaRoutes(app, db, auth);
+  experimentoRoutes(app, db, auth);
 
   app.get('/api/plans', async (req, res, next) => {
     try {
@@ -102,6 +104,10 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
   await printSetupHints(db);
   if (scheduler) {
     setInterval(() => runAbScheduler(db).catch((e) => console.error('[ab]', e.message)), 5 * 60 * 1000).unref();
+    setInterval(async () => {
+      try { const { avisarExperimentos } = await import('./experimentos.js'); await avisarExperimentos(db); }
+      catch (e) { console.error('[experimentos]', e.message); }
+    }, 60 * 60 * 1000).unref();
   }
   return { app, db };
 }
