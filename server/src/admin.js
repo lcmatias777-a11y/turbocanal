@@ -1,5 +1,5 @@
 import { getSetting, setSetting } from './db.js';
-import { HttpError, audit, isEmail, must } from './util.js';
+import { HttpError, audit, isEmail, must, now } from './util.js';
 import { grant } from './credits.js';
 import { activatePayment, providerReady } from './payments.js';
 import { googleConfigured } from './auth.js';
@@ -17,6 +17,39 @@ const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
 
 export function adminRoutes(app, db, auth) {
   const wrap = (fn) => async (req, res, next) => { try { await fn(req, res); } catch (e) { next(e); } };
+
+  // ---------- Backup: baixar uma cópia do banco ----------
+  // O Postgres gratuito do Render expira; isto garante que dá para recomeçar sem perder nada.
+  const TABELAS_BACKUP = ['users', 'plans', 'tool_costs', 'transactions', 'payments', 'settings', 'audit',
+    'ab_tests', 'competitors', 'reviews', 'site_comments', 'respostas', 'review_votes', 'review_reports', 'blocos'];
+  // Segredos e tokens do YouTube ficam de fora: backup é para os DADOS, não para as chaves.
+  const SEGREDO = /^(gemini_api_key|yt_api_key|mp_access_token|jwt_secret|admin_setup_token)$/;
+
+  app.get('/api/admin/backup', ...auth.owner, wrap(async (req, res) => {
+    const dump = { gerado_em: now(), banco: db.kind, versao: 1, tabelas: {} };
+    for (const t of TABELAS_BACKUP) {
+      try {
+        let linhas = await db.all(`SELECT * FROM ${t}`);
+        if (t === 'users') linhas = linhas.map((u) => ({ ...u, pass_hash: u.pass_hash ? '(removido do backup)' : null }));
+        if (t === 'settings') linhas = linhas.filter((r) => !SEGREDO.test(r.key));
+        dump.tabelas[t] = linhas;
+      } catch { dump.tabelas[t] = []; }
+    }
+    dump.resumo = Object.fromEntries(Object.entries(dump.tabelas).map(([t, l]) => [t, l.length]));
+    await audit(db, req.user, 'admin.backup', 'banco', `${Object.values(dump.resumo).reduce((a, b) => a + b, 0)} linhas`);
+    res.setHeader('Content-Disposition', `attachment; filename="turbocanal-backup-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.send(JSON.stringify(dump, null, 2));
+  }));
+
+  app.get('/api/admin/backup/resumo', ...auth.admin, wrap(async (req, res) => {
+    const resumo = {};
+    for (const t of TABELAS_BACKUP) {
+      try { resumo[t] = Number((await db.get(`SELECT COUNT(*) AS n FROM ${t}`)).n) || 0; } catch { resumo[t] = 0; }
+    }
+    const ultimo = await db.get("SELECT created_at FROM audit WHERE action='admin.backup' ORDER BY created_at DESC LIMIT 1");
+    res.json({ resumo, total: Object.values(resumo).reduce((a, b) => a + b, 0), ultimo_backup: ultimo?.created_at || null });
+  }));
 
   app.get('/api/admin/overview', ...auth.admin, wrap(async (req, res) => {
     const users = (await db.get('SELECT COUNT(*)::int AS n FROM users')).n;

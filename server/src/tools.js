@@ -130,6 +130,20 @@ export function toolRoutes(app, db, auth) {
     (req, res, next) => { const i = ideasInput(req); next(i.niche || i.titles.length ? undefined : new HttpError(400, 'Diga o tema do canal (ou vincule seu canal para eu usar os seus vídeos).')); },
     run('ideas_ai', (req) => ai.channelIdeas(db, ideasInput(req))));
 
+  // Auditoria do canal: os dados saem do YouTube aqui no servidor, não do navegador
+  app.post('/api/tools/audit_ai', auth.required, AI, run('audit_ai', async (req) => {
+    const { myChannelAudit } = await import('./channel.js');
+    const dados = await myChannelAudit(db, req.user);
+    return ai.channelAudit(db, dados);
+  }));
+
+  // Laboratório de título
+  app.post('/api/tools/title_lab', auth.required, AI, run('title_lab', (req) => ai.titleLab(db, {
+    titulo: must(req.body?.titulo ?? req.body?.title, 'título', { max: 200 }),
+    palavra: String(req.body?.palavra || '').slice(0, 60),
+    canal: String(req.body?.canal || '').slice(0, 100)
+  })));
+
   // Sugestões de resposta a um comentário
   app.post('/api/tools/reply_ai', auth.required, AI, run('reply_ai', (req) => {
     const comment = must(req.body?.comment, 'comentário', { max: 2000 });

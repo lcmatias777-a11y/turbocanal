@@ -231,7 +231,9 @@ const TOOL_SEED = [
   ['playlist_create', 10, 'Criar playlist no YouTube'],
   ['playlist_add', 5, 'Adicionar ou remover vídeo de playlist'],
   ['ideas_ai', 10, 'Ideias de vídeos para o seu canal (IA)'],
-  ['coach_ai', 300, 'Análise da IA na extensão (resumo, gancho, desempenho, ideias)']
+  ['coach_ai', 300, 'Análise da IA na extensão (resumo, gancho, desempenho, ideias)'],
+  ['audit_ai', 200, 'Auditoria do canal (IA): nota, o que funciona e 5 melhorias'],
+  ['title_lab', 100, 'Laboratório de título: nota, diagnóstico e 5 alternativas (IA)']
 ];
 
 const DEFAULT_SETTINGS = () => ({

@@ -81,6 +81,38 @@ export async function myChannel(db, user) {
   return { token, channel: c };
 }
 
+/** Dados do canal do próprio usuário, prontos para a auditoria da IA.
+ *  Busca aqui no servidor (não aceita lista vinda do navegador). */
+export async function myChannelAudit(db, user) {
+  const { token, channel } = await myChannel(db, user);
+  const uploads = channel.contentDetails?.relatedPlaylists?.uploads;
+  let videos = [];
+  if (uploads) {
+    const pl = await yt(token, 'playlistItems', { params: { part: 'contentDetails', playlistId: uploads, maxResults: 25 } });
+    const ids = (pl.items || []).map((i) => i.contentDetails?.videoId).filter(Boolean);
+    if (ids.length) {
+      const vs = await yt(token, 'videos', { params: { part: 'snippet,statistics,status,contentDetails', id: ids.join(','), maxResults: 25 } });
+      videos = (vs.items || []).map(mapVideo).filter((v) => v.privacy === 'public');
+    }
+  }
+  const st = channel.statistics || {};
+  return {
+    canal: channel.snippet?.title || '',
+    inscritos: st.hiddenSubscriberCount ? null : +st.subscriberCount || 0,
+    videos: videos.map((v) => ({
+      titulo: v.title,
+      views: v.views,
+      likes: v.likes,
+      comentarios: v.comments,
+      duracaoSeg: v.durationSec,
+      tags: (v.tags || []).length,
+      descricaoTam: (v.description || '').length,
+      seo: v.seoScore,
+      publicado: v.publishedAt
+    }))
+  };
+}
+
 async function ownedVideo(db, user, videoId) {
   const { token, channel } = await myChannel(db, user);
   const r = await yt(token, 'videos', { params: { part: 'snippet,statistics,status,contentDetails', id: videoId } });

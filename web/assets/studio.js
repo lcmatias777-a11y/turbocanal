@@ -107,6 +107,33 @@ export function buildArgs(op, { inName, start = 0, end = null, duration = null, 
     }
     case 'compress':
       return { args: [...ss, ...t, '-i', inName, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '30', '-pix_fmt', 'yuv420p', '-vf', "scale='min(1280,iw)':-2", ...(hasAudio ? ['-c:a', 'aac', '-b:a', '96k'] : ['-an']), ...tail, 'out.mp4'], out: 'out.mp4', mime: 'video/mp4' };
+    case 'gif': {
+      const tg = ['-t', String(Math.min(len ?? 8, 10))]; // GIF longo fica gigante
+      const fc = 'fps=12,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse';
+      return { args: [...ss, ...tg, '-i', inName, '-filter_complex', fc, '-loop', '0', 'out.gif'], out: 'out.gif', mime: 'image/gif' };
+    }
+    case 'rotate_right':
+      return { args: [...ss, ...t, '-i', inName, '-vf', 'transpose=1', ...enc, ...aenc, ...tail, 'out.mp4'], out: 'out.mp4', mime: 'video/mp4' };
+    case 'rotate_left':
+      return { args: [...ss, ...t, '-i', inName, '-vf', 'transpose=2', ...enc, ...aenc, ...tail, 'out.mp4'], out: 'out.mp4', mime: 'video/mp4' };
+    case 'flip':
+      return { args: [...ss, ...t, '-i', inName, '-vf', 'hflip', ...enc, ...aenc, ...tail, 'out.mp4'], out: 'out.mp4', mime: 'video/mp4' };
+    case 'volume_up': {
+      const a = hasAudio ? ['-af', 'volume=6dB', '-c:a', 'aac', '-b:a', '160k'] : ['-an'];
+      return { args: [...ss, ...t, '-i', inName, '-c:v', 'copy', ...a, ...tail, 'out.mp4'], out: 'out.mp4', mime: 'video/mp4' };
+    }
+    case 'fade': {
+      if (!len || len < 2) throw new Error('Para o fade, marque o início e o fim (precisa de pelo menos 2 segundos).');
+      const d = 0.6, fim = (len - d).toFixed(2);
+      const vf = `fade=t=in:st=0:d=${d},fade=t=out:st=${fim}:d=${d}`;
+      const af = hasAudio ? ['-af', `afade=t=in:st=0:d=${d},afade=t=out:st=${fim}:d=${d}`] : [];
+      return { args: [...ss, ...t, '-i', inName, '-vf', vf, ...af, ...enc, ...aenc, ...tail, 'out.mp4'], out: 'out.mp4', mime: 'video/mp4' };
+    }
+    case 'contact_sheet': {
+      const quantos = 6;
+      const fps = len && len > quantos ? `${quantos}/${len.toFixed(2)}` : '1/5';
+      return { args: [...ss, ...t, '-i', inName, '-vf', `fps=${fps},scale=480:-1,tile=3x2`, '-frames:v', '1', 'out.png'], out: 'out.png', mime: 'image/png' };
+    }
     default:
       throw new Error('Operação desconhecida: ' + op);
   }
@@ -120,7 +147,14 @@ const OPS = [
   ['speed', '⏩ Acelerar 1,5x'],
   ['mute', '🔇 Remover áudio'],
   ['mp3', '🎵 Extrair áudio (MP3)'],
-  ['compress', '🗜️ Comprimir (até 720p, arquivo menor)']
+  ['compress', '🗜️ Comprimir (até 720p, arquivo menor)'],
+  ['gif', '🎞️ Virar GIF (até 10s, bom para post e thread)'],
+  ['contact_sheet', '🖼️ Mosaico de 6 quadros (para escolher a capa)'],
+  ['rotate_right', '↻ Girar 90° para a direita'],
+  ['rotate_left', '↺ Girar 90° para a esquerda'],
+  ['flip', '🪞 Espelhar (inverter horizontal)'],
+  ['volume_up', '🔊 Aumentar o volume (+6 dB)'],
+  ['fade', '🌗 Fade no começo e no fim']
 ];
 
 export async function mountEditor(el, ctx) {
@@ -130,7 +164,7 @@ export async function mountEditor(el, ctx) {
   const cuts = Array.isArray(preset.cuts) ? preset.cuts.filter((c) => c.end > c.start) : [];
   el.innerHTML = `
     <h1>✂️ Editor de vídeo</h1>
-    <p class="muted">Corte, transforme em Shorts, acelere, tire o áudio ou comprima. Roda <b>no seu navegador</b>: o vídeo não sai do seu computador e não gasta créditos. Depois, é só postar no seu canal.</p>
+    <p class="muted">Corte, transforme em Shorts, gire, vire GIF, tire um mosaico de quadros para escolher a capa, acelere, aumente o volume ou comprima. Roda <b>no seu navegador</b>: o vídeo não sai do seu computador e não gasta créditos. Depois, é só postar no seu canal.</p>
     ${preset.title ? alertBox('info', `Corte sugerido pela IA: <b>${esc(preset.title)}</b> (${esc(fmtTime(preset.start))} a ${esc(fmtTime(preset.end))}). Escolha o arquivo original do vídeo para aplicar.`) : ''}
     ${cuts.length ? alertBox('info', `A IA achou <b>${cuts.length} cortes</b>:<br>${cuts.map((c, i) => `${i + 1}) ${esc(c.title || 'Corte ' + (i + 1))} (${esc(fmtTime(c.start))} a ${esc(fmtTime(c.end))})`).join('<br>')}<br>Escolha abaixo o arquivo ORIGINAL do vídeo e clique em <b>Fazer os ${cuts.length} Shorts</b>.`) : ''}
     <div class="card">

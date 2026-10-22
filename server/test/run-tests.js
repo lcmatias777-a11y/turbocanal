@@ -579,6 +579,49 @@ check('apagar a própria avaliação recalcula a média na hora',
   apagar.status === 200 && depoisApagar.data.resumo.total === 1 && depoisApagar.data.resumo.media === 2, JSON.stringify(depoisApagar.data.resumo));
 
 
+// ---------- Backup do banco ----------
+console.log('\n— Backup do banco —');
+const bkComum = await req('/api/admin/backup', { token: t1 });
+check('usuário comum não baixa backup', bkComum.status === 403);
+const bkAdmin = await req('/api/admin/backup', { token: tEq });
+check('administrador comum também não baixa (só o principal)', bkAdmin.status === 403, String(bkAdmin.status));
+const bk = await req('/api/admin/backup', { token: tOwn });
+check('o administrador principal baixa o backup', bk.status === 200 && bk.data.tabelas && bk.data.resumo);
+check('o backup traz os dados de verdade (usuários, planos, créditos)',
+  bk.data.tabelas.users.length >= 2 && bk.data.tabelas.plans.length === 6 && bk.data.tabelas.transactions.length > 0, JSON.stringify(bk.data.resumo));
+check('o backup NÃO leva senha nem chaves de API',
+  bk.data.tabelas.users.every((u) => !u.pass_hash || u.pass_hash === '(removido do backup)')
+  && !bk.data.tabelas.settings.some((r) => /api_key|jwt_secret|mp_access_token|setup_token/.test(r.key)),
+  JSON.stringify(bk.data.tabelas.settings.map((r) => r.key)));
+const resumoBk = await req('/api/admin/backup/resumo', { token: tOwn });
+check('o painel mostra quantas linhas existem e quando foi o último backup',
+  resumoBk.status === 200 && resumoBk.data.total > 0 && !!resumoBk.data.ultimo_backup, JSON.stringify(resumoBk.data).slice(0, 120));
+
+// ---------- Ferramentas novas: auditoria do canal e laboratório de título ----------
+console.log('\n— Auditoria do canal e título —');
+let b0a = (await req('/api/me', { token: t1 })).data.user.credits;
+const aud = await req('/api/tools/audit_ai', { method: 'POST', token: t1, body: {} });
+check('auditoria do canal: nota, o que funciona, 5 melhorias e próximos vídeos',
+  aud.status === 200 && typeof aud.data.result.nota === 'number' && aud.data.result.melhorias.length === 5
+  && aud.data.result.funciona.length === 3 && aud.data.result.proximos.length === 3, JSON.stringify(aud.data).slice(0, 180));
+check('cada melhoria vem com o dado que a sustenta', aud.data.result.melhorias.every((m) => m.dado && m.acao));
+check('a auditoria diz em que se baseou (quantidade de vídeos e mediana)', aud.data.result.base?.videos > 0 && aud.data.result.base.medianaViews >= 0, JSON.stringify(aud.data.result.base));
+check('a auditoria avisa que não tem retenção nem CTR', /retenção|CTR/i.test(aud.data.result.aviso || ''));
+check('auditoria custa 200 créditos', aud.data.credits.charged === 200 && (await req('/api/me', { token: t1 })).data.user.credits === b0a - 200);
+
+b0a = (await req('/api/me', { token: t1 })).data.user.credits;
+const tl = await req('/api/tools/title_lab', { method: 'POST', token: t1, body: { titulo: 'EU FIZ ISSO', palavra: 'bedwars' } });
+check('laboratório de título: nota medida aqui, diagnóstico e 5 alternativas',
+  tl.status === 200 && tl.data.result.alternativas.length === 5 && tl.data.result.checagem.length === 6, JSON.stringify(tl.data).slice(0, 160));
+check('título curto, em caixa alta e sem a palavra-chave tira nota baixa', tl.data.result.nota <= 40, String(tl.data.result.nota));
+const tlBom = await req('/api/tools/title_lab', { method: 'POST', token: t1, body: { titulo: 'Como vencer no bedwars: 7 truques que funcionam', palavra: 'bedwars' } });
+check('título bom tira nota alta', tlBom.data.result.nota >= 80, String(tlBom.data.result.nota));
+check('laboratório de título custa 100 créditos', tl.data.credits.charged === 100);
+check('título é obrigatório', (await req('/api/tools/title_lab', { method: 'POST', token: t1, body: {} })).status === 400);
+const custos = (await req('/api/tools/costs')).data.costs;
+check('as duas ferramentas novas aparecem na tabela de preços',
+  custos.find((c) => c.tool === 'audit_ai')?.cost === 200 && custos.find((c) => c.tool === 'title_lab')?.cost === 100);
+
 // ---------- Avisos e cards do painel ----------
 console.log('\n— Avisos e cards —');
 const vazioBl = await req('/api/blocks?pagina=home');

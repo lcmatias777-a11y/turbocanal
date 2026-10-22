@@ -46,6 +46,16 @@ export async function startFakeGemini() {
       })));
     }
     if (/desempenho \(/.test(text)) return res.json(reply(JSON.stringify({ resumo: 'O jogador vence partidas de bedwars.', gancho: { nota: 7, analise: 'Começa mostrando a vitória.', sugestao: 'Mostre o placar antes.' }, desempenho: { veredito: 'acima da média', porque: 'Tem 4800 views, bem acima dos outros vídeos.' }, ideias: [{ titulo: 'Bedwars só com arco', porque: 'Desafio parecido' }, { titulo: 'Bedwars sem armadura', porque: 'Curiosidade' }, { titulo: 'Bedwars em 1 minuto', porque: 'Shorts' }, { titulo: 'extra' }], inscritos: ['Peça inscrição no pico do vídeo.', 'Faça séries.', 'Responda comentários.'] })));
+    if (/"melhorias":\[\{"titulo"/.test(text)) return res.json(reply(JSON.stringify({
+      nota: 72, resumo: 'Canal pequeno com vídeos acima da mediana quando são curtos.',
+      funciona: [{ ponto: 'Vídeos curtos rendem mais', dado: 'os 3 acima da mediana têm menos de 8 min' }, { ponto: 'Títulos com número', dado: '2 dos 3 melhores têm número' }, { ponto: 'Tags consistentes', dado: 'média de 9 tags' }],
+      melhorias: Array.from({ length: 7 }, (_, i) => ({ titulo: `Melhoria ${i + 1}`, dado: `dado ${i + 1}`, acao: `ação ${i + 1}` })),
+      proximos: [{ titulo: 'Próximo 1', porque: 'padrão dos curtos' }, { titulo: 'Próximo 2', porque: 'tags' }, { titulo: 'Próximo 3', porque: 'número no título' }]
+    })));
+    if (/"alternativas":\[\{"titulo"/.test(text)) return res.json(reply(JSON.stringify({
+      diagnostico: 'O título é longo e não traz a palavra-chave no começo.',
+      alternativas: Array.from({ length: 7 }, (_, i) => ({ titulo: `Alternativa ${i + 1}`, porque: `motivo ${i + 1}` }))
+    })));
     if (/"ideias"/.test(text)) return res.json(reply(JSON.stringify({ ideias: Array.from({ length: 10 }, (_, i) => ({ titulo: `Ideia ${i + 1} de bedwars`, formato: i % 2 ? 'Shorts' : 'Longo', porque: 'Combina com o canal.', palavra_chave: 'bedwars' })) })));
     if (/"respostas"/.test(text)) return res.json(reply('```json\n' + JSON.stringify({ respostas: ['Valeu!', 'Boa pergunta!', 'Qual parte você mais gostou?'] }) + '\n```'));
     if (/titulos \(8 títulos/.test(text)) return res.json(reply(JSON.stringify({ titulos: ['T1', 'T2', 'T3', 'T4', 'T5'], descricao: 'desc', tags: ['a', 'b'], hashtags: ['#a'], capa_textos: ['UAU'], roteiro: [{ parte: 'Gancho', texto: 'x' }, { parte: 'Promessa', texto: 'y' }, { parte: 'Parte 1', texto: 'z' }, { parte: 'Final', texto: 'w' }], ideias: ['i1', 'i2', 'i3', 'i4', 'i5'] })));

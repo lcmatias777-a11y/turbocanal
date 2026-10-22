@@ -39,6 +39,8 @@ const TOOL_LINKS = [
   ['#/ferramentas/video', 'Analisar vídeo'],
   ['#/ferramentas/canal', 'Analisar canal'],
   ['#/ferramentas/tendencias', '🔥 Tendências do seu nicho'],
+  ['#/ferramentas/auditoria', '🩺 Auditoria do meu canal (IA)'],
+  ['#/ferramentas/titulo', '🧲 Laboratório de título'],
   ['#/ferramentas/insights', '✨ IA do vídeo (assiste e sugere)'],
   ['#/ferramentas/ideias', '💡 Ideias de vídeos'],
   ['#/ferramentas/preparar', '📝 Preparar publicação'],
@@ -619,6 +621,60 @@ views['ferramentas/ideias'] = toolPage({
   after: (r, out) => {
     for (const a of out.querySelectorAll('[data-prep]')) a.onclick = () => { state.toolPrefill = { topic: r.ideias[+a.dataset.prep].titulo }; };
     for (const a of out.querySelectorAll('[data-kw]')) a.onclick = () => { state.toolPrefill = { q: r.ideias[+a.dataset.kw].palavra_chave || r.ideias[+a.dataset.kw].titulo }; };
+  }
+});
+
+views['ferramentas/auditoria'] = toolPage({
+  title: '🩺 Auditoria do meu canal (IA)', toolKey: 'audit_ai',
+  desc: 'A IA olha os seus últimos vídeos públicos (views, likes, comentários, duração, tags, descrição e nota de SEO) e devolve uma nota do canal, o que já está funcionando e 5 melhorias para o próximo vídeo. Cada recomendação vem com o número que a sustenta.',
+  formHtml: `<div id="audCanal" class="muted small">Verificando o seu canal…</div>`,
+  onMount: async () => {
+    const box = $('#audCanal');
+    if (!box) return;
+    box.innerHTML = state.user?.youtube?.connected
+      ? `✅ Vou buscar os últimos vídeos de <b>${esc(state.user.youtube.channel_title || 'seu canal')}</b> direto no YouTube.`
+      : 'Para auditar, vincule seu canal primeiro: <a href="/api/auth/google?connect=1">Vincular meu canal</a>.';
+  },
+  getBody: () => ({}),
+  render: (r) => `<div class="card">
+      <div class="row" style="gap:16px;align-items:center;flex-wrap:wrap">
+        <div class="kpi" style="font-size:2.6rem">${r.nota}<span class="muted" style="font-size:1rem">/100</span></div>
+        <div><b>Nota do canal</b><div class="muted small">${esc(r.resumo || '')}</div></div>
+      </div>
+      <p class="muted small">Base: ${r.base?.videos || 0} vídeos públicos · mediana de ${fmt(r.base?.medianaViews || 0)} views.</p>
+    </div>
+    <div class="card" style="margin-top:12px"><h3>✅ O que já está funcionando</h3>
+      ${(r.funciona || []).map((f) => `<p><b>${esc(f.ponto)}</b><br><span class="muted small">📊 ${esc(f.dado || '')}</span></p>`).join('') || '<p class="muted">—</p>'}</div>
+    <div class="card" style="margin-top:12px"><h3>🔧 5 melhorias para o próximo vídeo</h3>
+      ${(r.melhorias || []).map((m, i) => `<div class="rv-item"><div class="rv-cab"><span class="pill">${i + 1}</span> <b>${esc(m.titulo)}</b></div>
+        <p class="muted small">📊 ${esc(m.dado || '')}</p><p>${esc(m.acao || '')}</p></div>`).join('')}</div>
+    <div class="card" style="margin-top:12px"><h3>💡 Próximos vídeos sugeridos</h3>
+      ${(r.proximos || []).map((x) => `<p><b>${esc(x.titulo)}</b><br><span class="muted small">${esc(x.porque || '')}</span></p>`).join('') || '<p class="muted">—</p>'}
+      <p class="small muted">${esc(r.aviso || '')}</p></div>`
+});
+
+views['ferramentas/titulo'] = toolPage({
+  title: '🧲 Laboratório de título', toolKey: 'title_lab',
+  desc: 'Cola o título que você pensou. A nota sai de critérios medidos aqui (tamanho, número, palavra-chave no começo, caixa alta, promessa e emoji) e a IA escreve 5 alternativas melhores, explicando cada uma.',
+  formHtml: `<label>Título que você pensou</label><input name="titulo" required maxlength="200" placeholder="ex.: Transformei FINGERDASH em uma fase IMPOSSÍVEL!">
+    <label>Palavra-chave que você quer rankear (opcional)</label><input name="palavra" maxlength="60" placeholder="ex.: geometry dash">`,
+  getBody: (fd) => ({ titulo: fd.get('titulo'), palavra: fd.get('palavra'), canal: state.user?.youtube?.channel_title || '' }),
+  render: (r) => `<div class="card">
+      <div class="row" style="gap:16px;align-items:center;flex-wrap:wrap">
+        <div class="kpi" style="font-size:2.6rem">${r.nota}<span class="muted" style="font-size:1rem">/100</span></div>
+        <div><b>${esc(r.original)}</b><div class="muted small">${esc(r.diagnostico || '')}</div></div>
+      </div>
+      ${(r.checagem || []).map((c) => `<div class="small">${c.ok ? '✅' : '⚠️'} ${esc(c.item)}${c.ok ? '' : ` <span class="muted">— ${esc(c.dica)}</span>`}</div>`).join('')}
+    </div>
+    <div class="card" style="margin-top:12px"><h3>5 alternativas</h3>
+      ${(r.alternativas || []).map((a, i) => `<div class="rv-item"><div class="rv-cab"><span class="pill">${i + 1}</span> <b>${esc(a.titulo)}</b> <span class="muted small">${a.titulo.length} caracteres</span></div>
+        <p class="muted small">${esc(a.porque || '')}</p>
+        <div class="rv-acoes"><button data-copiar="${esc(a.titulo)}">📋 copiar</button></div></div>`).join('')}
+      <p class="small muted">${esc(r.aviso || '')}</p></div>`,
+  after: (r, out) => {
+    for (const b of out.querySelectorAll('[data-copiar]')) b.onclick = async () => {
+      try { await navigator.clipboard.writeText(b.dataset.copiar); b.textContent = '✅ copiado'; } catch { b.textContent = '❌ não deu'; }
+    };
   }
 });
 
@@ -1533,6 +1589,9 @@ const adminTabs = {
         <p class="small muted">Login com Google: ${s.google_login_configured ? '<span class="pill ok">ativo</span>' : '<span class="pill warn">pendente</span> (variáveis GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no servidor; URI de redirecionamento: <span class="copybox" style="display:inline-block">' + esc(s.google_redirect_uri) + '</span>)'}
         <br>Banco de dados: <span class="pill ${s.database === 'postgres' ? 'ok' : 'warn'}">${esc(s.database)}</span>${s.database !== 'postgres' ? ' (sem DATABASE_URL os dados não persistem em hospedagem com disco efêmero)' : ''}</p>
         <p><button id="csave" class="btn sm">Salvar</button></p></div>
+      <div class="card"><h3>Backup do banco</h3><div id="bkp"><span class="spin"></span></div>
+        <p class="small muted">O Postgres gratuito do Render expira em 19/11/2026. Baixe uma cópia de vez em quando: o arquivo traz usuários, créditos, histórico, pagamentos, avaliações e os avisos. Chaves de API e senhas <b>não</b> vão no arquivo.</p>
+        <p><a class="btn sm" href="/api/admin/backup" download>⬇️ Baixar backup agora</a></p></div>
       <div class="card"><h3>Pagamentos (Pix)</h3><div id="pmsg2"></div>
         <details class="small" ${s.payments_enabled === '1' ? '' : 'open'}><summary><b>Como ligar os pagamentos (passo a passo)</b></summary>
         <ol class="muted">
@@ -1556,6 +1615,16 @@ const adminTabs = {
         <p><label style="display:inline"><input type="checkbox" id="c_payon" style="width:auto" ${s.payments_enabled === '1' ? 'checked' : ''}> Pagamentos ativados</label></p>
         <p><button id="psave" class="btn sm">Salvar pagamentos</button></p></div>
       </div>`;
+    (async () => {
+      const el = $('#bkp');
+      if (!el) return;
+      try {
+        const b = await api('/admin/backup/resumo');
+        const linhas = Object.entries(b.resumo).filter(([, n]) => n > 0).map(([t, n]) => `${esc(t)}: ${fmt(n)}`).join(' · ');
+        el.innerHTML = `<p><b>${fmt(b.total)}</b> linhas no banco agora.<br><span class="muted small">${linhas || 'banco vazio'}</span></p>
+          <p class="small ${b.ultimo_backup ? 'muted' : ''}">${b.ultimo_backup ? 'Último backup: ' + dt(b.ultimo_backup) : '⚠️ Você ainda não baixou nenhum backup.'}</p>`;
+      } catch (e) { el.innerHTML = alertBox('warn', esc(e.message)); }
+    })();
     $('#csave').onclick = async () => {
       try {
         const updates = { site_name: $('#c_site').value, free_monthly_topup: $('#c_topup').value };

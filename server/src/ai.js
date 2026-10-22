@@ -98,6 +98,88 @@ export async function channelIdeas(db, { niche = '', titles = [], channel = '' }
   return { ideias: parsed.ideias.slice(0, 10), metodo: 'ia', modelo, base: list.length };
 }
 
+// ---------------- Auditoria do canal ----------------
+/** Olha os últimos vídeos do canal e devolve nota, o que funciona e 5 melhorias.
+ *  Regra: cada recomendação precisa citar o DADO que a sustenta (nada de palpite solto). */
+export async function channelAudit(db, { canal = '', inscritos = null, videos = [] }) {
+  const lista = videos.slice(0, 25);
+  if (!lista.length) throw new HttpError(400, 'Não encontrei vídeos no seu canal para auditar.');
+  const mediana = (arr) => {
+    const v = arr.filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+    return v.length ? v[Math.floor(v.length / 2)] : 0;
+  };
+  const medViews = mediana(lista.map((v) => v.views));
+  const linhas = lista.map((v, i) =>
+    `${i + 1}. "${String(v.titulo).slice(0, 90)}" | ${v.views} views | ${v.likes ?? '?'} likes | ${v.comentarios ?? '?'} comentários | ` +
+    `${v.duracaoSeg ? Math.round(v.duracaoSeg / 60) + ' min' : 'duração ?'} | ${v.tags} tags | descrição ${v.descricaoTam} caracteres | SEO ${v.seo}/100 | publicado ${String(v.publicado || '').slice(0, 10)}`
+  ).join('\n');
+  const prompt =
+    `Você é um analista de canais do YouTube, brasileiro, direto e honesto. Audite o canal com os dados REAIS abaixo. ` +
+    `Canal: "${canal}"${inscritos != null ? `, ${inscritos} inscritos` : ''}. Mediana de views dos últimos vídeos: ${medViews}.\n` +
+    `ÚLTIMOS VÍDEOS:\n${linhas}\n\n` +
+    `Regras: use SOMENTE esses números; toda recomendação precisa citar o dado que a sustenta (ex.: "os 3 vídeos acima da mediana têm menos de 8 minutos"); ` +
+    `não prometa resultado garantido; não invente métricas que não estão aí (retenção, CTR e impressões NÃO estão disponíveis, não fale delas como se soubesse). ` +
+    `Responda SOMENTE com JSON válido, sem markdown: ` +
+    `{"nota":0-100,"resumo":"2 frases sobre o estado do canal","funciona":[{"ponto":"o que está dando certo","dado":"o número que mostra isso"}],` +
+    `"melhorias":[{"titulo":"melhoria em até 8 palavras","dado":"o número que justifica","acao":"o que fazer no próximo vídeo, bem concreto"}],` +
+    `"proximos":[{"titulo":"ideia de próximo vídeo","porque":"baseado em qual padrão"}]} ` +
+    `Exatamente 5 itens em "melhorias", 3 em "funciona" e 3 em "proximos".`;
+  const { parsed, modelo } = await askJson(db, prompt, 2200, (p) => Array.isArray(p.melhorias) && p.melhorias.length);
+  return {
+    nota: Math.max(0, Math.min(100, Math.round(Number(parsed.nota) || 0))),
+    resumo: String(parsed.resumo || '').slice(0, 600),
+    funciona: (parsed.funciona || []).slice(0, 3),
+    melhorias: parsed.melhorias.slice(0, 5),
+    proximos: (parsed.proximos || []).slice(0, 3),
+    base: { videos: lista.length, medianaViews: medViews },
+    aviso: 'Análise feita só com os números públicos dos seus vídeos. Não inclui retenção, CTR nem impressões (o YouTube não libera isso aqui).',
+    metodo: 'ia',
+    modelo
+  };
+}
+
+// ---------------- Laboratório de título ----------------
+/** Nota do título com critérios objetivos (medidos aqui, não pela IA) + 5 alternativas. */
+export function titleChecks(titulo, palavra = '') {
+  const t = String(titulo || '').trim();
+  const p = String(palavra || '').trim().toLowerCase();
+  const checks = [];
+  const add = (item, ok, dica) => checks.push({ item, ok: !!ok, dica });
+  add('Entre 20 e 70 caracteres', t.length >= 20 && t.length <= 70, `Está com ${t.length}. Acima de 70 o YouTube corta no feed.`);
+  add('Tem número ou colchete', /\d|\[|\(/.test(t), 'Números e marcadores costumam aumentar o clique.');
+  add('Palavra-chave nas primeiras 40 letras', !p || t.slice(0, 40).toLowerCase().includes(p), p ? `Coloque "${palavra}" no começo.` : 'Informe a palavra-chave para eu conferir.');
+  add('Sem CAIXA ALTA exagerada', (t.replace(/[^A-ZÁÉÍÓÚÂÊÔÃÕÇ]/g, '').length / Math.max(1, t.replace(/\s/g, '').length)) < 0.5, 'Mais da metade em maiúsculas parece spam.');
+  add('Promete algo claro', /(como|por que|porque|o que|melhor|pior|nunca|sempre|segredo|erro|truque|guia|passo a passo|em \d)/i.test(t), 'Diga o que a pessoa ganha assistindo.');
+  add('Sem emoji demais', (t.match(/\p{Extended_Pictographic}/gu) || []).length <= 2, 'Até 2 emojis; mais do que isso polui.');
+  const ok = checks.filter((c) => c.ok).length;
+  return { nota: Math.round((ok / checks.length) * 100), checks, tamanho: t.length };
+}
+
+export async function titleLab(db, { titulo, palavra = '', canal = '' }) {
+  const medido = titleChecks(titulo, palavra);
+  const faltando = medido.checks.filter((c) => !c.ok).map((c) => c.item);
+  const prompt =
+    `Você é especialista em títulos do YouTube em português do Brasil. ` +
+    (canal ? `Canal: "${canal}". ` : '') +
+    `Título atual: "${String(titulo).slice(0, 120)}" (${medido.tamanho} caracteres).` +
+    (palavra ? ` Palavra-chave alvo: "${palavra}".` : '') +
+    (faltando.length ? ` Uma checagem objetiva apontou que falta: ${faltando.join('; ')}.` : ' A checagem objetiva não apontou problemas.') +
+    ` Escreva 5 alternativas melhores, cada uma com no máximo 70 caracteres, sem clickbait mentiroso (não prometa o que o título não entrega). ` +
+    `Para cada uma, diga em 1 frase o que ela faz melhor que o original. ` +
+    `Responda SOMENTE com JSON: {"diagnostico":"2 frases sobre o título atual","alternativas":[{"titulo":"...","porque":"..."}]}`;
+  const { parsed, modelo } = await askJson(db, prompt, 1200, (p) => Array.isArray(p.alternativas) && p.alternativas.length);
+  return {
+    original: String(titulo).slice(0, 200),
+    nota: medido.nota,
+    checagem: medido.checks,
+    diagnostico: String(parsed.diagnostico || '').slice(0, 400),
+    alternativas: parsed.alternativas.slice(0, 5).map((a) => ({ titulo: String(a.titulo || '').slice(0, 100), porque: String(a.porque || '').slice(0, 200) })),
+    aviso: 'A nota vem de critérios medidos aqui (tamanho, número, palavra-chave, caixa alta, promessa, emoji). As alternativas são sugestões da IA.',
+    metodo: 'ia',
+    modelo
+  };
+}
+
 // ---------------- Sugestões de resposta a comentários ----------------
 export async function replySuggestions(db, { comment, channel = '' }) {
   const prompt =
