@@ -1,0 +1,28 @@
+const { chromium } = require('/opt/npm-tools/node_modules/playwright');
+const LOCAL = process.argv[2];
+let pass = 0, fail = 0;
+const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); } else { fail++; console.log('  FALHOU ', n, x); } };
+(async () => {
+  const b = await chromium.launch({ channel: 'chromium', headless: true, args: ['--no-sandbox'] });
+  const erros = [];
+  const ctx = await b.newContext({ viewport: { width: 1280, height: 1100 }, baseURL: LOCAL });
+  let r = await ctx.request.post(LOCAL + '/api/auth/login', { data: { email: 'admin@example.com', password: 'senha12345' } });
+  if (!r.ok()) throw new Error('login do dono falhou: ' + r.status() + ' ' + (await r.text()).slice(0, 120));
+  const p = await ctx.newPage();
+  p.on('pageerror', (e) => erros.push(String(e)));
+  p.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) erros.push(m.text()); });
+  await p.goto(LOCAL + '/#/admin/geral');
+  await p.waitForSelector('#achk .rv-item', { timeout: 20000 });
+  const t = await p.textContent('#achk');
+  check('mostra os 8 pontos de configuração', (await p.$$('#achk .rv-item')).length === 8, String((await p.$$('#achk .rv-item')).length));
+  check('diz quantos estão prontos', /de 8 prontos/.test(t), t.slice(0, 120));
+  check('aponta o que bloqueia o site', /Bloqueia o site/.test(t));
+  check('cada pendência vem com o passo para resolver', (await p.$$('#achk .rv-item p')).length >= 1);
+  check('avisa que nenhuma chave aparece ali', /Nenhuma chave aparece aqui/.test(t));
+  check('não imprime valor de chave nenhuma', !/AIza|APP_USR/.test(t));
+  await p.screenshot({ path: process.argv[3] + '/admin-checklist.png', fullPage: false });
+  check('nenhum erro de JavaScript', erros.length === 0, erros.join(' | '));
+  await b.close();
+  console.log(`\nRESULTADO: ${pass} passaram, ${fail} falharam.`);
+  process.exit(fail ? 1 : 0);
+})().catch((e) => { console.error('ERRO:', e); process.exit(1); });

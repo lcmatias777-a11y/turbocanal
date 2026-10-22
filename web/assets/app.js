@@ -1526,7 +1526,6 @@ const adminTabs = {
 
   async geral(el) {
     const o = await api('/admin/overview');
-    const cfgPill = (ok, okTxt, noTxt) => `<span class="pill ${ok ? 'ok' : 'warn'}">${ok ? okTxt : noTxt}</span>`;
     el.innerHTML = `
       <section class="grid cols3">
         <div class="card"><h3>Usuários</h3><div class="kpi">${fmt(o.users)}</div>
@@ -1538,16 +1537,17 @@ const adminTabs = {
         <div class="card"><h3>Cota do YouTube hoje</h3><div class="kpi">${fmt(o.youtubeQuota?.usedToday || 0)} <small class="muted">/ ${fmt(o.youtubeQuota?.dailyLimit || 10000)}</small></div>
           <p class="muted small">Compartilhada por todo o site. Busca = 100 unidades, postar vídeo = 1.600, capa ou edição = 50, leitura = 1. Renova por volta das 4h ou 5h. Quando o site crescer, peça aumento gratuito ao Google no <a href="https://support.google.com/youtube/contact/yt_api_form" target="_blank" rel="noopener">formulário de cota da API do YouTube</a>.</p></div>
       </section>
-      <div class="card"><h3>Status da configuração</h3>
-        <p>YouTube API: ${cfgPill(o.config.youtubeApiConfigured, 'configurada', 'pendente')} ·
-           IA Gemini: ${cfgPill(o.config.geminiConfigured, 'configurada', 'pendente')} ·
-           Login Google: ${cfgPill(o.config.googleLoginConfigured, 'ativo', 'pendente')} ·
-           Banco: ${cfgPill(o.config.database === 'postgres', 'Postgres persistente', esc(o.config.database || ''))} ·
-           Provedor de pagamentos: ${cfgPill(o.config.paymentProviderConfigured, 'configurado', 'pendente')} ·
-           Pagamentos: ${cfgPill(o.config.paymentsEnabled, 'ativados', 'desativados')} ·
-           Chave Pix: ${cfgPill(o.config.pixKeyConfirmed, 'confirmada', 'não confirmada')}</p></div>
+      <div class="card"><h3>O que já está pronto e o que falta</h3><div id="achk"><span class="spin"></span></div></div>
       <div class="card scroll"><h3>Uso por ferramenta (30 dias)</h3>
         ${o.usage30d.length ? `<table><tr><th>Ferramenta</th><th>Usos</th></tr>${o.usage30d.map((u) => `<tr><td>${esc(u.tool)}</td><td>${u.n}</td></tr>`).join('')}</table>` : '<p class="muted">Sem uso ainda.</p>'}</div>`;
+    try {
+      const c = await api('/admin/checklist');
+      $('#achk').innerHTML = `<p>${c.prontos} de ${c.total} prontos.${c.bloqueios.length ? ` <b class="warn">Bloqueia o site:</b> ${c.bloqueios.map(esc).join(', ')}.` : c.faltando ? ' Nada bloqueia o site, mas ainda falta configurar o de baixo.' : ' Está tudo configurado.'}</p>
+        ${c.itens.map((i) => `<div class="rv-item"><div class="rv-cab">${i.ok ? '✅' : i.critico ? '⛔' : '⚠️'} <b>${esc(i.titulo)}</b>
+          <span class="muted small">— ${esc(i.estado)}</span></div>
+          ${i.resolver ? `<p class="small">👉 ${esc(i.resolver)}</p>` : ''}</div>`).join('')}
+        <p class="small muted">Nenhuma chave aparece aqui, só se está preenchida ou não.</p>`;
+    } catch (e) { showErr($('#achk'), e); }
   },
 
   async usuarios(el) {

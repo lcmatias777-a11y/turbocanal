@@ -51,6 +51,54 @@ export function adminRoutes(app, db, auth) {
     res.json({ resumo, total: Object.values(resumo).reduce((a, b) => a + b, 0), ultimo_backup: ultimo?.created_at || null });
   }));
 
+  // Estado honesto de cada integração: o que já funciona e o que ainda falta.
+  // NUNCA devolve o valor de chave nenhuma — só se está preenchida ou não.
+  app.get('/api/admin/checklist', ...auth.admin, wrap(async (req, res) => {
+    const temYt = !!((await getSetting(db, 'yt_api_key')) || process.env.YT_API_KEY);
+    const temIA = !!((await getSetting(db, 'gemini_api_key')) || process.env.GEMINI_API_KEY);
+    const temMp = !!(await getSetting(db, 'mp_access_token'));
+    const pixOk = (await getSetting(db, 'pix_key_confirmed')) === '1';
+    const pagLigado = (await getSetting(db, 'payments_enabled')) === '1';
+    const ultimoBackup = (await db.get("SELECT created_at FROM audit WHERE action='admin.backup' ORDER BY created_at DESC LIMIT 1"))?.created_at || null;
+    const diasBackup = ultimoBackup ? Math.floor((Date.now() - new Date(ultimoBackup).getTime()) / 86400e3) : null;
+    const canaisLigados = (await db.get('SELECT COUNT(*)::int AS n FROM yt_tokens')).n;
+
+    const itens = [
+      { chave: 'banco', titulo: 'Banco de dados', ok: db.kind === 'postgres', critico: true,
+        estado: db.kind === 'postgres' ? 'Postgres (os dados ficam salvos)' : `${db.kind} — os dados somem a cada deploy`,
+        resolver: db.kind === 'postgres' ? '' : 'Crie um Postgres no Render e ligue a variável DATABASE_URL no serviço.' },
+      { chave: 'login', titulo: 'Entrar com o Google', ok: googleConfigured(), critico: true,
+        estado: googleConfigured() ? 'configurado' : 'falta o client ID/secret do Google',
+        resolver: googleConfigured() ? '' : 'Preencha GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET nas variáveis do servidor.' },
+      { chave: 'youtube', titulo: 'Chave da API do YouTube', ok: temYt, critico: true,
+        estado: temYt ? `preenchida · ${canaisLigados} canal(is) vinculado(s) por OAuth` : 'não preenchida: busca, tendências e análises não funcionam',
+        resolver: temYt ? '' : 'Cole a chave em Admin → Configurações → Chave da API do YouTube.' },
+      { chave: 'ia', titulo: 'IA (Gemini)', ok: temIA, critico: false,
+        estado: temIA ? 'preenchida' : 'não preenchida: as ferramentas de IA avisam e NÃO cobram créditos',
+        resolver: temIA ? '' : 'Cole a chave em Admin → Configurações → Chave do Gemini.' },
+      { chave: 'mercadopago', titulo: 'Mercado Pago (Pix)', ok: temMp, critico: false,
+        estado: temMp ? 'token preenchido' : 'sem token: ninguém consegue pagar',
+        resolver: temMp ? '' : 'Cole o Access Token de produção em Admin → Configurações. Nunca cole aqui no chat.' },
+      { chave: 'pix', titulo: 'Chave Pix conferida por você', ok: pixOk, critico: false,
+        estado: pixOk ? 'conferida' : 'ainda NÃO conferida — nenhum Pix é gerado até você confirmar que a chave é sua',
+        resolver: pixOk ? '' : 'Abra Admin → Configurações, confira a chave Pix e marque que ela é sua.' },
+      { chave: 'pagamentos', titulo: 'Pagamentos ligados', ok: pagLigado && temMp && pixOk, critico: false,
+        estado: pagLigado && temMp && pixOk ? 'ligados' : 'desligados: os planos pagos aparecem, mas não dá para comprar',
+        resolver: pagLigado && temMp && pixOk ? '' : 'Depende do token do Mercado Pago e da chave Pix conferida; depois ligue em Admin → Configurações.' },
+      { chave: 'backup', titulo: 'Backup do banco', ok: diasBackup !== null && diasBackup <= 30, critico: false,
+        estado: ultimoBackup ? `último há ${diasBackup} dia(s)` : 'nunca foi feito',
+        resolver: diasBackup !== null && diasBackup <= 30 ? '' : 'Baixe um backup em Admin → Banco de dados. Guarde o arquivo fora do Render.' }
+    ];
+    const faltando = itens.filter((i) => !i.ok);
+    res.json({
+      itens,
+      prontos: itens.length - faltando.length,
+      total: itens.length,
+      faltando: faltando.length,
+      bloqueios: faltando.filter((i) => i.critico).map((i) => i.titulo)
+    });
+  }));
+
   app.get('/api/admin/overview', ...auth.admin, wrap(async (req, res) => {
     const users = (await db.get('SELECT COUNT(*)::int AS n FROM users')).n;
     const byPlan = await db.all('SELECT plan_id, COUNT(*)::int AS n FROM users GROUP BY plan_id');

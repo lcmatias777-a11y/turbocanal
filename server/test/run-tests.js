@@ -622,6 +622,22 @@ const custos = (await req('/api/tools/costs')).data.costs;
 check('as duas ferramentas novas aparecem na tabela de preços',
   custos.find((c) => c.tool === 'audit_ai')?.cost === 200 && custos.find((c) => c.tool === 'title_lab')?.cost === 100);
 
+// ---------- O que falta configurar (sem vazar chave nenhuma) ----------
+console.log('\n— Checklist de configuração —');
+const chk = await req('/api/admin/checklist', { token: tOwn });
+check('o checklist lista todos os pontos de configuração', chk.status === 200 && chk.data.itens.length === 8 && chk.data.total === 8, JSON.stringify(chk.data).slice(0, 140));
+check('cada item diz o estado e, se falta, como resolver',
+  chk.data.itens.every((i) => typeof i.ok === 'boolean' && i.estado) && chk.data.itens.filter((i) => !i.ok).every((i) => i.resolver));
+check('o checklist NÃO devolve o valor de nenhuma chave',
+  !/AIza|APP_USR|sk-|gemini_api_key|mp_access_token/.test(JSON.stringify(chk.data)), JSON.stringify(chk.data).slice(0, 200));
+check('aponta o banco em memória como bloqueio nos testes', chk.data.bloqueios.includes('Banco de dados'), JSON.stringify(chk.data.bloqueios));
+const itPix = chk.data.itens.find((i) => i.chave === 'pix'), itPag = chk.data.itens.find((i) => i.chave === 'pagamentos');
+check('o estado do Pix e o dos pagamentos batem com o que está mesmo salvo no banco',
+  itPix.ok === ((await getSetting(db, 'pix_key_confirmed')) === '1')
+  && itPag.ok === (itPix.ok && !!(await getSetting(db, 'mp_access_token')) && (await getSetting(db, 'payments_enabled')) === '1'),
+  JSON.stringify({ pix: itPix.ok, pag: itPag.ok })); 
+check('usuário comum não vê o checklist', (await req('/api/admin/checklist', { token: t1 })).status === 403);
+
 // ---------- Rastro de quem apagou o quê ----------
 console.log('\n— Rastro de exclusões —');
 const cmtA = await req('/api/comments', { method: 'POST', token: t1, body: { texto: 'Comentário que a própria autora vai apagar.' } });
