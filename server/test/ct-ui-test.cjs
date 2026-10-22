@@ -43,9 +43,23 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
 
   // 3) as ferramentas respondem com o canal simulado
   await pessoa.p.goto(LOCAL + '/#/canal');
-  await pessoa.p.waitForFunction(() => /simulado/i.test(document.querySelector('#app')?.textContent || ''), null, { timeout: 25000 })
-    .then(() => check('"Meu canal" abre com o canal simulado', true))
-    .catch(async () => check('"Meu canal" abre com o canal simulado', false, (await pessoa.p.textContent('#app')).replace(/\s+/g, ' ').slice(0, 160)));
+  // Checar só o texto "simulado" não basta: o selo aparece no título mesmo
+  // quando a lista de vídeos quebra logo abaixo. Foi assim que um "u is not
+  // defined" passou batido por este teste. Agora o teste exige os CARTÕES.
+  let abriu = true;
+  try {
+    await pessoa.p.waitForSelector('.thumbrow img', { timeout: 25000 });
+  } catch { abriu = false; }
+  check('"Meu canal" abre e LISTA os vídeos do canal de teste', abriu,
+    abriu ? '' : (await pessoa.p.textContent('#app')).replace(/\s+/g, ' ').slice(0, 180));
+  const cartoes = await pessoa.p.$$eval('.thumbrow img', (ns) => ns.length).catch(() => 0);
+  check('vêm vários vídeos, cada um com capa carregada', cartoes >= 3, String(cartoes));
+  const capaOk = await pessoa.p.$$eval('.thumbrow img', (ns) => ns.filter((i) => i.naturalWidth > 0).length).catch(() => 0);
+  check('as capas carregam de verdade (nada de quadrado quebrado)', capaOk >= 3, String(capaOk));
+  check('o nome do canal aparece com o selo de simulado',
+    /Pixel Arena/.test(await pessoa.p.textContent('#app')) && /simulado/i.test(await pessoa.p.textContent('#app')));
+  const erroNaTela = await pessoa.p.$$eval('.alert.err, .alert-err', (ns) => ns.map((n) => n.textContent.trim())).catch(() => []);
+  check('e NENHUMA caixa de erro vermelha na tela', erroNaTela.length === 0, erroNaTela.join(' | ').slice(0, 120));
   check('a faixa continua visível nas outras páginas', !!(await pessoa.p.$('#faixaTeste')));
 
   await pessoa.p.goto(LOCAL + '/#/dashboard');

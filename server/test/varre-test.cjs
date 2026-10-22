@@ -26,8 +26,13 @@ const ADMIN = ['geral', 'usuarios', 'planos', 'custos', 'pagamentos', 'pedidos',
     await p.waitForTimeout(1400);
     const texto = (await p.textContent('#app').catch(() => '')) || '';
     const spinPreso = await p.$$eval('#app .spin', (ns) => ns.length).catch(() => 0);
+    // Caixa de erro vermelha na tela. Sem isto a varredura dava a página por
+    // boa quando ela abria e mostrava só "u is not defined" dentro de um
+    // quadro vermelho: tinha texto, não tinha spinner preso, e o erro era
+    // capturado pelo código, então nem aparecia no console.
+    const caixasDeErro = await p.$$eval('#app .alert.err', (ns) => ns.map((n) => n.textContent.trim().slice(0, 120))).catch(() => []);
     p.off('pageerror', onErr); p.off('console', onCon);
-    return { erros, texto: texto.trim(), spinPreso };
+    return { erros, texto: texto.trim(), spinPreso, caixasDeErro };
   };
 
   // visitante
@@ -35,8 +40,8 @@ const ADMIN = ['geral', 'usuarios', 'planos', 'custos', 'pagamentos', 'pedidos',
   const pa = await anon.newPage();
   for (const url of PUBLICAS) {
     const r = await visitar(pa, url);
-    check(`visitante em ${url}`, r.erros.length === 0 && r.texto.length > 20 && !/Página não encontrada/.test(r.texto),
-      `${r.erros.join(' | ')}${r.texto.length <= 20 ? ' (tela vazia)' : ''}${/Página não encontrada/.test(r.texto) ? ' (404)' : ''}`);
+    check(`visitante em ${url}`, r.erros.length === 0 && r.texto.length > 20 && !/Página não encontrada/.test(r.texto) && r.caixasDeErro.length === 0,
+      `${r.erros.join(' | ')}${r.texto.length <= 20 ? ' (tela vazia)' : ''}${/Página não encontrada/.test(r.texto) ? ' (404)' : ''}${r.caixasDeErro.length ? ' ERRO NA TELA: ' + r.caixasDeErro.join(' / ') : ''}`);
   }
 
   // dono
@@ -46,8 +51,8 @@ const ADMIN = ['geral', 'usuarios', 'planos', 'custos', 'pagamentos', 'pedidos',
   const p = await ctx.newPage();
   for (const url of [...PRIVADAS, ...ADMIN]) {
     const r = await visitar(p, url);
-    check(`dono em ${url}`, r.erros.length === 0 && r.texto.length > 20 && !/Página não encontrada/.test(r.texto),
-      `${r.erros.join(' | ')}${r.texto.length <= 20 ? ' (tela vazia)' : ''}${/Página não encontrada/.test(r.texto) ? ' (404)' : ''}`);
+    check(`dono em ${url}`, r.erros.length === 0 && r.texto.length > 20 && !/Página não encontrada/.test(r.texto) && r.caixasDeErro.length === 0,
+      `${r.erros.join(' | ')}${r.texto.length <= 20 ? ' (tela vazia)' : ''}${/Página não encontrada/.test(r.texto) ? ' (404)' : ''}${r.caixasDeErro.length ? ' ERRO NA TELA: ' + r.caixasDeErro.join(' / ') : ''}`);
     if (r.spinPreso) check(`dono em ${url}: nada fica rodando para sempre`, false, `${r.spinPreso} carregando preso`);
   }
 

@@ -1210,7 +1210,7 @@ const canalTabs = {
     el.innerHTML = `
       <div class="card"><div class="thumbrow">${c.thumb ? `<img src="${esc(c.thumb)}" style="border-radius:50%;width:80px">` : ''}
         <div><h3>${esc(c.title)}</h3><p>👥 ${c.subs == null ? 'inscritos ocultos' : fmt(c.subs) + ' inscritos'} · 👁 ${fmt(c.views)} views · 🎬 ${fmt(c.videos)} vídeos</p>
-        <p>${u.youtube.teste
+        <p>${state.user?.youtube?.teste
             ? '<a class="btn sm ghost" href="#/canal-teste">Desligar o canal de teste</a> <span class="muted small">Este canal não existe no YouTube, então não há Studio para abrir.</span>'
             : '<a class="btn sm ghost" href="https://studio.youtube.com" target="_blank" rel="noopener">Abrir YouTube Studio</a> <button class="btn sm ghost" id="ytoff">Desvincular canal</button>'}</p></div></div></div>
       <div class="grid cols2">${data.videos.map((v) => `
@@ -1219,7 +1219,7 @@ const canalTabs = {
             <p class="muted small">👁 ${fmt(v.views)} · 👍 ${fmt(v.likes)} · 💬 ${fmt(v.comments)} · ⚡ ${fmt(v.vph)}/h · ${dt(v.publishedAt).split(',')[0]} · ${esc(privLabel(v.privacy))}</p>
             <p class="small"><span class="pill ${v.seoScore >= 80 ? 'ok' : v.seoScore >= 50 ? 'warn' : 'err'}" title="${esc((v.seoTodo || []).join(' · ') || 'Tudo certo')}">SEO ${v.seoScore ?? '—'}/100</span>
               ${(v.seoTodo || []).length ? `<span class="muted">falta: ${esc((v.seoTodo || []).slice(0, 2).join(', '))}${v.seoTodo.length > 2 ? '…' : ''}</span>` : '<span class="muted">checklist completo ✅</span>'}</p>
-            <p class="small">${u.youtube.teste ? '' : `<a href="https://studio.youtube.com/video/${esc(v.id)}/edit" target="_blank" rel="noopener">editar no Studio ↗</a> · `}<a href="#/ferramentas/insights?video=${esc(v.id)}">✨ IA do vídeo</a> · <a href="#/ferramentas/transformar" data-transform="${esc(v.id)}">✂️ 3 cortes para Shorts</a></p></div></div>
+            <p class="small">${state.user?.youtube?.teste ? '' : `<a href="https://studio.youtube.com/video/${esc(v.id)}/edit" target="_blank" rel="noopener">editar no Studio ↗</a> · `}<a href="#/ferramentas/insights?video=${esc(v.id)}">✨ IA do vídeo</a> · <a href="#/ferramentas/transformar" data-transform="${esc(v.id)}">✂️ 3 cortes para Shorts</a></p></div></div>
           <details><summary class="small">✏️ Editar título, descrição, tags e visibilidade</summary>
             <p><a class="btn sm ghost" href="#/ferramentas/insights?video=${esc(v.id)}">✨ IA assiste e sugere tudo</a> <span class="muted small">${costOf('video_insights_ai')} · você tira o que não quiser e salva</span></p>
             <label>Título <span class="muted small" data-len="${esc(v.id)}">${(v.title || '').length}/100</span></label><input data-f="title" value="${esc(v.title)}" maxlength="100">
