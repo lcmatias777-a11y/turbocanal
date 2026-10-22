@@ -268,3 +268,10 @@ a.bl-card:hover { border-color: var(--accent2); text-decoration: none; }
   .ch-tela { grid-template-columns: 1fr; }
   .ch-lado { max-height: 300px; }
 }
+
+/* "Sua próxima ação": o card que abre o painel */
+.prox { border-color: var(--accent); background: linear-gradient(135deg, #1b285055, var(--card)); }
+.prox-cab { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 8px; }
+.prox-ico { font-size: 1.7rem; line-height: 1.2; }
+.prox-dado { background: var(--bg2); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 8px 12px; font-size: .9rem; color: var(--muted); }
+.prox-acoes { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }

@@ -258,6 +258,15 @@ CREATE TABLE IF NOT EXISTS mensagens (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_msg_conv ON mensagens(conversa_id, created_at);
+
+CREATE TABLE IF NOT EXISTS acoes_dispensadas (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  chave TEXT NOT NULL,
+  ate TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_disp_user ON acoes_dispensadas(user_id, ate);
 `;
 
 const PLAN_SEED = [

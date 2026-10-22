@@ -816,6 +816,65 @@ check('periodo fora do limite e recusado', (await req('/api/channel/raiox?dias=5
 check('raio-X exige login', (await req('/api/channel/raiox')).status === 401);
 }
 
+// ---------- Sua proxima acao ----------
+console.log('\n— Sua próxima ação —');
+{
+  const { escolherAcoes } = await import('../src/proxima.js');
+  const semCanal = escolherAcoes({ canalLigado: false });
+  check('sem canal ligado, a unica acao e vincular o canal', semCanal.length === 1 && semCanal[0].chave === 'vincular_canal');
+
+  const xrayBom = {
+    base: { analisados: 9, total: 10, medianaInscritosPorMil: 2, retencaoMediana: 35, minGrupo: 3 },
+    campeoes: [{ id: 'c0', titulo: 'Curto que converte', inscritosPorMil: 20, views: 1000 }],
+    soView: [{ id: 'viral', titulo: 'Viral', views: 90000, inscritosPorMil: 0 }],
+    melhorFaixa: { id: 0, nome: 'até 1 min (Shorts)', videos: 4, retencaoMediana: 80 },
+    piorFaixa: { id: 4, nome: 'mais de 20 min', videos: 5, retencaoMediana: 20 }
+  };
+  const horBom = { combinacao: { dia: 6, faixa: 6, nome: 'sábado, 18h–21h', videos: 5, mediana: 10002, diferenca: 896 } };
+  const acoes = escolherAcoes({ canalLigado: true, xray: xrayBom, horarios: horBom, comentariosSemResposta: 3, iaLigada: true, temAvaliacao: true });
+  check('a primeira sugestao e a continuacao do video que mais converte',
+    acoes[0].chave.startsWith('continuacao_') && /Curto que converte/.test(acoes[0].titulo), JSON.stringify(acoes[0]).slice(0, 150));
+  check('TODA sugestao de oportunidade vem com o dado que a sustenta',
+    acoes.filter((a) => a.tipo === 'oportunidade').every((a) => a.dado && /\d/.test(a.dado)));
+  check('a sugestao de formato cita as duas faixas e os dois numeros',
+    acoes.some((a) => a.chave.startsWith('formato_') && /80%/.test(a.dado) && /20%/.test(a.dado)));
+  check('a sugestao de horario cita a mediana e quantos videos', acoes.some((a) => a.chave.startsWith('horario_') && /5 vídeos/.test(a.dado)));
+  check('o video que traz view e nao traz inscrito vira alerta', acoes.some((a) => a.tipo === 'atencao' && a.chave.startsWith('fora_nicho_')));
+  check('comentarios sem resposta viram tarefa', acoes.some((a) => a.chave === 'responder_comentarios' && /3 comentário/.test(a.titulo)));
+
+  // canal sem amostra: admite em vez de fabricar oportunidade
+  const xrayFraco = { base: { analisados: 1, total: 4, medianaInscritosPorMil: 0, retencaoMediana: 0, minGrupo: 3 }, campeoes: [], soView: [], melhorFaixa: null, piorFaixa: null };
+  const fracas = escolherAcoes({ canalLigado: true, xray: xrayFraco, horarios: { combinacao: null }, comentariosSemResposta: 0, iaLigada: true, temAvaliacao: true });
+  check('com pouca amostra NAO inventa oportunidade, admite e oferece preparo',
+    fracas.every((a) => a.tipo !== 'oportunidade') && fracas.some((a) => a.chave === 'poucos_videos'), JSON.stringify(fracas.map((a) => a.chave)));
+  check('a admissao tambem vem com numero', fracas.find((a) => a.chave === 'poucos_videos')?.dado?.includes('1 de 4'));
+
+  // diferenca pequena nao vira recomendacao
+  const quaseIgual = escolherAcoes({ canalLigado: true, horarios: { combinacao: { dia: 1, faixa: 1, nome: 'segunda, 03h–06h', videos: 5, mediana: 100, diferenca: 5 } }, xray: xrayFraco, comentariosSemResposta: 0, iaLigada: true, temAvaliacao: true });
+  check('diferenca de 5% nao vira recomendacao de horario', !quaseIgual.some((a) => a.chave.startsWith('horario_')));
+
+  // o aviso de ligar a IA so existe para o dono
+  const comIaDesligada = escolherAcoes({ canalLigado: true, xray: xrayBom, horarios: horBom, comentariosSemResposta: 0, iaLigada: false, temAvaliacao: true });
+  check('o aviso de ligar a IA e marcado como so do dono', comIaDesligada.find((a) => a.chave === 'ligar_ia')?.soDono === true);
+
+  // conta sem canal ligado
+  const semYt = await req('/api/auth/register', { method: 'POST', body: { email: 'semcanal@example.com', password: 'senha12345', name: 'Sem Canal' } });
+  const paSem = await req('/api/proxima-acao', { token: semYt.data.token });
+  check('conta sem canal: a acao e vincular o canal', paSem.status === 200 && paSem.data.canalLigado === false && paSem.data.acao?.chave === 'vincular_canal', JSON.stringify(paSem.data).slice(0, 140));
+
+  // conta COM canal ligado (YouTube simulado, poucos videos): admite em vez de inventar
+  const pa = await req('/api/proxima-acao', { token: t1 });
+  check('conta com canal ligado le o YouTube de verdade e responde', pa.status === 200 && pa.data.canalLigado === true, JSON.stringify(pa.data).slice(0, 140));
+  check('com canal ligado mas poucos dados, admite em vez de inventar oportunidade',
+    pa.data.acao && pa.data.acao.tipo !== 'oportunidade', JSON.stringify(pa.data.acao).slice(0, 160));
+  const disp = await req('/api/proxima-acao/dispensar', { method: 'POST', token: t1, body: { chave: pa.data.acao.chave } });
+  check('dispensar responde com ate quando', disp.status === 200 && disp.data.dias === 14 && disp.data.ate);
+  const depoisDisp = await req('/api/proxima-acao', { token: t1 });
+  check('a acao dispensada some da vez seguinte', depoisDisp.data.acao?.chave !== pa.data.acao.chave, JSON.stringify(depoisDisp.data.acao));
+  check('dispensar sem chave e recusado', (await req('/api/proxima-acao/dispensar', { method: 'POST', token: t1, body: {} })).status === 400);
+  check('proxima acao exige login', (await req('/api/proxima-acao')).status === 401);
+}
+
 // ---------- Encerrar sessoes (o botao de emergencia de verdade) ----------
 console.log('\n— Encerrar sessões —');
 const sessUser = await req('/api/auth/register', { method: 'POST', body: { email: 'sess@example.com', password: 'senha12345', name: 'Sessao' } });

@@ -282,6 +282,40 @@ function needLogin() {
     <p><a class="btn" href="#/login">Entrar com Google</a></p></div>`;
 }
 
+const ICONE_ACAO = { oportunidade: '🎯', atencao: '⚠️', preparo: '🧭' };
+
+async function carregarProximaAcao() {
+  const box = $('#proxAcao');
+  if (!box) return;
+  let d;
+  try { d = await api('/proxima-acao'); }
+  catch (e) { box.innerHTML = `<h3>🎯 Sua próxima ação</h3><p class="muted small">${esc(e.message)}</p>`; return; }
+
+  if (d.erro) {
+    box.innerHTML = `<h3>🎯 Sua próxima ação</h3><p class="muted">${esc(d.erro)}</p>`;
+    return;
+  }
+  const a = d.acao;
+  if (!a) {
+    box.innerHTML = `<h3>🎯 Sua próxima ação</h3>
+      <p class="muted">Nada de urgente agora. ${d.dispensadas ? `Você dispensou ${d.dispensadas} sugestão(ões); elas voltam em alguns dias.` : 'Quando os seus números mostrarem uma oportunidade, ela aparece aqui.'}</p>`;
+    return;
+  }
+  box.innerHTML = `<div class="prox-cab"><span class="prox-ico">${ICONE_ACAO[a.tipo] || '🎯'}</span>
+      <div><span class="muted small">Sua próxima ação${d.total > 1 ? ` · ${d.total} sugestões na fila` : ''}</span>
+        <h3 style="margin:2px 0 0">${esc(a.titulo)}</h3></div></div>
+    <p>${esc(a.porque)}</p>
+    ${a.dado ? `<p class="prox-dado">📊 ${esc(a.dado)}</p>` : ''}
+    <div class="prox-acoes">
+      <a class="btn sm" href="${esc(a.botao.href)}"${a.botao.externo ? ' rel="noopener"' : ''}>${esc(a.botao.texto)}</a>
+      <button class="btn sm ghost" id="proxDisp">dispensar por 14 dias</button>
+    </div>`;
+  $('#proxDisp').onclick = async () => {
+    try { await api('/proxima-acao/dispensar', { method: 'POST', body: { chave: a.chave } }); } catch (e) { alert(e.message); }
+    carregarProximaAcao();
+  };
+}
+
 views.dashboard = async () => {
   if (!state.user) return needLogin();
   const u = state.user;
@@ -302,6 +336,7 @@ views.dashboard = async () => {
     : '';
   appEl().innerHTML = `
     <h1>Olá, ${esc(u.name || u.email.split('@')[0])} 👋</h1>
+    <div id="proxAcao" class="card prox"><p class="center"><span class="spin"></span></p></div>
     ${aiBanner}
     ${ytBanner}
     <section class="grid cols3">
@@ -322,6 +357,7 @@ views.dashboard = async () => {
     <h2>Atividade recente</h2>
     <div class="card scroll">${histTable(hist)}
       <p class="small"><a href="#/historico">Ver histórico completo →</a></p></div>`;
+  carregarProximaAcao();
 };
 
 function toolCostLabel(hash) {
