@@ -149,10 +149,21 @@ export function proximaRoutes(app, db, auth) {
       }
     }
 
+    // Comentários recentes do canal que ainda não receberam NENHUMA resposta.
+    // Só conta quando o canal está ligado; se o YouTube recusar, fica em zero em
+    // vez de derrubar o card inteiro.
+    let semResposta = 0;
+    if (canalLigado) {
+      try {
+        const { comentariosSemResposta } = await import('./channel.js');
+        semResposta = await comentariosSemResposta(db, user);
+      } catch { semResposta = 0; }
+    }
+
     const iaLigada = !!((await db.get("SELECT value FROM settings WHERE key='gemini_api_key'"))?.value || process.env.GEMINI_API_KEY);
     const temAvaliacao = !!(await db.get('SELECT 1 AS x FROM reviews WHERE user_id=?', [user.id]));
 
-    const todas = escolherAcoes({ canalLigado, xray, horarios, comentariosSemResposta: 0, iaLigada, temAvaliacao })
+    const todas = escolherAcoes({ canalLigado, xray, horarios, comentariosSemResposta: semResposta, iaLigada, temAvaliacao })
       .filter((a) => !a.soDono || user.role === 'owner');
 
     const dispensadas = await db.all('SELECT chave FROM acoes_dispensadas WHERE user_id=? AND ate > ?', [user.id, now()]);

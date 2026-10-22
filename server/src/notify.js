@@ -23,6 +23,7 @@ export const TIPOS = {
   pedido_admin: '🙋',
   pedido_decidido: '✅',
   mensagem_chat: '✉️',
+  experimento: '🧪',
   seguranca: '🔐'
 };
 

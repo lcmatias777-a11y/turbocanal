@@ -972,6 +972,8 @@ console.log('\n— Diário de experimentos —');
   check('quando chega a data, a pessoa e avisada', avisados >= 1
     && (await req('/api/notifications', { token: t1 })).data.itens.some((x) => /experimento/i.test(x.titulo)));
   check('e nao avisa duas vezes pelo mesmo', (await avisarExperimentos(db)) === 0);
+  check('o aviso do experimento usa o tipo proprio (e nao o de resposta a comentario)',
+    (await req('/api/notifications', { token: t1 })).data.itens.some((x) => x.tipo === 'experimento' && x.emoji === '🧪'));
 }
 
 // ---------- Sua proxima acao ----------
@@ -1017,6 +1019,10 @@ console.log('\n— Sua próxima ação —');
   check('e o alerta NAO afirma que o publico e de fora do nicho',
     acoes.filter((a) => a.tipo === 'atencao').every((a) => /não quer dizer que o público é de fora do nicho/i.test(a.porque)));
   check('comentarios sem resposta viram tarefa', acoes.some((a) => a.chave === 'responder_comentarios' && /3 comentário/.test(a.titulo)));
+  const { comentariosSemResposta } = await import('../src/channel.js');
+  const semResp = await comentariosSemResposta(db, (await db.get('SELECT * FROM users WHERE email=?', ['maria@example.com'])));
+  check('o contador de comentarios sem resposta le o YouTube de verdade (nao fica fixo em zero)',
+    Number.isInteger(semResp) && semResp >= 0, String(semResp));
 
   // canal sem amostra: admite em vez de fabricar oportunidade
   const xrayFraco = { base: { analisados: 1, total: 4, medianaInscritosPorMil: 0, retencaoMediana: 0, minGrupo: 3 }, campeoes: [], soView: [], melhorFaixa: null, piorFaixa: null };

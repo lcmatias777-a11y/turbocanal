@@ -145,6 +145,17 @@ export async function myPublicVideos(db, user, max = 50) {
  *  retenção (% médio assistido e tempo médio) e inscritos ganhos/perdidos.
  *  CTR e impressões NÃO entram: não existem nos relatórios de canal da Analytics
  *  API v2, só no Studio. Preferi faltar o número a inventar um. */
+/** Quantos comentários recentes do canal ainda não têm NENHUMA resposta.
+ *  Olha só os 30 mais novos: serve para "tem gente esperando você", não para
+ *  auditar o canal inteiro. */
+export async function comentariosSemResposta(db, user) {
+  const { token, channel } = await myChannel(db, user);
+  const r = await yt(token, 'commentThreads', {
+    params: { part: 'snippet', allThreadsRelatedToChannelId: channel.id, maxResults: 30, order: 'time', textFormat: 'plainText' }
+  });
+  return (r.items || []).filter((t) => Number(t.snippet?.totalReplyCount || 0) === 0).length;
+}
+
 export async function myVideoXray(db, user, dias = 90) {
   const { token, channel } = await myChannel(db, user);
   const d = Math.min(365, Math.max(28, parseInt(dias, 10) || 90));

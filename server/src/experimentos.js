@@ -156,7 +156,7 @@ export async function avisarExperimentos(db) {
   const vencidos = await db.all(
     "SELECT * FROM experimentos WHERE status='rodando' AND revisar_em <= ? AND avisado=0 LIMIT 100", [now()]);
   for (const e of vencidos) {
-    await notificar(db, e.user_id, 'resposta_recebida', 'Hora de olhar o seu experimento', {
+    await notificar(db, e.user_id, 'experimento', 'Hora de olhar o seu experimento', {
       corpo: `"${e.hipotese}" — já passou a data que você marcou para revisar. Veja o antes e depois.`,
       link: '#/ferramentas/experimentos', dados: { experimento: e.id }
     });
