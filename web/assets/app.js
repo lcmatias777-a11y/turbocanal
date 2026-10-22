@@ -1350,6 +1350,11 @@ views.conta = async () => {
       <div class="card"><h3>Seus dados</h3>
         <p>E-mail: <b>${esc(u.email)}</b><br>Plano: <b>${esc(u.plan?.name)}</b> · Papel: <b>${esc(u.role)}</b></p>
         <p class="muted small">Login feito com o Google: não há senha para gerenciar aqui.</p>
+        <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
+        <h3 style="margin-top:0">Segurança</h3>
+        <p class="small">O TurboCanal não tem senha própria: quem entra na sua conta do Google entra aqui. Por isso o que mais protege é a <b>verificação em duas etapas</b> na conta Google, em <a href="https://myaccount.google.com/security" target="_blank" rel="noopener">myaccount.google.com/security</a>.</p>
+        <p class="small">Se desconfiar que alguém entrou na sua conta, encerre tudo: todos os aparelhos e a extensão caem na hora e precisam entrar de novo.</p>
+        <p><button class="btn sm secondary" id="sairTudo">🔒 Sair de todos os aparelhos</button></p>
         <p>Canal do YouTube: ${u.youtube?.connected ? `<span class="pill ok">conectado (${esc(u.youtube.channel_title || '')})</span>` : '<span class="pill warn">não conectado</span> <a href="#/canal">conectar</a>'}</p></div>
       <div class="card"><h3>Token para a extensão do Chrome</h3>
         <p class="muted small">Use este token para entrar na extensão. Ele dá acesso à sua conta: trate como uma senha e não compartilhe.</p>
@@ -1375,6 +1380,18 @@ views.conta = async () => {
       await api('/auth/claim-owner', { method: 'POST', body: { token: new FormData(ev.target).get('token') } });
       await refreshMe(); location.hash = '#/admin';
     } catch (e) { showErr($('#omsg'), e); }
+  };
+  const st = $('#sairTudo');
+  if (st) st.onclick = async () => {
+    if (!confirm('Encerrar todas as sessões? Você vai sair daqui também e precisa entrar de novo com o Google. A extensão do Chrome também vai pedir para entrar.')) return;
+    st.disabled = true;
+    try {
+      const r = await api('/me/sair-de-tudo', { method: 'POST' });
+      alert(r.aviso || 'Sessões encerradas.');
+      state.user = null;
+      location.hash = '/';
+      location.reload();
+    } catch (e) { alert(e.message); st.disabled = false; }
   };
 };
 
@@ -1847,13 +1864,33 @@ const adminTabs = {
       $('#ulist').innerHTML = `<table><tr><th>E-mail</th><th>Nome</th><th>Papel</th><th>Plano</th><th>Créditos</th><th>Ações</th></tr>
         ${r.items.map((u) => `<tr><td>${esc(u.email)}</td><td>${esc(u.name || '')}</td><td>${esc(u.role)}</td><td>${esc(u.plan_id)}</td>
           <td>${u.role === 'owner' ? '∞' : fmt(u.credits)}</td>
-          <td class="small"><button class="btn sm ghost" data-cr="${u.id}">± créditos</button></td></tr>`).join('')}</table>`;
+          <td class="small"><button class="btn sm ghost" data-cr="${u.id}">± créditos</button>
+            ${state.user?.role === 'owner' ? `<button class="btn sm ghost" data-sess="${u.id}" title="Derruba todos os acessos desta conta agora">🔒 encerrar sessões</button>` : ''}
+            <button class="btn sm ghost" data-ban="${u.id}" data-banido="${u.banido ? 1 : 0}">${u.banido ? '♻️ tirar banimento' : '🚫 banir'}</button></td></tr>`).join('')}</table>`;
+      for (const b of el.querySelectorAll('[data-sess]')) b.onclick = async () => {
+        if (!confirm('Derrubar todos os acessos desta conta agora? A pessoa precisa entrar de novo com o Google.')) return;
+        try { await api(`/admin/users/${b.dataset.sess}/encerrar-sessoes`, { method: 'POST' }); alert('Acessos encerrados.'); }
+        catch (e) { alert(e.message); }
+      };
+      for (const b of el.querySelectorAll('[data-ban]')) b.onclick = async () => {
+        const desfazer = b.dataset.banido === '1';
+        const motivo = desfazer ? '' : (prompt('Motivo do banimento (a pessoa vê isso ao tentar entrar):') ?? '');
+        if (!desfazer && motivo === null) return;
+        try {
+          const r = await api(`/admin/users/${b.dataset.ban}/banir`, { method: 'POST', body: { desfazer, motivo } });
+          alert(r.executado ? (desfazer ? 'Banimento retirado.' : 'Conta banida.') : 'Pedido enviado ao administrador principal.');
+          await carregarNotificacoes(); load($('#uq').value);
+        } catch (e) { alert(e.message); }
+      };
       for (const b of el.querySelectorAll('[data-cr]')) b.onclick = async () => {
         const delta = parseInt(prompt('Ajuste de créditos (ex.: 500 ou -200):'), 10);
         if (!delta) return;
         const note = prompt('Motivo do ajuste (fica na auditoria):') || '';
-        try { await api(`/admin/users/${b.dataset.cr}/credits`, { method: 'POST', body: { delta, note } }); load($('#uq').value); }
-        catch (e) { alert(e.message); }
+        try {
+          const r = await api(`/admin/users/${b.dataset.cr}/credits`, { method: 'POST', body: { delta, note } });
+          if (!r.executado) alert('Pedido enviado ao administrador principal. Os créditos só mudam depois do Sim dele.');
+          await carregarNotificacoes(); load($('#uq').value);
+        } catch (e) { alert(e.message); }
       };
     };
     el.innerHTML = `<div class="card"><div class="row"><div><label>Buscar por e-mail ou nome</label><input id="uq"></div>

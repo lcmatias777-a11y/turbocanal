@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
   google_sub TEXT,
   banido INTEGER NOT NULL DEFAULT 0,
   banido_motivo TEXT NOT NULL DEFAULT '',
+  sessao_v INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS plans (
@@ -432,6 +433,7 @@ async function seed(db) {
   // Banimento de conta (pedido do dono): coluna nova nas contas já existentes
   try { await db.run('ALTER TABLE users ADD COLUMN banido INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { await db.run("ALTER TABLE users ADD COLUMN banido_motivo TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { await db.run('ALTER TABLE users ADD COLUMN sessao_v INTEGER NOT NULL DEFAULT 0'); } catch {}
   // review_replies virou 'respostas' (que serve também para comentários); só sai se estiver vazia
   try {
     const r = await db.get('SELECT COUNT(*) AS n FROM review_replies');

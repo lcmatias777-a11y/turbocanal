@@ -86,15 +86,19 @@ export function adminRoutes(app, db, auth) {
       { chave: 'pagamentos', titulo: 'Pagamentos ligados', ok: pagLigado && temMp && pixOk, critico: false,
         estado: pagLigado && temMp && pixOk ? 'ligados' : 'desligados: os planos pagos aparecem, mas não dá para comprar',
         resolver: pagLigado && temMp && pixOk ? '' : 'Depende do token do Mercado Pago e da chave Pix conferida; depois ligue em Admin → Configurações.' },
+      { chave: 'duas_etapas', titulo: 'Verificação em duas etapas na sua conta Google', ok: null, critico: false,
+        estado: 'só você consegue conferir isso (o site não enxerga a sua conta Google)',
+        resolver: 'O TurboCanal não tem senha própria: o login é só pelo Google. Então a chave do site inteiro é a sua conta Google. Ligue a verificação em duas etapas nela em myaccount.google.com/security. É a única coisa que protege de verdade contra conta invadida.' },
       { chave: 'backup', titulo: 'Backup do banco', ok: diasBackup !== null && diasBackup <= 30, critico: false,
         estado: ultimoBackup ? `último há ${diasBackup} dia(s)` : 'nunca foi feito',
         resolver: diasBackup !== null && diasBackup <= 30 ? '' : 'Baixe um backup em Admin → Banco de dados. Guarde o arquivo fora do Render.' }
     ];
-    const faltando = itens.filter((i) => !i.ok);
+    const avaliados = itens.filter((i) => i.ok !== null);
+    const faltando = avaliados.filter((i) => !i.ok);
     res.json({
       itens,
-      prontos: itens.length - faltando.length,
-      total: itens.length,
+      prontos: avaliados.length - faltando.length,
+      total: avaliados.length,
       faltando: faltando.length,
       bloqueios: faltando.filter((i) => i.critico).map((i) => i.titulo)
     });
@@ -127,8 +131,8 @@ export function adminRoutes(app, db, auth) {
   app.get('/api/admin/users', ...auth.admin, wrap(async (req, res) => {
     const q = String(req.query.q || '').trim().toLowerCase();
     const rows = q
-      ? await db.all('SELECT id,email,name,role,plan_id,credits,created_at FROM users WHERE lower(email) LIKE ? OR lower(name) LIKE ? ORDER BY created_at DESC LIMIT 100', [`%${q}%`, `%${q}%`])
-      : await db.all('SELECT id,email,name,role,plan_id,credits,created_at FROM users ORDER BY created_at DESC LIMIT 100');
+      ? await db.all('SELECT id,email,name,role,plan_id,credits,banido,banido_motivo,created_at FROM users WHERE lower(email) LIKE ? OR lower(name) LIKE ? ORDER BY created_at DESC LIMIT 100', [`%${q}%`, `%${q}%`])
+      : await db.all('SELECT id,email,name,role,plan_id,credits,banido,banido_motivo,created_at FROM users ORDER BY created_at DESC LIMIT 100');
     res.json({ items: rows });
   }));
 
@@ -284,6 +288,20 @@ export function adminRoutes(app, db, auth) {
   app.delete('/api/admin/admins/:id', ...auth.admin, wrap(async (req, res) => {
     const r = await pedirOuFazer(db, req.user, 'remover_admin', { alvo_user: req.params.id, motivo: req.body?.motivo });
     res.status(r.executado ? 200 : 202).json({ ok: true, ...r });
+  }));
+
+  // Derrubar as sessões de outra conta (só o administrador principal).
+  // Serve para cortar o acesso de uma conta de administrador invadida.
+  app.post('/api/admin/users/:id/encerrar-sessoes', ...auth.owner, wrap(async (req, res) => {
+    const alvo = await db.get('SELECT id,email FROM users WHERE id=?', [req.params.id]);
+    if (!alvo) throw new HttpError(404, 'Usuário não encontrado.');
+    await db.run('UPDATE users SET sessao_v=sessao_v+1 WHERE id=?', [alvo.id]);
+    await audit(db, req.user, 'auth.sessoes_encerradas', alvo.id, `pelo administrador principal · ${alvo.email}`);
+    const { notificar } = await import('./notify.js');
+    await notificar(db, alvo.id, 'seguranca', 'Suas sessões foram encerradas', {
+      corpo: 'O administrador principal encerrou os acessos da sua conta. Entre de novo com o Google.', link: '#/dashboard'
+    });
+    res.json({ ok: true });
   }));
 
   app.get('/api/admin/audit', ...auth.admin, wrap(async (req, res) => {

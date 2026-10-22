@@ -765,9 +765,11 @@ check('e ela é avisada de que perdeu o acesso',
 // ---------- O que falta configurar (sem vazar chave nenhuma) ----------
 console.log('\n— Checklist de configuração —');
 const chk = await req('/api/admin/checklist', { token: tOwn });
-check('o checklist lista todos os pontos de configuração', chk.status === 200 && chk.data.itens.length === 8 && chk.data.total === 8, JSON.stringify(chk.data).slice(0, 140));
+check('o checklist lista todos os pontos de configuração', chk.status === 200 && chk.data.itens.length === 9 && chk.data.total === 8, JSON.stringify(chk.data).slice(0, 140));
+check('o item das duas etapas aparece sem fingir que o site mediu isso',
+  chk.data.itens.find((i) => i.chave === 'duas_etapas')?.ok === null && /myaccount[.]google[.]com/.test(chk.data.itens.find((i) => i.chave === 'duas_etapas')?.resolver || ''));
 check('cada item diz o estado e, se falta, como resolver',
-  chk.data.itens.every((i) => typeof i.ok === 'boolean' && i.estado) && chk.data.itens.filter((i) => !i.ok).every((i) => i.resolver));
+  chk.data.itens.every((i) => (typeof i.ok === 'boolean' || i.ok === null) && i.estado) && chk.data.itens.filter((i) => i.ok === false).every((i) => i.resolver));
 check('o checklist NÃO devolve o valor de nenhuma chave',
   !/AIza|APP_USR|sk-|gemini_api_key|mp_access_token/.test(JSON.stringify(chk.data)), JSON.stringify(chk.data).slice(0, 200));
 check('aponta o banco em memória como bloqueio nos testes', chk.data.bloqueios.includes('Banco de dados'), JSON.stringify(chk.data.bloqueios));
@@ -777,6 +779,27 @@ check('o estado do Pix e o dos pagamentos batem com o que está mesmo salvo no b
   && itPag.ok === (itPix.ok && !!(await getSetting(db, 'mp_access_token')) && (await getSetting(db, 'payments_enabled')) === '1'),
   JSON.stringify({ pix: itPix.ok, pag: itPag.ok })); 
 check('usuário comum não vê o checklist', (await req('/api/admin/checklist', { token: t1 })).status === 403);
+
+// ---------- Encerrar sessoes (o botao de emergencia de verdade) ----------
+console.log('\n— Encerrar sessões —');
+const sessUser = await req('/api/auth/register', { method: 'POST', body: { email: 'sess@example.com', password: 'senha12345', name: 'Sessao' } });
+const tSess = sessUser.data.token;
+check('a conta nova entra normalmente', (await req('/api/me', { token: tSess })).status === 200);
+const saiuTudo = await req('/api/me/sair-de-tudo', { method: 'POST', token: tSess });
+check('"sair de todos os aparelhos" responde ok e avisa que esta sessao caiu tambem',
+  saiuTudo.status === 200 && /entre de novo/i.test(saiuTudo.data.aviso || ''), JSON.stringify(saiuTudo.data));
+const depoisSess = await req('/api/me', { token: tSess });
+check('o token antigo para de valer na hora', depoisSess.status === 401 && /encerrada/i.test(depoisSess.data.error || ''), JSON.stringify(depoisSess.data));
+const relogin = await req('/api/auth/login', { method: 'POST', body: { email: 'sess@example.com', password: 'senha12345' } });
+check('entrando de novo, o token novo vale', relogin.status === 200 && (await req('/api/me', { token: relogin.data.token })).status === 200);
+check('usuario comum nao derruba a sessao de outra pessoa',
+  (await req(`/api/admin/users/${sessUser.data.user.id}/encerrar-sessoes`, { method: 'POST', token: t1 })).status === 403);
+const corte = await req(`/api/admin/users/${sessUser.data.user.id}/encerrar-sessoes`, { method: 'POST', token: tOwn });
+check('o administrador principal corta o acesso de uma conta na hora',
+  corte.status === 200 && (await req('/api/me', { token: relogin.data.token })).status === 401);
+const voltou = await req('/api/auth/login', { method: 'POST', body: { email: 'sess@example.com', password: 'senha12345' } });
+check('e a pessoa fica sabendo pela notificacao',
+  (await req('/api/notifications', { token: voltou.data.token })).data.itens.some((x) => x.tipo === 'seguranca'));
 
 // ---------- Rastro de quem apagou o quê ----------
 console.log('\n— Rastro de exclusões —');

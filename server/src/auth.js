@@ -27,7 +27,8 @@ async function secret(db) {
 }
 
 export async function signToken(db, userId, days = 30) {
-  return jwt.sign({ uid: userId }, await secret(db), { expiresIn: `${days}d` });
+  const u = await db.get('SELECT sessao_v FROM users WHERE id=?', [userId]);
+  return jwt.sign({ uid: userId, sv: Number(u?.sessao_v || 0) }, await secret(db), { expiresIn: `${days}d` });
 }
 
 function cookieOpts() {
@@ -80,6 +81,9 @@ export function makeAuth(db) {
       // Papel e saldo sempre lidos do banco (nunca confiar no que o navegador manda)
       const user = await getUser(db, payload.uid);
       if (!user) throw new HttpError(401, 'Conta não encontrada. Entre novamente.');
+      if (Number(payload.sv || 0) !== Number(user.sessao_v || 0)) {
+        throw new HttpError(401, 'Esta sessão foi encerrada. Entre de novo com o Google.');
+      }
       if (user.banido) throw new HttpError(403, `Esta conta está suspensa.${user.banido_motivo ? ` Motivo: ${user.banido_motivo}` : ''} Se achar que é engano, fale com o administrador do site.`);
       req.user = await ensureRefill(db, user);
       next();
@@ -168,6 +172,17 @@ export function authRoutes(app, db, auth) {
     } catch (e) {
       next(e);
     }
+  });
+
+  // Encerrar TODAS as sessões da minha conta. É o botão de emergência de verdade:
+  // se alguém entrou na sua conta do Google, isso derruba o invasor na hora.
+  app.post('/api/me/sair-de-tudo', auth.required, async (req, res, next) => {
+    try {
+      await db.run('UPDATE users SET sessao_v=sessao_v+1 WHERE id=?', [req.user.id]);
+      await audit(db, req.user, 'auth.sessoes_encerradas', req.user.id, 'pela própria pessoa');
+      res.clearCookie(COOKIE, { ...cookieOpts(), maxAge: undefined });
+      res.json({ ok: true, aviso: 'Todas as sessões foram encerradas, inclusive esta. Entre de novo com o Google.' });
+    } catch (e) { next(e); }
   });
 
   app.post('/api/auth/login', async (req, res, next) => {
