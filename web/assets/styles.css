@@ -287,4 +287,36 @@ a.bl-card:hover { border-color: var(--accent2); text-decoration: none; }
 .lig-corpo { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: center; padding: 14px; }
 .lig-ico { font-size: 1.5rem; }
 .lig-corpo p { margin: 2px 0 0; }
-.lig-bts { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+.lig-bts { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; padding: 0 14px 14px; }
+
+/* Painel de chamada: topo fixo, vídeo, medidores de nível e controles */
+.lig-topo { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 14px 14px 10px; }
+.lig-quem p { margin: 2px 0 0; }
+.lig-min { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; width: 26px; height: 26px; cursor: pointer; line-height: 1; }
+.lig-caixa.encolhida .lig-video,
+.lig-caixa.encolhida .lig-niveis,
+.lig-caixa.encolhida .lig-bts,
+.lig-caixa.encolhida .lig-extra { display: none; }
+.lig-video { position: relative; margin: 0 14px 10px; border-radius: 10px; overflow: hidden; background: #000; }
+.lig-video video#ligVidRemoto { width: 100%; display: block; max-height: 230px; object-fit: contain; background: #000; }
+.lig-video video#ligVidLocal { position: absolute; right: 8px; bottom: 8px; width: 86px; border-radius: 6px; border: 1px solid var(--line); background: #000; }
+.lig-niveis { padding: 0 14px 6px; display: grid; gap: 6px; }
+.lig-nivel { display: grid; grid-template-columns: 4.2rem 1fr; gap: 8px; align-items: center; }
+.lig-nvnome { font-size: .82rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lig-nvtrilho { background: var(--bg2); border: 1px solid var(--line); border-radius: 999px; height: 9px; overflow: hidden; }
+.lig-nvtrilho i { display: block; height: 100%; width: 0; background: var(--line); border-radius: 999px; transition: width .08s linear; }
+.lig-nvtrilho i.tem-som { background: var(--ok); }
+.lig-dica { margin: 2px 0 0; line-height: 1.35; }
+.lig-extra { padding: 0 14px 12px; display: grid; gap: 4px; }
+.lig-extra select { width: 100%; }
+@media (max-width: 620px) {
+  .lig-caixa { right: 8px; left: 8px; width: auto; }
+  .lig-nivel { grid-template-columns: 3.4rem 1fr; }
+}
+
+
+/* Aviso de permissão de notificação, no topo da aba de chats */
+.ch-perm { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: space-between;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 10px; font-size: .9rem; }
+.ch-perm.ok { border-color: var(--ok); }
+.ch-perm.no { border-color: var(--line); color: var(--muted); }

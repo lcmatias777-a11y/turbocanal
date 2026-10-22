@@ -1641,7 +1641,14 @@ views.ajuda = async () => {
    conexão direta acontecer. Quando isso ocorre a tela diz exatamente isso. */
 // cliente = esta aba. Com duas abas abertas, os recados da ligação têm de chegar
 // na aba que está na chamada, e não em qualquer uma.
-const lig = { pc: null, local: null, conversa: null, com: null, comNome: '', estado: 'parado', timer: null, prazo: null, entrando: null, cliente: Math.random().toString(36).slice(2, 12), outroCliente: '' };
+const lig = {
+  pc: null, local: null, conversa: null, com: null, comNome: '', estado: 'parado',
+  timer: null, prazo: null, entrando: null, outroCliente: '',
+  cliente: Math.random().toString(36).slice(2, 12),
+  // voz: mudo, medidores de nível e o canal de vídeo (tela ou câmera)
+  mudo: false, ac: null, medidores: { eu: null, outro: null }, raf: null, pintando: false,
+  envioVideo: null, remetenteVideo: null, enviando: null, renegociando: false
+};
 window.lig = lig; // deixa o estado visível para diagnóstico e para os testes de navegador
 const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
 
@@ -1655,6 +1662,84 @@ function ligRitmo() {
   nt.ligTimer = setInterval(() => { ligOuvir(); }, ms);
 }
 
+/* ---------- Chamada chegando com o site em segundo plano ----------
+   Três avisos que não custam nada e não dependem de servidor nenhum:
+   toque gerado no próprio navegador, notificação do sistema e o título da aba
+   piscando. Tudo isso funciona com a aba aberta, mesmo minimizada ou atrás de
+   outra janela. Com o site FECHADO quem avisa é o Service Worker (sw.js). */
+
+const toque = { ac: null, timer: null, tituloOriginal: null, notif: null };
+window.toque = toque; // o teste de navegador confere o toque e o título por aqui
+
+function toqueTocar() {
+  if (toque.timer) return;
+  try {
+    toque.ac = toque.ac || new (window.AudioContext || window.webkitAudioContext)();
+    if (toque.ac.state === 'suspended') toque.ac.resume().catch(() => {});
+  } catch { toque.ac = null; }
+  const bipe = () => {
+    if (!toque.ac) return;
+    // Dois tons curtos, como telefone: gerados na hora, sem arquivo de som.
+    for (const [atraso, hz] of [[0, 880], [0.42, 660]]) {
+      const o = toque.ac.createOscillator(), g = toque.ac.createGain();
+      const t = toque.ac.currentTime + atraso;
+      o.type = 'sine'; o.frequency.value = hz;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.18, t + 0.04);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+      o.connect(g).connect(toque.ac.destination);
+      o.start(t); o.stop(t + 0.4);
+    }
+  };
+  bipe();
+  toque.timer = setInterval(bipe, 1800);
+  // Título piscando: resolve o caso de a notificação estar negada
+  toque.tituloOriginal = document.title;
+  let liga = false;
+  toque.piscar = setInterval(() => {
+    liga = !liga;
+    document.title = liga ? '📞 Chamada recebida!' : toque.tituloOriginal;
+  }, 900);
+}
+
+function toqueParar() {
+  if (toque.timer) { clearInterval(toque.timer); toque.timer = null; }
+  if (toque.piscar) { clearInterval(toque.piscar); toque.piscar = null; }
+  if (toque.tituloOriginal) { document.title = toque.tituloOriginal; toque.tituloOriginal = null; }
+  if (toque.notif) { try { toque.notif.close(); } catch {} toque.notif = null; }
+}
+
+/** Notificação do sistema. Só aparece se a pessoa tiver autorizado antes:
+ *  pedir permissão sozinho, na abertura do site, é o que faz o navegador
+ *  passar a ignorar o pedido. Aqui a permissão é pedida por um botão. */
+function toqueNotificar(nome) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    toque.notif = new Notification('📞 ' + (nome || 'Alguém') + ' está te ligando', {
+      body: 'Clique para abrir o TurboCanal e atender.',
+      tag: 'turbocanal-chamada',
+      requireInteraction: true,
+      silent: false
+    });
+    toque.notif.onclick = () => {
+      try { window.focus(); } catch {}
+      if (location.hash !== '#/admin/chats') location.hash = '#/admin/chats';
+      try { toque.notif.close(); } catch {}
+    };
+  } catch { /* sem notificação o toque e o título já avisam */ }
+}
+
+/** Estado da permissão, para a tela poder dizer a verdade sobre ela. */
+function toqueEstado() {
+  if (!('Notification' in window)) return 'sem-suporte';
+  return Notification.permission; // 'default' | 'granted' | 'denied'
+}
+
+async function toquePedirPermissao() {
+  if (!('Notification' in window)) return 'sem-suporte';
+  try { return await Notification.requestPermission(); } catch { return 'denied'; }
+}
+
 function ligPainel() {
   let el = $('#ligCaixa');
   if (!el) {
@@ -1666,16 +1751,239 @@ function ligPainel() {
   return el;
 }
 
+/** O painel é montado UMA vez por chamada. O elemento de áudio nunca é
+ *  recriado no meio: recriar zera o srcObject e a pessoa fica sem som com a
+ *  ligação conectada, que é exatamente o tipo de defeito invisível. */
+function ligMontar() {
+  const el = ligPainel();
+  if (el.dataset.montado === '1') return el;
+  el.dataset.montado = '1';
+  el.innerHTML = `
+    <div class="lig-topo">
+      <span class="lig-ico">📞</span>
+      <div class="lig-quem"><b id="ligNome">Ligação</b><p class="small muted" id="ligEstado">…</p></div>
+      <button class="lig-min" id="ligMin" title="Encolher">–</button>
+    </div>
+    <div class="lig-video" id="ligVideo" hidden>
+      <video id="ligVidRemoto" autoplay playsinline></video>
+      <video id="ligVidLocal" autoplay playsinline muted></video>
+    </div>
+    <div class="lig-niveis" id="ligNiveis" hidden>
+      <div class="lig-nivel"><span class="lig-nvnome">Você</span><span class="lig-nvtrilho"><i id="ligNvEu"></i></span></div>
+      <div class="lig-nivel"><span class="lig-nvnome" id="ligNvNome">Outro</span><span class="lig-nvtrilho"><i id="ligNvOutro"></i></span></div>
+      <p class="lig-dica small muted"><b>A barra do outro mexendo = som chegando.</b> Se ela mexe e você não ouve, o problema é a saída de som, não a ligação. E se a <i>sua</i> barra cai quando o outro fala no alto-falante, é o cancelamento de eco do navegador tirando da sua captura o que a máquina está tocando. Use fone e ela volta.</p>
+    </div>
+    <div class="lig-bts" id="ligBts"></div>
+    <div class="lig-extra" id="ligExtra" hidden></div>
+    <audio id="ligAudio" autoplay></audio>`;
+  $('#ligMin').onclick = () => el.classList.toggle('encolhida');
+  return el;
+}
+
+function ligBotoes(botoes = []) {
+  const alvo = $('#ligBts');
+  if (!alvo) return;
+  alvo.innerHTML = botoes.map((b) => `<button class="btn sm ${b.cor || 'secondary'}" id="${b.id}"${b.titulo ? ` title="${esc(b.titulo)}"` : ''}>${esc(b.texto)}</button>`).join('');
+  for (const b of botoes) { const n = $('#' + b.id); if (n) n.onclick = b.acao; }
+}
+
+function ligDesenhar(texto, botoes = []) {
+  ligMontar();
+  const n = $('#ligNome'); if (n) n.textContent = lig.comNome || 'Ligação';
+  const nv = $('#ligNvNome'); if (nv) nv.textContent = (lig.comNome || 'Outro').split(' ')[0];
+  ligEstado(texto);
+  ligBotoes(botoes);
+}
+
+function ligEstado(t) { const e = $('#ligEstado'); if (e) e.textContent = t; }
+
+/* ---------- Medidor de nível: mostra que tem som, mesmo sem alto-falante ---------- */
+
+async function ligAc() {
+  if (!lig.ac) { try { lig.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; } }
+  // Suspenso, o analisador só devolve silêncio: o medidor mentiria dizendo que
+  // não chega som. Espera acordar antes de medir.
+  if (lig.ac.state === 'suspended') { try { await lig.ac.resume(); } catch {} }
+  return lig.ac;
+}
+
+/** Liga um analisador numa trilha de áudio e pinta a barra correspondente. */
+async function ligMedidor(stream, barraId, qual) {
+  const ac = await ligAc();
+  if (!ac || !stream || !stream.getAudioTracks().length) return;
+  try {
+    const fonte = ac.createMediaStreamSource(stream);
+    const an = ac.createAnalyser();
+    an.fftSize = 1024;
+    fonte.connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    lig.medidores[qual] = { an, buf, fonte };
+    $('#ligNiveis')?.removeAttribute('hidden');
+    if (!lig.pintando) ligPintarNiveis();
+  } catch { /* sem medidor não quebra a ligação */ }
+}
+
+function ligPintarNiveis() {
+  lig.pintando = true;
+  const passo = () => {
+    if (lig.estado === 'parado') { lig.pintando = false; return; }
+    // O navegador pode suspender o contexto a qualquer momento (aba em segundo
+    // plano, por exemplo). Sem isto a barra congela sem explicação.
+    if (lig.ac && lig.ac.state === 'suspended') lig.ac.resume().catch(() => {});
+    for (const [qual, id] of [['eu', '#ligNvEu'], ['outro', '#ligNvOutro']]) {
+      const m = lig.medidores[qual], barra = $(id);
+      if (!m || !barra) continue;
+      m.an.getByteTimeDomainData(m.buf);
+      let pico = 0;
+      for (const v of m.buf) { const d = Math.abs(v - 128); if (d > pico) pico = d; }
+      const mudoAqui = qual === 'eu' && lig.mudo;
+      // raiz quadrada: fala normal fica visível em vez de uma barrinha parada
+      const pct = mudoAqui ? 0 : Math.min(100, Math.round(Math.sqrt(pico / 128) * 100));
+      barra.style.width = pct + '%';
+      barra.className = pct > 4 ? 'tem-som' : '';
+    }
+    lig.raf = requestAnimationFrame(passo);
+  };
+  passo();
+}
+
+function ligPararMedidores() {
+  if (lig.raf) { cancelAnimationFrame(lig.raf); lig.raf = null; }
+  lig.pintando = false;
+  for (const q of ['eu', 'outro']) { try { lig.medidores[q]?.fonte.disconnect(); } catch {} lig.medidores[q] = null; }
+}
+
+/* ---------- Controles durante a chamada ---------- */
+
+function ligControles() {
+  ligBotoes([
+    { id: 'ligMudo', texto: lig.mudo ? '🔇 Mudo' : '🎙 Microfone', cor: lig.mudo ? 'secondary' : '', titulo: 'Liga e desliga o seu microfone', acao: ligAlternarMudo },
+    { id: 'ligTela', texto: lig.enviando === 'tela' ? '🛑 Parar tela' : '🖥 Tela', cor: 'secondary', titulo: 'Compartilhar a sua tela', acao: () => (lig.enviando === 'tela' ? ligPararVideo() : ligCompartilhar('tela')) },
+    { id: 'ligCam', texto: lig.enviando === 'camera' ? '🛑 Parar câmera' : '📹 Câmera', cor: 'secondary', titulo: 'Ligar a sua câmera', acao: () => (lig.enviando === 'camera' ? ligPararVideo() : ligCompartilhar('camera')) },
+    { id: 'ligDisp', texto: '⚙️', cor: 'ghost', titulo: 'Escolher microfone e saída de som', acao: ligDispositivos },
+    { id: 'ligFim', texto: '📵 Desligar', cor: 'secondary', acao: () => { ligSinal(lig.conversa, lig.com, 'desligou', {}); ligFechar(); } }
+  ]);
+}
+
+function ligAlternarMudo() {
+  lig.mudo = !lig.mudo;
+  for (const t of lig.local?.getAudioTracks() || []) t.enabled = !lig.mudo;
+  ligControles();
+  ligEstado(lig.mudo ? 'Seu microfone está desligado.' : 'Conectado. Pode falar.');
+}
+
+/** Compartilhar tela ou câmera. Usa o mesmo canal de vídeo: trocar de um para
+ *  o outro substitui a trilha, sem derrubar a ligação. */
+async function ligCompartilhar(tipo) {
+  if (!lig.pc || lig.estado !== 'falando') return alert('Só dá para compartilhar com a ligação conectada.');
+  try {
+    const s = tipo === 'tela'
+      ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 12 }, audio: false })
+      : await navigator.mediaDevices.getUserMedia({ video: { width: 640 }, audio: false });
+    const faixa = s.getVideoTracks()[0];
+    if (!faixa) throw new Error('nenhuma imagem foi escolhida');
+    try { lig.envioVideo?.getVideoTracks().forEach((t) => t.stop()); } catch {}
+    lig.envioVideo = s;
+    lig.enviando = tipo;
+    if (lig.remetenteVideo) await lig.remetenteVideo.replaceTrack(faixa);
+    else lig.remetenteVideo = lig.pc.addTrack(faixa, s);
+    const vl = $('#ligVidLocal');
+    if (vl) { vl.srcObject = s; $('#ligVideo').hidden = false; vl.play?.().catch(() => {}); }
+    // Parar pelo botão do próprio navegador tem de refletir aqui
+    faixa.onended = () => { if (lig.enviando === tipo) ligPararVideo(); };
+    ligControles();
+    ligEstado(tipo === 'tela' ? 'Compartilhando sua tela.' : 'Sua câmera está ligada.');
+    await ligRenegociar();
+  } catch (e) {
+    if (/Permission|NotAllowed|denied/i.test(String(e))) ligEstado('Você não autorizou. A ligação continua só com voz.');
+    else alert(`Não deu para compartilhar: ${e.message || e}`);
+  }
+}
+
+async function ligPararVideo() {
+  try { lig.envioVideo?.getTracks().forEach((t) => t.stop()); } catch {}
+  lig.envioVideo = null; lig.enviando = null;
+  const vl = $('#ligVidLocal'); if (vl) vl.srcObject = null;
+  if (!$('#ligVidRemoto')?.srcObject) $('#ligVideo')?.setAttribute('hidden', '');
+  if (lig.remetenteVideo) { try { await lig.remetenteVideo.replaceTrack(null); } catch {} }
+  ligControles();
+  ligEstado('Conectado. Pode falar.');
+  await ligRenegociar();
+}
+
+/** Nova oferta no meio da chamada (entrou ou saiu vídeo). Quem adicionou a
+ *  trilha é quem oferece; o outro lado responde. */
+async function ligRenegociar() {
+  if (!lig.pc || lig.renegociando) return;
+  lig.renegociando = true;
+  try {
+    const oferta = await lig.pc.createOffer();
+    await lig.pc.setLocalDescription(oferta);
+    await ligSinal(lig.conversa, lig.com, 'oferta', { sdp: lig.pc.localDescription, renegociar: true });
+  } catch { /* a ligação de voz continua */ }
+  lig.renegociando = false;
+}
+
+/** Escolher microfone e, onde o navegador deixa, a saída de som. */
+async function ligDispositivos() {
+  const cx = $('#ligExtra');
+  if (!cx) return;
+  if (!cx.hasAttribute('hidden')) { cx.setAttribute('hidden', ''); return; }
+  cx.removeAttribute('hidden');
+  cx.innerHTML = '<p class="small muted">Carregando dispositivos…</p>';
+  let lista = [];
+  try { lista = await navigator.mediaDevices.enumerateDevices(); } catch {}
+  const mics = lista.filter((d) => d.kind === 'audioinput');
+  const saidas = lista.filter((d) => d.kind === 'audiooutput');
+  const temSink = typeof $('#ligAudio')?.setSinkId === 'function';
+  cx.innerHTML = `
+    <label class="small">Microfone</label>
+    <select id="ligMic">${mics.map((d, i) => `<option value="${esc(d.deviceId)}">${esc(d.label || 'Microfone ' + (i + 1))}</option>`).join('') || '<option>nenhum encontrado</option>'}</select>
+    <label class="small">Saída de som</label>
+    ${temSink
+      ? `<select id="ligSaida">${saidas.map((d, i) => `<option value="${esc(d.deviceId)}">${esc(d.label || 'Saída ' + (i + 1))}</option>`).join('') || '<option>nenhuma encontrada</option>'}</select>`
+      : '<p class="small muted">Este navegador não deixa escolher a saída de som pela página. Troque pelo sistema.</p>'}
+    <p class="small muted">Sem permissão de microfone os nomes aparecem em branco. Isso é do navegador, não do site.</p>`;
+  const mic = $('#ligMic');
+  if (mic) mic.onchange = async () => {
+    try {
+      const novo = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: mic.value } } });
+      const faixa = novo.getAudioTracks()[0];
+      const rem = lig.pc?.getSenders().find((s) => s.track && s.track.kind === 'audio');
+      if (rem) await rem.replaceTrack(faixa);
+      try { lig.local?.getAudioTracks().forEach((t) => t.stop()); } catch {}
+      lig.local = novo;
+      faixa.enabled = !lig.mudo;
+      try { lig.medidores.eu?.fonte.disconnect(); } catch {}
+      lig.medidores.eu = null;
+      ligMedidor(novo, '#ligNvEu', 'eu');
+      ligEstado('Microfone trocado.');
+    } catch (e) { ligEstado('Não deu para trocar o microfone: ' + (e.message || e)); }
+  };
+  const saida = $('#ligSaida');
+  if (saida) saida.onchange = async () => {
+    try { await $('#ligAudio').setSinkId(saida.value); ligEstado('Saída de som trocada.'); }
+    catch (e) { ligEstado('Não deu para trocar a saída: ' + (e.message || e)); }
+  };
+}
+
 function ligFechar(msg) {
+  toqueParar();
   if (lig.timer) { clearInterval(lig.timer); lig.timer = null; }
   if (lig.prazo) { clearTimeout(lig.prazo); lig.prazo = null; }
+  ligPararMedidores();
   try { lig.pc?.close(); } catch {}
   try { lig.local?.getTracks().forEach((t) => t.stop()); } catch {}
-  lig.pc = null; lig.local = null; lig.estado = 'parado'; lig.conversa = null; lig.com = null; lig.entrando = null; lig.outroCliente = '';
+  try { lig.envioVideo?.getTracks().forEach((t) => t.stop()); } catch {}
+  lig.pc = null; lig.local = null; lig.envioVideo = null; lig.remetenteVideo = null; lig.enviando = null;
+  lig.estado = 'parado'; lig.conversa = null; lig.com = null; lig.entrando = null; lig.outroCliente = '';
+  lig.mudo = false; lig.renegociando = false;
   ligRitmo();
   const el = $('#ligCaixa');
   if (!el) return;
   if (msg) {
+    el.dataset.montado = '';
+    el.classList.remove('encolhida');
     el.innerHTML = `<div class="lig-corpo"><b>Ligação encerrada</b><p class="small">${esc(msg)}</p>
       <div class="lig-bts"><button class="btn sm secondary" id="ligOk">Fechar</button></div></div>`;
     $('#ligOk').onclick = () => el.remove();
@@ -1687,32 +1995,43 @@ async function ligSinal(conversa, para, tipo, dados = {}) {
   try {
     await api(`/admin/chats/${conversa}/sinal`, {
       method: 'POST',
-      // "chamando" e "oferta" não têm aba de destino: ainda não se sabe qual vai atender
-      body: { para, tipo, dados, cliente: lig.cliente, paraCliente: ['chamando', 'oferta'].includes(tipo) ? '' : lig.outroCliente }
+      // "chamando" e "oferta" de início não têm aba de destino: ainda não se
+      // sabe qual vai atender. A re-oferta do meio da chamada já tem.
+      body: {
+        para, tipo, dados, cliente: lig.cliente,
+        paraCliente: (tipo === 'chamando' || (tipo === 'oferta' && !dados.renegociar)) ? '' : lig.outroCliente
+      }
     });
   } catch {}
 }
-
-function ligDesenhar(texto, botoes = []) {
-  const el = ligPainel();
-  el.innerHTML = `<div class="lig-corpo"><span class="lig-ico">📞</span>
-      <div><b>${esc(lig.comNome || 'Ligação')}</b><p class="small muted" id="ligEstado">${esc(texto)}</p></div>
-      <div class="lig-bts">${botoes.map((b) => `<button class="btn sm ${b.cor || 'secondary'}" id="${b.id}">${esc(b.texto)}</button>`).join('')}</div>
-    </div><audio id="ligAudio" autoplay></audio>`;
-  for (const b of botoes) { const n = $('#' + b.id); if (n) n.onclick = b.acao; }
-}
-
-function ligEstado(t) { const e = $('#ligEstado'); if (e) e.textContent = t; }
 
 async function ligCriarPc(conversa, com) {
   const pc = new RTCPeerConnection({ iceServers: STUN });
   lig.pc = pc;
   lig.local = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   for (const t of lig.local.getTracks()) pc.addTrack(t, lig.local);
-  pc.ontrack = (ev) => { const a = $('#ligAudio'); if (a) a.srcObject = ev.streams[0]; };
+  ligMedidor(lig.local, '#ligNvEu', 'eu');
+  lig.remetenteVideo = null; // o canal de vídeo nasce quando alguém liga a tela ou a câmera
+  pc.ontrack = (ev) => {
+    const st = ev.streams[0];
+    if (ev.track.kind === 'audio') {
+      const a = $('#ligAudio');
+      if (a) { a.srcObject = st; a.play?.().catch(() => {}); }
+      ligMedidor(st, '#ligNvOutro', 'outro');
+    } else {
+      const v = $('#ligVidRemoto');
+      if (v) { v.srcObject = st; $('#ligVideo')?.removeAttribute('hidden'); v.play?.().catch(() => {}); }
+      ev.track.onended = () => { const vv = $('#ligVidRemoto'); if (vv) vv.srcObject = null; if (!lig.envioVideo) $('#ligVideo')?.setAttribute('hidden', ''); };
+    }
+  };
   pc.onicecandidate = (ev) => { if (ev.candidate) ligSinal(conversa, com, 'ice', { c: ev.candidate.toJSON() }); };
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'connected') { lig.estado = 'falando'; ligEstado('Conectado. Pode falar.'); if (lig.prazo) { clearTimeout(lig.prazo); lig.prazo = null; } }
+    if (pc.connectionState === 'connected') {
+      lig.estado = 'falando';
+      ligEstado('Conectado. Pode falar.');
+      ligControles();
+      if (lig.prazo) { clearTimeout(lig.prazo); lig.prazo = null; }
+    }
     if (pc.connectionState === 'failed') {
       ligSinal(conversa, com, 'falhou', {});
       ligFechar('Não consegui abrir a conexão direta entre os dois computadores. Isso acontece quando as duas redes bloqueiam ligação direta. Para funcionar sempre seria preciso um servidor TURN, que é pago — eu não liguei nada pago sem avisar o custo antes.');
@@ -1763,16 +2082,28 @@ async function ligOuvir() {
   try { d = await api('/admin/chats/sinais?cliente=' + encodeURIComponent(lig.cliente)); } catch { return; }
   for (const s of d.itens) {
     if (s.tipo === 'oferta') {
+      // Re-oferta no meio da chamada: o outro lado ligou ou desligou a imagem.
+      if (lig.pc && lig.estado !== 'parado' && s.de === lig.com) {
+        try {
+          await lig.pc.setRemoteDescription(new RTCSessionDescription(s.dados.sdp));
+          const resp = await lig.pc.createAnswer();
+          await lig.pc.setLocalDescription(resp);
+          await ligSinal(s.conversa, s.de, 'resposta', { sdp: lig.pc.localDescription, renegociar: true });
+        } catch { /* a voz continua */ }
+        continue;
+      }
       if (lig.estado !== 'parado') { lig.outroCliente = s.deCliente || ''; await ligSinal(s.conversa, s.de, 'recusou', { motivo: 'ocupado' }); lig.outroCliente = ''; continue; }
       lig.estado = 'tocando'; lig.comNome = s.deNome; lig.entrando = s; lig.outroCliente = s.deCliente || '';
       ligRitmo();
+      toqueTocar();
+      toqueNotificar(s.deNome);
       ligDesenhar('está te ligando', [
-        { id: 'ligAceita', texto: '✅ Atender', cor: '', acao: () => ligAtender(s) },
-        { id: 'ligRecusa', texto: '❌ Recusar', cor: 'secondary', acao: () => { ligSinal(s.conversa, s.de, 'recusou', {}); ligFechar(); } }
+        { id: 'ligAceita', texto: '✅ Atender', cor: '', acao: () => { toqueParar(); ligAtender(s); } },
+        { id: 'ligRecusa', texto: '❌ Recusar', cor: 'secondary', acao: () => { toqueParar(); ligSinal(s.conversa, s.de, 'recusou', {}); ligFechar(); } }
       ]);
-    } else if (s.tipo === 'resposta' && lig.pc && !lig.pc.currentRemoteDescription) {
+    } else if (s.tipo === 'resposta' && lig.pc && lig.pc.signalingState === 'have-local-offer') {
       lig.outroCliente = s.deCliente || lig.outroCliente;
-      try { await lig.pc.setRemoteDescription(new RTCSessionDescription(s.dados.sdp)); ligEstado('Conectando…'); } catch {}
+      try { await lig.pc.setRemoteDescription(new RTCSessionDescription(s.dados.sdp)); if (lig.estado !== 'falando') ligEstado('Conectando…'); } catch {}
     } else if (s.tipo === 'ice' && lig.pc) {
       try { await lig.pc.addIceCandidate(s.dados.c); } catch {}
     } else if (s.tipo === 'recusou') {
@@ -2267,11 +2598,25 @@ const adminTabs = {
 
   // ---------- Chats entre administradores ----------
   async chats(el) {
-    el.innerHTML = `<div class="ch-tela">
+    const perm = toqueEstado();
+    const avisoPerm = perm === 'granted'
+      ? '<div class="ch-perm ok">🔔 Avisos de chamada ligados. Com a aba aberta em segundo plano, você recebe notificação do sistema, toque e o título piscando.</div>'
+      : perm === 'denied'
+        ? '<div class="ch-perm no">🔕 Você bloqueou as notificações para este site no navegador. O toque e o título piscando continuam funcionando; a notificação do sistema só volta se você liberar nas permissões do site, no cadeado da barra de endereço.</div>'
+        : perm === 'sem-suporte'
+          ? '<div class="ch-perm no">Este navegador não tem notificações do sistema. O toque e o título piscando continuam funcionando.</div>'
+          : '<div class="ch-perm"><span>Quer receber chamada com o site em segundo plano? Precisa autorizar a notificação uma vez. Não custa nada e não manda nada para ninguém.</span><button class="btn sm" id="chPerm">🔔 Autorizar avisos</button></div>';
+    el.innerHTML = avisoPerm + `<div class="ch-tela">
         <aside class="ch-lado"><div class="ch-topo"><b>Conversas</b><button class="btn sm ghost" id="chNovo">+ grupo</button></div>
           <div id="chLista"><span class="spin"></span></div></aside>
         <section class="ch-painel" id="chPainel"><p class="muted" style="padding:20px">Escolha uma conversa à esquerda.</p></section>
       </div>`;
+    const bp = $('#chPerm');
+    if (bp) bp.onclick = async () => {
+      const r = await toquePedirPermissao();
+      if (r === 'granted') toqueNotificar('Teste do TurboCanal');
+      adminTabs.chats(el);
+    };
     await chPintarLista();
     $('#chNovo').onclick = chNovoGrupo;
     if (ch.aberta) await chAbrir(ch.aberta);
