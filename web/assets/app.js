@@ -931,11 +931,14 @@ views['ferramentas/raiox'] = async (params) => {
       <div class="card"><h3>🧲 Os que mais trazem inscrito</h3>
         <p class="muted small">Inscritos ganhos menos perdidos, por mil views. A mediana do seu canal é ${num(r.base.medianaInscritosPorMil)}.</p>
         ${tabela(r.campeoes, (v) => v.inscritosPorMil, 'por mil views', '')}</div>
-      <div class="card"><h3>👀 Muita view, pouco inscrito</h3>
-        <p class="muted small">Muita view e inscrito nenhum. Não prova que o público é de fora do nicho, mas é por aqui que eu começaria a olhar.</p>
-        ${tabela(r.soView, (v) => v.inscritosPorMil, 'por mil views', '')}</div>
+      <div class="card"><h3>👀 Converteram menos do que o normal do canal</h3>
+        <p class="muted small">Pela taxa mediana do seu canal, esses renderiam mais inscritos do que renderam. Não quer dizer que o público é de fora do nicho: pode ser vídeo que resolve a dúvida e a pessoa segue a vida.</p>
+        ${r.soView.length ? `<table><tr><th>Vídeo</th><th>Esperado</th><th>Veio</th><th>Views</th></tr>${r.soView.map((v) => `<tr>
+          <td><a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc(v.titulo)}</a></td>
+          <td>${num(v.esperados)}</td><td><b>${num(v.inscritosLiquidos)}</b></td><td>${fmt(v.views)}</td></tr>`).join('')}</table>`
+          : '<p class="muted">Nenhum vídeo com views suficientes para essa conta.</p>'}</div>
       <div class="card"><h3>⏳ Os que mais prendem</h3>
-        <p class="muted small">Percentual médio assistido. A mediana do canal é ${num(r.base.retencaoMediana)}%.${r.temAcimaDeCem ? ' Acima de 100% quer dizer que a mesma pessoa assistiu mais de uma vez (Shorts repetem sozinhos).' : ''}</p>
+        <p class="muted small">Percentual médio assistido. A mediana do canal é ${num(r.base.retencaoMediana)}% (nos vídeos normais, ${num(r.retencaoNormais)}%).${r.temAcimaDeCem ? ' Acima de 100% quer dizer que a mesma pessoa assistiu mais de uma vez (Shorts repetem sozinhos).' : ''}</p>
         ${tabela(r.prendemMais, (v) => Math.round(v.percentualMedio), 'assistido', '%')}</div>
       <div class="card"><h3>💤 Os que menos prendem</h3>
         ${tabela(r.prendemMenos, (v) => Math.round(v.percentualMedio), 'assistido', '%')}</div>

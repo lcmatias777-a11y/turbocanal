@@ -7,9 +7,9 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
 
 const FAKE = {
   canal: 'Canal do Teste', periodo: { de: '2026-07-24', ate: '2026-10-21', dias: 90 },
-  base: { analisados: 9, total: 10, medianaInscritosPorMil: 2, retencaoMediana: 35, minGrupo: 3 },
+  base: { analisados: 9, total: 10, medianaInscritosPorMil: 2, retencaoMediana: 35, minGrupo: 3 }, retencaoNormais: 20,
   campeoes: [{ id: 'c0', titulo: 'Curto que converte', views: 1000, inscritosPorMil: 20, percentualMedio: 80 }],
-  soView: [{ id: 'viral', titulo: 'Viral fora do nicho', views: 90000, inscritosPorMil: 0, percentualMedio: 10 }],
+  soView: [{ id: 'viral', titulo: 'Viral fora do nicho', views: 90000, inscritosPorMil: 0, inscritosLiquidos: 0, esperados: 180, percentualMedio: 10 }],
   prendemMais: [{ id: 'c0', titulo: 'Curto que converte', views: 1000, inscritosPorMil: 20, percentualMedio: 80 }],
   prendemMenos: [{ id: 'viral', titulo: 'Viral fora do nicho', views: 90000, inscritosPorMil: 0, percentualMedio: 10 }],
   faixas: [
@@ -51,7 +51,8 @@ const FAKE = {
   const t = await p.textContent('#rxOut');
   check('mostra as conclusões com o número que as sustenta', /20 inscritos por mil views/.test(t) && /80% do público/.test(t));
   check('lista os que mais trazem inscrito', /Curto que converte/.test(t));
-  check('separa o que traz view e não traz inscrito', /Viral fora do nicho/.test(t) && /Muita view, pouco inscrito/.test(t));
+  check('separa o que converteu menos do que o normal do canal, dizendo o esperado',
+    /Viral fora do nicho/.test(t) && /Converteram menos do que o normal do canal/.test(t) && /Esperado/.test(t));
   check('desenha a retenção por tamanho de vídeo', (await p.$$('.bt-linha')).length === 5);
   const cores = await p.$$eval('.bt-barra', (bs) => bs.map((x) => x.style.background));
   check('a melhor faixa sai em verde e as sem amostra em cinza',

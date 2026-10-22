@@ -820,9 +820,11 @@ const umSoPuxa = analisarVideos([
   { id: 'b2', titulo: 'B2', views: 2000, duracaoSeg: 1500, duracaoMediaSeg: 150, percentualMedio: 10, inscritosGanhos: 1 },
   { id: 'b3', titulo: 'B3', views: 2000, duracaoSeg: 1500, duracaoMediaSeg: 150, percentualMedio: 10, inscritosGanhos: 1 }
 ]);
-check('quando a vantagem depende de um video so, o site diz que e sinal e nao conclusao',
-  umSoPuxa.formatoRobusto === false && umSoPuxa.conclusoes.some((c) => /SOME quando tiro/.test(c)),
-  JSON.stringify(umSoPuxa.conclusoes).slice(0, 200));
+check('quando a vantagem depende de um video so, o site manda TESTAR em vez de afirmar duracao ideal',
+  umSoPuxa.formatoRobusto === false && umSoPuxa.conclusoes.some((c) => /faixa para TESTAR/.test(c)),
+  JSON.stringify(umSoPuxa.conclusoes).slice(0, 220));
+check('a faixa vencedora e comparada com a MEDIANA dos normais, nao com a pior faixa',
+  umSoPuxa.conclusoes.some((c) => /mediana dos normais/.test(c)));
 check('escreve conclusoes citando o numero que as sustenta',
   ax.conclusoes.length >= 2 && ax.conclusoes.every((c) => /\d/.test(c)), JSON.stringify(ax.conclusoes).slice(0, 200));
 check('avisa que CTR e impressoes nao existem na API, em vez de inventar',
@@ -958,7 +960,7 @@ console.log('\n— Sua próxima ação —');
   const xrayBom = {
     base: { analisados: 9, total: 10, medianaInscritosPorMil: 2, retencaoMediana: 35, minGrupo: 3 },
     campeoes: [{ id: 'c0', titulo: 'Curto que converte', inscritosPorMil: 20, views: 1000 }],
-    soView: [{ id: 'viral', titulo: 'Viral', views: 90000, inscritosPorMil: 0 }],
+    soView: [{ id: 'viral', titulo: 'Viral', views: 90000, inscritosPorMil: 0, inscritosLiquidos: 0, esperados: 180 }],
     melhorFaixa: { id: 0, nome: 'até 1 min (Shorts)', videos: 4, retencaoMediana: 80 },
     piorFaixa: { id: 4, nome: 'mais de 20 min', videos: 5, retencaoMediana: 20 }
   };
@@ -979,13 +981,17 @@ console.log('\n— Sua próxima ação —');
   const horNaoRobusto = { combinacao: { ...horBom.combinacao, robusta: false } };
   check('horario cuja vantagem some sem o video que mais puxa tambem nao vira recomendacao',
     !escolherAcoes({ canalLigado: true, xray: xrayBom, horarios: horNaoRobusto, comentariosSemResposta: 0, iaLigada: true, temAvaliacao: true }).some((a) => a.chave.startsWith('horario_')));
-  const viralFraco = { ...xrayBom, soView: [{ id: 'v', titulo: 'Pouca view', views: 600, inscritosPorMil: 0 }] };
-  check('video com pouca view nao vira alerta de fora do nicho',
-    !escolherAcoes({ canalLigado: true, xray: viralFraco, horarios: horBom, comentariosSemResposta: 0, iaLigada: true, temAvaliacao: true }).some((a) => a.chave.startsWith('fora_nicho_')));
+  const viralFraco = { ...xrayBom, soView: [{ id: 'v', titulo: 'Pouca view', views: 600, inscritosPorMil: 0, inscritosLiquidos: 0, esperados: 1.2 }] };
+  check('video onde so 1 inscrito seria esperado NAO vira alerta (zero ali nao diz nada)',
+    !escolherAcoes({ canalLigado: true, xray: viralFraco, horarios: horBom, comentariosSemResposta: 0, iaLigada: true, temAvaliacao: true }).some((a) => a.chave.startsWith('conversao_baixa_')));
   const campFraco = { ...xrayBom, campeoes: [{ id: 'x', titulo: 'So 50 views', inscritosPorMil: 40, views: 50 }] };
   check('campeao com 50 views nao vira "faca uma continuacao"',
     !escolherAcoes({ canalLigado: true, xray: campFraco, horarios: horBom, comentariosSemResposta: 0, iaLigada: true, temAvaliacao: true }).some((a) => a.chave.startsWith('continuacao_')));
-  check('o video que traz view e nao traz inscrito vira alerta', acoes.some((a) => a.tipo === 'atencao' && a.chave.startsWith('fora_nicho_')));
+  check('o video que converte abaixo do esperado vira alerta, citando quantos inscritos renderia',
+    acoes.some((a) => a.tipo === 'atencao' && a.chave.startsWith('conversao_baixa_') && /renderiam cerca de/.test(a.dado)),
+    JSON.stringify(acoes.find((a) => a.tipo === 'atencao')));
+  check('e o alerta NAO afirma que o publico e de fora do nicho',
+    acoes.filter((a) => a.tipo === 'atencao').every((a) => /não quer dizer que o público é de fora do nicho/i.test(a.porque)));
   check('comentarios sem resposta viram tarefa', acoes.some((a) => a.chave === 'responder_comentarios' && /3 comentário/.test(a.titulo)));
 
   // canal sem amostra: admite em vez de fabricar oportunidade

@@ -64,12 +64,12 @@ export function escolherAcoes({ canalLigado, xray, horarios, comentariosSemRespo
     });
   }
 
-  if (soView && soView.views >= 1000 && soView.inscritosPorMil <= 0) {
+  if (soView && soView.views >= 1000 && Number(soView.esperados) >= 3 && soView.inscritosLiquidos < soView.esperados / 2) {
     fora.push({
-      chave: 'fora_nicho_' + soView.id, tipo: 'atencao',
-      titulo: `“${soView.titulo}” traz gente que não fica`,
-      porque: 'Zero inscrito não prova que o público é de fora do nicho, mas é o primeiro lugar onde eu olharia antes de repetir esse assunto.',
-      dado: `${n(soView.views)} views e ${d1(soView.inscritosPorMil)} inscrito por mil views.`,
+      chave: 'conversao_baixa_' + soView.id, tipo: 'atencao',
+      titulo: `“${soView.titulo}” converteu menos inscrito do que o normal do seu canal`,
+      porque: 'Pela taxa mediana do seu canal, esse vídeo renderia mais inscritos do que rendeu. Vale olhar o que ele tem de diferente. Não quer dizer que o público é de fora do nicho.',
+      dado: `${n(soView.views)} views renderiam cerca de ${d1(soView.esperados)} inscrito(s) pela sua taxa mediana, e vieram ${soView.inscritosLiquidos}.`,
       botao: { texto: 'Comparar com os outros vídeos', href: '#/ferramentas/raiox' }
     });
   }

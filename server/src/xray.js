@@ -75,9 +75,14 @@ export function analisarVideos(videos, opts = {}) {
   const porInscrito = [...comparaveis].sort((a, b) => b.inscritosPorMil - a.inscritosPorMil || b.inscritosLiquidos - a.inscritosLiquidos);
   const medianaPorMil = mediana(comparaveis.map((v) => v.inscritosPorMil));
   const campeoes = porInscrito.filter((v) => v.inscritosPorMil > medianaPorMil && v.inscritosLiquidos > 0).slice(0, 5);
+  // Conversão abaixo do esperado: não é "público fora do nicho". A pergunta certa é
+  // quantos inscritos seria razoável esperar naquela quantidade de views, pela
+  // própria taxa do canal. Zero em 100 views não diz nada; zero em 10 mil, sim.
+  const esperados = (views) => (medianaPorMil * views) / 1000;
   const soView = [...comparaveis]
-    .filter((v) => v.views >= Math.max(1, mediana(comparaveis.map((x) => x.views))) && v.inscritosPorMil <= medianaPorMil)
-    .sort((a, b) => b.views - a.views).slice(0, 5);
+    .filter((v) => v.inscritosPorMil < medianaPorMil && esperados(v.views) >= 3)
+    .map((v) => ({ ...v, esperados: Math.round(esperados(v.views) * 10) / 10 }))
+    .sort((a, b) => (b.esperados - b.inscritosLiquidos) - (a.esperados - a.inscritosLiquidos)).slice(0, 5);
 
   // --- 2) Que formato prende ---
   const faixas = FAIXAS.map((f, id) => {
@@ -112,18 +117,24 @@ export function analisarVideos(videos, opts = {}) {
       ? `“${c.titulo}” é o que mais converte: ${br(c.inscritosPorMil)} inscritos por mil views, contra ${br(medianaPorMil)} na mediana do canal. Vale olhar o que esse vídeo faz de diferente.`
       : `“${c.titulo}” aparece como o que mais converte (${br(c.inscritosPorMil)} inscritos por mil views, contra ${br(medianaPorMil)} na mediana). Mas ele tem só ${br(c.views)} views: nessa escala, um inscrito a mais ou a menos muda bastante a taxa. Trate como pista.`);
   }
+  // Comparar a melhor faixa com a PIOR exagera a diferença (a pior pode ter tido
+  // um azar). A referência passa a ser a mediana de todos os vídeos normais.
+  const normais = comparaveis.filter((v) => v.faixa > 0);
+  const retencaoNormais = r1(mediana(normais.map((v) => v.percentualMedio)));
+  const refNormais = { amostra: normais };
   let formatoRobusto = null;
-  if (melhorFaixa && piorFaixa && melhorFaixa.id !== piorFaixa.id) {
-    formatoRobusto = robusta(melhorFaixa, piorFaixa, 'percentualMedio', 1.3);
+  if (melhorFaixa && normais.length >= MIN_GRUPO * 2 && melhorFaixa.retencaoMediana > retencaoNormais) {
+    formatoRobusto = robusta(melhorFaixa, refNormais, 'percentualMedio', 1.3);
     conclusoes.push(formatoRobusto
-      ? `Entre os vídeos normais, os de ${melhorFaixa.nome} seguram ${br(melhorFaixa.retencaoMediana)}% do público, contra ${br(piorFaixa.retencaoMediana)}% nos de ${piorFaixa.nome} (${melhorFaixa.videos} e ${piorFaixa.videos} vídeos). A vantagem continua de pé mesmo tirando o vídeo que mais puxa a média.`
-      : `Os seus vídeos de ${melhorFaixa.nome} aparecem com ${br(melhorFaixa.retencaoMediana)}% contra ${br(piorFaixa.retencaoMediana)}% nos de ${piorFaixa.nome}, mas essa vantagem SOME quando tiro o vídeo que mais puxa a média. Por enquanto é sinal, não conclusão.`);
+      ? `Entre os vídeos normais, os de ${melhorFaixa.nome} seguram ${br(melhorFaixa.retencaoMediana)}% do público, contra ${br(retencaoNormais)}% na mediana de todos os seus vídeos normais (${melhorFaixa.videos} de ${normais.length}). A vantagem continua de pé mesmo tirando o vídeo que mais puxa.`
+      : `Os seus vídeos de ${melhorFaixa.nome} aparecem com ${br(melhorFaixa.retencaoMediana)}% contra ${br(retencaoNormais)}% na mediana dos normais, mas a diferença não é grande o bastante ou some quando tiro o vídeo que mais puxa. É uma faixa para TESTAR, não uma duração ideal.`);
   }
   if (faixaShorts) {
     conclusoes.push(`Seus Shorts têm ${br(faixaShorts.retencaoMediana)}% de retenção mediana em ${faixaShorts.videos} vídeos. Short roda em loop, então esse número passa de 100% quando a mesma pessoa assiste mais de uma vez: compare Short com Short, nunca com vídeo longo.`);
   }
-  if (soView.length && campeoes.length && soView[0].views >= MIN_VIEWS_GRUPO) {
-    conclusoes.push(`“${soView[0].titulo}” tem ${br(soView[0].views)} views e ${br(soView[0].inscritosPorMil)} inscrito por mil. Zero inscrito não PROVA que o público é de fora do nicho (pode ser vídeo que resolve a dúvida e a pessoa segue a vida), mas é o primeiro lugar onde eu olharia.`);
+  if (soView.length && soView[0].views >= MIN_VIEWS_GRUPO) {
+    const v = soView[0];
+    conclusoes.push(`“${v.titulo}” converteu menos inscrito do que o seu canal costuma converter: ${br(v.views)} views renderiam cerca de ${br(v.esperados)} inscrito(s) pela taxa mediana do canal, e vieram ${v.inscritosLiquidos}. Vale investigar a conversão desse vídeo. Isso NÃO quer dizer que o público é de fora do nicho: pode ser um vídeo que resolve a dúvida e a pessoa segue a vida.`);
   }
 
   const avisos = [
@@ -139,7 +150,7 @@ export function analisarVideos(videos, opts = {}) {
 
   return {
     base: { analisados: comparaveis.length, total: todos.length, medianaInscritosPorMil: medianaPorMil, retencaoMediana: retencaoGeral, minGrupo: MIN_GRUPO },
-    campeoes, soView, prendemMais, prendemMenos,
+    campeoes, soView, prendemMais, prendemMenos, retencaoNormais,
     faixas: faixas.map(({ amostra, ...f }) => f), melhorFaixa, piorFaixa, faixaShorts, temAcimaDeCem, formatoRobusto, conclusoes, avisos
   };
 }
