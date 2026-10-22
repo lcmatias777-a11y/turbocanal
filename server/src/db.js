@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { conferir } from './guarda.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -362,6 +363,53 @@ CREATE INDEX IF NOT EXISTS idx_cp_user ON chat_publico(user_id, created_at);
 
 -- O que foi BARRADO nao e guardado: so o motivo, para dar para ver padrao de
 -- abuso sem criar um deposito do que eu nao quero que exista.
+-- Canal de teste (simulado). Os 1000 vídeos NÃO ficam aqui: são gerados por
+-- conta, sempre iguais. O banco guarda só quem está no modo teste e o que as
+-- pessoas editaram.
+CREATE TABLE IF NOT EXISTS demo_estado (
+  user_id TEXT PRIMARY KEY,
+  ligado INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS demo_edicoes (
+  escopo TEXT NOT NULL,
+  video_id TEXT NOT NULL,
+  titulo TEXT,
+  descricao TEXT,
+  tags TEXT,
+  privacidade TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (escopo, video_id)
+);
+
+CREATE TABLE IF NOT EXISTS demo_playlists (
+  id TEXT PRIMARY KEY,
+  escopo TEXT NOT NULL,
+  titulo TEXT NOT NULL,
+  descricao TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS demo_playlist_itens (
+  id TEXT PRIMARY KEY,
+  escopo TEXT NOT NULL,
+  playlist_id TEXT NOT NULL,
+  video_id TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS demo_respostas (
+  id TEXT PRIMARY KEY,
+  escopo TEXT NOT NULL,
+  comentario_id TEXT NOT NULL,
+  texto TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_demo_ed ON demo_edicoes(escopo);
+CREATE INDEX IF NOT EXISTS idx_demo_pl ON demo_playlist_itens(escopo, playlist_id);
+
 CREATE TABLE IF NOT EXISTS chat_bloqueios (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
@@ -537,6 +585,7 @@ function wrap(exec) {
       return r.rows;
     },
     async run(sql, params = []) {
+      conferir(sql);   // guarda de escrita: ver src/guarda.js
       const r = await exec(toPg(sql), params);
       return { changes: r.rowCount ?? 0 };
     }

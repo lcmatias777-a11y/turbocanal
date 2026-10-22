@@ -9,6 +9,7 @@
 // quem entrar numa conta de admin comum consegue PEDIR, não consegue FAZER.
 
 import { HttpError, uid, now, audit } from './util.js';
+import { autorizar } from './guarda.js';
 import { grant } from './credits.js';
 import { notificar, notificarDono } from './notify.js';
 
@@ -440,6 +441,7 @@ export async function pedirOuFazer(db, user, acao, dados = {}) {
 
   if (user.role === 'owner') {
     const p = { id: uid(), acao, pedido_por: user.id, alvo_user: alvoUser, alvo_id: alvoId, payload };
+    autorizar('fila: ' + acao);   // a decisão consciente é esta linha
     const resultado = await def.executar(db, p, user);
     return { executado: true, resultado };
   }
@@ -502,6 +504,7 @@ export function pedidoRoutes(app, db, auth) {
     if (!def) throw new HttpError(400, 'Essa ação não existe mais no site.');
     const payload = JSON.parse(p.payload);
     try {
+      autorizar('pedido aprovado: ' + p.acao);
       const resultado = await def.executar(db, { ...p, payload }, req.user);
       await db.run("UPDATE pedidos_admin SET status='aprovado', decidido_por=?, resposta=?, updated_at=? WHERE id=?", [req.user.id, resposta, now(), p.id]);
       await notificar(db, p.pedido_por, 'pedido_decidido', 'Seu pedido foi aprovado', {

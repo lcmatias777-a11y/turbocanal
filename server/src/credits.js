@@ -23,14 +23,18 @@ export async function ensureRefill(db, user) {
   if (user.last_refill === m) return user;
   const topup = parseInt((await getSetting(db, 'free_monthly_topup')) || '5000', 10);
   let recarregou = 0;
-  await db.tx(async (q) => {
+  // A recarga mensal roda sozinha na primeira visita do mês, em qualquer
+  // página, inclusive dentro do painel administrativo. Ela não é ação de
+  // administrador nenhum, então sai da guarda de escrita explicitamente.
+  const { semGuarda } = await import('./guarda.js');
+  await semGuarda(() => db.tx(async (q) => {
     const u = await q.get('SELECT credits,last_refill FROM users WHERE id=?', [user.id]);
     if (!u || u.last_refill === m) return;
     const delta = Math.max(0, topup - u.credits);
     await q.run('UPDATE users SET last_refill=?, credits=credits+? WHERE id=?', [m, delta, user.id]);
     if (delta > 0) await insertTx(q, user.id, delta, u.credits + delta, null, 'Recarga mensal do plano Free');
     recarregou = delta;
-  });
+  }));
   if (recarregou > 0) {
     const { avisos } = await import('./notify.js');
     await avisos.recarga(db, user.id, recarregou, topup);
@@ -50,8 +54,28 @@ export async function toolCost(db, tool) {
  * - Idempotência: o mesmo X-Idempotency-Key não cobra duas vezes.
  * - Saldo nunca fica negativo.
  */
+// Ferramentas que chamam a IA de verdade: essas custam dinheiro para o site a
+// cada uso, então continuam cobrando crédito mesmo no canal de teste. As
+// outras só fazem conta aqui dentro, e cobrar por elas num canal inventado
+// seria vender um passeio que não gasta nada.
+export const USA_IA = new Set([
+  'title_ai', 'description_ai', 'video_insights_ai', 'prep_ai', 'transform_ai',
+  'reply_ai', 'ideas_ai', 'coach_ai', 'audit_ai', 'title_lab'
+]);
+
 export async function spend(db, user, tool, { idem = null, note = null } = {}) {
   const costRow = await toolCost(db, tool);
+
+  // Canal de teste: o que é só conta sai de graça, e o registro diz por quê.
+  if (!USA_IA.has(tool)) {
+    const { ligado } = await import('./canalteste.js');
+    if (await ligado(db, user)) {
+      try {
+        await insertTx(db, user.id, 0, null, tool, 'Canal de teste (não cobra)', idem);
+      } catch { /* idem repetido: ignora */ }
+      return { charged: 0, balance: null, demo: true, cost: costRow.cost };
+    }
+  }
 
   if (user.role === 'owner') {
     try {

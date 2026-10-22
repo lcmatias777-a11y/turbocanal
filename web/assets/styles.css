@@ -374,3 +374,8 @@ a.bl-card:hover { border-color: var(--accent2); text-decoration: none; }
   .po-escrever { grid-template-columns: auto 1fr; }
   .po-escrever button, .po-escrever label.btn { grid-column: span 1; }
 }
+
+/* Faixa do canal de teste */
+#faixaTeste { background: #7a3d00; color: #ffe9d2; border-bottom: 1px solid #a85a12; }
+:root[data-theme="light"] #faixaTeste { background: #fff0dc; color: #6b3400; border-bottom-color: #e4b483; }
+.ft-in { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 0; flex-wrap: wrap; font-size: .9rem; }

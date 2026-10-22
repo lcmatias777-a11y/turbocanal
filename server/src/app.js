@@ -23,6 +23,8 @@ import { publicoRoutes } from './publico.js';
 import { perfilRoutes } from './perfil.js';
 import { postagemRoutes } from './postagens.js';
 import { enqueteRoutes } from './enquetes.js';
+import { canalTesteRoutes } from './canalteste.js';
+import { middleware as guardaMiddleware } from './guarda.js';
 import { blockRoutes } from './blocks.js';
 import { geminiKey } from './gemini.js';
 
@@ -33,6 +35,7 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
   app.set('trust proxy', 1);
 
   // CORS: a extensão usa Bearer token (não cookies); cookies só valem no mesmo domínio.
+  app.use(guardaMiddleware);   // guarda de escrita: ver src/guarda.js
   app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Idempotency-Key');
@@ -68,6 +71,7 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
   perfilRoutes(app, db, auth);
   postagemRoutes(app, db, auth);
   enqueteRoutes(app, db, auth);
+  canalTesteRoutes(app, db, auth);
 
   app.get('/api/plans', async (req, res, next) => {
     try {

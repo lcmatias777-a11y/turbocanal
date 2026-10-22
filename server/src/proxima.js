@@ -118,7 +118,11 @@ export function proximaRoutes(app, db, auth) {
 
   app.get('/api/proxima-acao', auth.required, wrap(async (req, res) => {
     const user = req.user;
-    const canalLigado = !!(await db.get('SELECT 1 AS x FROM yt_tokens WHERE user_id=?', [user.id]));
+    // O canal de teste conta como canal ligado aqui: senão o painel manda a
+    // pessoa vincular um canal justamente quando ela escolheu NÃO vincular.
+    const { ligado: modoTeste } = await import('./canalteste.js');
+    const canalLigado = (await modoTeste(db, user)) ||
+      !!(await db.get('SELECT 1 AS x FROM yt_tokens WHERE user_id=?', [user.id]));
 
     // A cota da YouTube Data API é compartilhada por TODO o site (10 mil unidades
     // por dia). Ler o canal a cada abertura do painel queimaria a cota com poucos

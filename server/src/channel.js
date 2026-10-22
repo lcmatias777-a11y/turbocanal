@@ -5,6 +5,7 @@ import { youtubeAccessToken } from './auth.js';
 import { spend, refund } from './credits.js';
 import { HttpError, audit, must, now, uid } from './util.js';
 import { seoChecklist, vph, engagement, countUnits, quotaError } from './youtube.js';
+import { apiDeTeste, ehTokenDeTeste, escopoDoToken } from './canalteste.js';
 
 // Endereços da API (podem ser trocados por um YouTube simulado nos testes automáticos)
 const API = process.env.YT_API_BASE || 'https://www.googleapis.com/youtube/v3/';
@@ -20,6 +21,13 @@ function unitsFor(path, method) {
 }
 
 async function yt(token, path, { method = 'GET', params = {}, body, raw } = {}) {
+  // Canal de teste: responde aqui mesmo. É o ÚNICO desvio do módulo, para que
+  // as 28 chamadas abaixo e todas as ferramentas continuem exatamente iguais,
+  // sem cada uma precisar saber se o canal é de verdade ou simulado.
+  if (ehTokenDeTeste(token)) {
+    if (raw) throw new HttpError(422, 'No canal de teste não dá para enviar arquivo: não existe vídeo de verdade do outro lado.');
+    return apiDeTeste(DB, escopoDoToken(token), path, { method, params, body });
+  }
   const u = new URL(path.startsWith('http') ? path : API + path);
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) u.searchParams.set(k, v);
   let resp, data;
@@ -80,6 +88,10 @@ export async function myChannel(db, user) {
   if (c.id) await db.run('UPDATE yt_tokens SET channel_id=?, channel_title=? WHERE user_id=?', [c.id, c.snippet?.title || null, user.id]);
   // Medição de inscritos para os "Resultados dos criadores". Nunca derruba a
   // ferramenta que chamou: falha aqui vira log, não erro para o usuário.
+  // Canal de teste NÃO mede: inventar inscritos conquistados a partir de um
+  // canal que não existe seria exatamente o número falso que o site promete
+  // não publicar.
+  if (ehTokenDeTeste(token)) return { token, channel: c };
   try {
     const { registrarMedicao } = await import('./estatisticas.js');
     await registrarMedicao(db, user, c, 'canal');

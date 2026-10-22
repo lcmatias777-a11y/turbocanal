@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { autorizar as autorizarEscrita } from './guarda.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 import { getSetting, setSetting } from './db.js';
@@ -46,6 +47,17 @@ export async function publicUser(db, user) {
   if (!user) return null;
   const plan = await db.get('SELECT id,name,price_cents,monthly_credits FROM plans WHERE id=?', [user.plan_id]);
   const yt = await db.get('SELECT channel_id, channel_title, refresh_token, scopes FROM yt_tokens WHERE user_id=?', [user.id]);
+  // Canal de teste: para a tela ele conta como canal ligado, senão a pessoa
+  // escolhe o modo teste e o site continua pedindo para vincular um canal. A
+  // flag "teste" vai junto para nada se passar por canal de verdade.
+  const { ligado: emTeste, CANAL_ID, CANAL_TITULO } = await import('./canalteste.js');
+  if (await emTeste(db, user)) {
+    return { ...(await publicUserBase(db, user, plan, yt)), youtube: { connected: true, teste: true, channel_id: CANAL_ID, channel_title: CANAL_TITULO } };
+  }
+  return publicUserBase(db, user, plan, yt);
+}
+
+async function publicUserBase(db, user, plan, yt) {
   return {
     id: user.id,
     email: user.email,
@@ -124,7 +136,9 @@ export function makeAuth(db) {
     required,
     optional,
     admin: [required, requireRole('owner', 'admin')],
-    owner: [required, requireRole('owner')]
+    // Rota exclusiva do principal JÁ É a decisão consciente: avisa a guarda de
+    // escrita (src/guarda.js) para a escrita perigosa poder acontecer ali.
+    owner: [required, requireRole('owner'), (req, res, next) => { autorizarEscrita('rota só do dono'); next(); }]
   };
 }
 
@@ -390,6 +404,9 @@ export function authRoutes(app, db, auth) {
 
 /** Access token válido do YouTube para o usuário (renova com refresh_token se preciso). */
 export async function youtubeAccessToken(db, user) {
+  // Modo canal de teste: devolve um token falso e nenhuma chamada sai daqui.
+  const { ligado, escopoDe, TOKEN } = await import('./canalteste.js');
+  if (await ligado(db, user)) return TOKEN(escopoDe(user));
   const row = await db.get('SELECT * FROM yt_tokens WHERE user_id=?', [user.id]);
   if (!row) {
     throw new HttpError(409, 'Entre com o Google para usar as ferramentas do YouTube (ou use "Conectar meu canal" para gerenciar seu canal).');

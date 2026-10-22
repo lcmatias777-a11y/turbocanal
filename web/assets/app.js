@@ -4,7 +4,7 @@
 const $ = (sel, el = document) => el.querySelector(sel);
 const appEl = () => $('#app');
 
-const state = { user: null, pub: {}, costs: [] };
+const state = { user: null, pub: {}, costs: [], teste: null };
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -67,6 +67,7 @@ function renderNav() {
         ${u ? link('#/dashboard', 'Painel') + link('#/ferramentas/palavras', 'Ferramentas') + link('#/canal', '📺 Meu canal') + link('#/historico', 'Histórico') : ''}
         ${link('#/planos', 'Planos')}
         ${link('#/extensao', 'Extensão')}
+        ${u ? link('#/canal-teste', '🧪 Canal de teste') : ''}
         ${u ? link('#/postagens', '📣 Postagens') : ''}
         ${u ? link('#/bate-papo', '💬 Bate-papo') : ''}
         ${link('#/resultados', '📊 Resultados')}
@@ -173,7 +174,27 @@ function montarSino() {
 
 async function refreshMe() {
   try { state.user = (await api('/me')).user; } catch { state.user = null; }
+  try { state.teste = state.user ? await api('/canal-teste') : null; } catch { state.teste = null; }
   renderNav();
+  faixaTeste();
+}
+
+/** Faixa fixa no topo enquanto o canal de teste está ligado. Ela existe para
+ *  ninguém confundir número inventado com número do próprio canal: some no
+ *  segundo em que a pessoa desliga o modo. */
+function faixaTeste() {
+  let el = $('#faixaTeste');
+  const on = !!state.teste?.ligado;
+  if (!on) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'faixaTeste';
+    document.getElementById('topbar').insertAdjacentElement('afterend', el);
+  }
+  el.innerHTML = `<div class="container ft-in">
+      <span><b>🧪 Canal de teste ligado.</b> Os números abaixo são inventados: este canal não existe no YouTube.</span>
+      <a class="btn sm ghost" href="#/canal-teste">ver / desligar</a>
+    </div>`;
 }
 
 /* ------------------------------ Páginas ------------------------------ */
@@ -2855,6 +2876,42 @@ async function poPintar(alvo, area) {
   poLigar($('#poLista'), d, recarregar);
   for (const id of po.abertos) if ($('#poc-' + id)) await poComentarios(id, area);
 }
+
+views['canal-teste'] = async () => {
+  if (!state.user) return needLogin();
+  const d = await api('/canal-teste');
+  state.teste = d;
+  appEl().innerHTML = `<h1>🧪 Canal de teste</h1>
+    <div class="card">
+      ${alertBox('', esc(d.aviso))}
+      <p>É um canal inventado com <b>${fmt(d.canal.videos)} vídeos</b>, ${fmt(d.canal.inscritos)} inscritos e ${fmt(d.canal.views)} visualizações somadas. Serve para você abrir qualquer ferramenta e ver como ela se comporta, sem precisar ligar um canal de verdade.</p>
+      <p class="muted">${esc(d.compartilhadoTexto)}</p>
+      <p class="muted small">${esc(d.cobranca)}</p>
+      <p class="muted small">O que não funciona aqui, porque depende de um canal real: ${d.limites.map(esc).join(', ')}. Nessas a tela diz o motivo em vez de fingir que deu certo.</p>
+      <p>
+        <button class="btn ${d.ligado ? 'secondary' : ''}" id="ctLigar">${d.ligado ? 'Desligar o canal de teste' : 'Ligar o canal de teste'}</button>
+        ${d.editados ? `<button class="btn ghost" id="ctReiniciar">Voltar ao original (${fmt(d.editados)} editado${d.editados === 1 ? '' : 's'})</button>` : ''}
+      </p>
+      <div id="ctMsg"></div>
+    </div>
+    ${d.ligado ? '<div class="card" style="margin-top:12px"><h3>Por onde começar</h3><p class="muted">Abra <a href="#/dashboard">o painel</a>, <a href="#/canal">Meu canal</a> ou o <a href="#/ferramentas/raiox">raio-X dos vídeos</a>. Tudo vai responder com os dados do canal de teste até você desligar aqui.</p></div>' : ''}`;
+
+  $('#ctLigar').onclick = async () => {
+    try {
+      await api('/canal-teste', { method: 'POST', body: { ligado: !d.ligado } });
+      await refreshMe();
+      views['canal-teste']();
+    } catch (e) { $('#ctMsg').innerHTML = alertBox('err', esc(e.message)); }
+  };
+  const rb = $('#ctReiniciar');
+  if (rb) rb.onclick = async () => {
+    if (!confirm(d.compartilhado ? 'Isso apaga as edições de TODOS os administradores no canal de teste. Continuar?' : 'Voltar seu canal de teste ao original?')) return;
+    try {
+      await api('/canal-teste/reiniciar', { method: 'POST' });
+      views['canal-teste']();
+    } catch (e) { $('#ctMsg').innerHTML = alertBox('err', esc(e.message)); }
+  };
+};
 
 views.postagens = async () => {
   if (!state.user) return needLogin();
