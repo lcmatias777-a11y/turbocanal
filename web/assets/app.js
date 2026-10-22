@@ -148,7 +148,12 @@ function montarSino() {
     document.body.appendChild(cx);
     const r = s.getBoundingClientRect();
     cx.style.top = `${r.bottom + 8}px`;
-    cx.style.right = `${Math.max(8, window.innerWidth - r.right - 8)}px`;
+    // alinha pelo sino, mas sem deixar nenhuma borda sair da tela (no celular o
+    // sino cai no comeco da linha e a caixa escapava para fora pela esquerda)
+    const larg = cx.getBoundingClientRect().width || 380;
+    const dirIdeal = window.innerWidth - r.right - 8;
+    const dirMax = Math.max(8, window.innerWidth - larg - 8);
+    cx.style.right = `${Math.min(Math.max(8, dirIdeal), dirMax)}px`;
     pintarCaixa(cx);
     carregarNotificacoes();
   };

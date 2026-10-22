@@ -97,7 +97,7 @@ export function chatRoutes(app, db, auth) {
       out.push({
         id: c.id, tipo: c.tipo,
         nome: c.tipo === 'dm' ? (outro?.name || outro?.email || 'Conversa') : c.nome,
-        subtitulo: c.tipo === 'dm' ? (outro?.email || '') : `${membros.length} participantes`,
+        subtitulo: c.tipo === 'dm' ? (outro?.email || '') : `${membros.length} participante${membros.length === 1 ? '' : 's'}`,
         membros: membros.map((m) => ({ id: m.id, email: m.email, nome: m.name || '', papel: m.role })),
         fixado: !!c.fixado, ordem: c.ordem,
         ultima: ultima ? { texto: ultima.texto, quando: ultima.created_at, minha: ultima.user_id === userId } : null,
