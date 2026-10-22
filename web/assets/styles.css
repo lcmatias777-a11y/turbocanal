@@ -203,3 +203,14 @@ a.bl-card:hover { border-color: var(--accent2); text-decoration: none; }
 }
 .bl-previa { background: var(--bg2); border: 1px dashed var(--line); border-radius: 12px; padding: 12px; }
 .bl-previa [data-slot] { margin: 0; }
+
+/* Melhor horário para publicar: barras de mediana por dia e por faixa */
+.bt-linha { display: grid; grid-template-columns: 7.5rem 1fr auto; gap: 10px; align-items: center; margin: 7px 0; }
+.bt-nome { font-size: .92rem; }
+.bt-trilho { background: var(--bg2); border: 1px solid var(--line); border-radius: 999px; height: 14px; overflow: hidden; }
+.bt-barra { display: block; height: 100%; border-radius: 999px; transition: width .35s ease; }
+.bt-val { white-space: nowrap; }
+@media (max-width: 620px) {
+  .bt-linha { grid-template-columns: 5.5rem 1fr; }
+  .bt-val { grid-column: 1 / -1; }
+}

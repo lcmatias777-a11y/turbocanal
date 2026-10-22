@@ -40,6 +40,7 @@ const TOOL_LINKS = [
   ['#/ferramentas/canal', 'Analisar canal'],
   ['#/ferramentas/tendencias', '🔥 Tendências do seu nicho'],
   ['#/ferramentas/auditoria', '🩺 Auditoria do meu canal (IA)'],
+  ['#/ferramentas/horarios', '⏰ Melhor horário para publicar'],
   ['#/ferramentas/titulo', '🧲 Laboratório de título'],
   ['#/ferramentas/insights', '✨ IA do vídeo (assiste e sugere)'],
   ['#/ferramentas/ideias', '💡 Ideias de vídeos'],
@@ -675,6 +676,58 @@ views['ferramentas/titulo'] = toolPage({
     for (const b of out.querySelectorAll('[data-copiar]')) b.onclick = async () => {
       try { await navigator.clipboard.writeText(b.dataset.copiar); b.textContent = '✅ copiado'; } catch { b.textContent = '❌ não deu'; }
     };
+  }
+});
+
+views['ferramentas/horarios'] = toolPage({
+  title: '⏰ Melhor horário para publicar', toolKey: 'best_time',
+  desc: 'Sem IA e sem adivinhação: eu pego a data de publicação e as views dos seus vídeos públicos no YouTube e comparo as medianas por dia da semana e por faixa de horário. Se não houver vídeos suficientes para comparar, o resultado diz isso em vez de inventar um horário.',
+  formHtml: `<label>Seu fuso horário</label><select name="fuso" id="btFuso"></select>
+    <div id="btCanal" class="muted small" style="margin-top:8px">Verificando o seu canal…</div>`,
+  onMount: async () => {
+    const sel = $('#btFuso');
+    if (sel) {
+      let aqui = 'America/Sao_Paulo';
+      try { aqui = Intl.DateTimeFormat().resolvedOptions().timeZone || aqui; } catch {}
+      const zonas = [...new Set([aqui, 'America/Sao_Paulo', 'America/Manaus', 'America/Belem', 'America/Cuiaba', 'America/Rio_Branco', 'America/Noronha', 'UTC'])];
+      sel.innerHTML = zonas.map((z) => `<option value="${esc(z)}"${z === aqui ? ' selected' : ''}>${esc(z.replace(/_/g, ' '))}${z === aqui ? ' (o seu)' : ''}</option>`).join('');
+    }
+    const box = $('#btCanal');
+    if (box) {
+      box.innerHTML = state.user?.youtube?.connected
+        ? `✅ Vou ler os vídeos públicos de <b>${esc(state.user.youtube.channel_title || 'seu canal')}</b> direto no YouTube.`
+        : 'Para calcular, vincule seu canal primeiro: <a href="/api/auth/google?connect=1">Vincular meu canal</a>.';
+    }
+  },
+  getBody: (fd) => ({ fuso: fd.get('fuso') }),
+  render: (r) => {
+    const barras = (grupos, melhorId) => {
+      const max = Math.max(1, ...grupos.map((g) => g.mediana));
+      return grupos.map((g) => {
+        const w = Math.round((g.mediana / max) * 100);
+        const cor = !g.videos ? 'var(--line)' : g.suficiente ? (g.id === melhorId ? 'var(--ok)' : 'var(--accent)') : 'var(--line)';
+        const nota = !g.videos ? 'nenhum vídeo' : `${fmt(g.mediana)} views · ${g.videos} vídeo${g.videos > 1 ? 's' : ''}${g.suficiente ? '' : ' (pouco para comparar)'}`;
+        return `<div class="bt-linha"><span class="bt-nome">${esc(g.nome)}</span>
+          <span class="bt-trilho"><span class="bt-barra" style="width:${w}%;background:${cor}"></span></span>
+          <span class="bt-val muted small">${nota}</span></div>`;
+      }).join('');
+    };
+    const dataBr = (iso) => (iso ? new Date(iso).toLocaleDateString('pt-BR') : '—');
+    return `<div class="card">
+        <h3>${r.recomendacao ? '⏰ O que os seus próprios números dizem' : '🤔 Ainda não dá para dizer'}</h3>
+        <p>${r.recomendacao ? esc(r.recomendacao) : 'Não há vídeos suficientes com views maduras para comparar horários. Publique mais alguns e volte aqui — eu não vou chutar um horário.'}</p>
+        <p class="muted small">Base: ${r.base.considerados} vídeo${r.base.considerados === 1 ? '' : 's'} público${r.base.considerados === 1 ? '' : 's'} com mais de ${r.base.diasMaturacao} dias${r.base.considerados ? ` (de ${dataBr(r.base.primeiro)} a ${dataBr(r.base.ultimo)})` : ''} · mediana geral de ${fmt(r.base.medianaGeral)} views · fuso ${esc(r.fuso)}.</p>
+      </div>
+      <div class="grid cols2" style="margin-top:12px">
+        <div class="card"><h3>Por dia da semana</h3>${barras(r.dias, r.melhorDia?.id)}</div>
+        <div class="card"><h3>Por faixa de horário</h3>${barras(r.faixas, r.melhorFaixa?.id)}</div>
+      </div>
+      ${r.piorDia || r.piorFaixa ? `<div class="card" style="margin-top:12px"><h3>O outro lado</h3>
+        ${r.piorDia ? `<p>Dia mais fraco: <b>${esc(r.piorDia.nome)}</b> — mediana ${fmt(r.piorDia.mediana)} views em ${r.piorDia.videos} vídeos (${r.piorDia.diferenca >= 0 ? '+' : ''}${r.piorDia.diferenca}% em relação à mediana geral).</p>` : ''}
+        ${r.piorFaixa ? `<p>Faixa mais fraca: <b>${esc(r.piorFaixa.nome)}</b> — mediana ${fmt(r.piorFaixa.mediana)} views em ${r.piorFaixa.videos} vídeos (${r.piorFaixa.diferenca >= 0 ? '+' : ''}${r.piorFaixa.diferenca}% em relação à mediana geral).</p>` : ''}</div>` : ''}
+      <div class="card" style="margin-top:12px"><h3>Leia antes de mudar sua rotina</h3>
+        <ul class="small muted">${(r.avisos || []).map((a) => `<li>${esc(a)}</li>`).join('')}</ul>
+        <p class="small muted">Um grupo só vira recomendação com no mínimo ${r.base.minAmostra} vídeos. Os que têm menos aparecem em cinza.</p></div>`;
   }
 });
 

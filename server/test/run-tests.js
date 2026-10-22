@@ -622,6 +622,54 @@ const custos = (await req('/api/tools/costs')).data.costs;
 check('as duas ferramentas novas aparecem na tabela de preços',
   custos.find((c) => c.tool === 'audit_ai')?.cost === 200 && custos.find((c) => c.tool === 'title_lab')?.cost === 100);
 
+// ---------- Melhor horário para publicar ----------
+console.log('\n— Melhor horário para publicar —');
+const { analisarHorarios, mediana, partesLocais } = await import('../src/schedule.js');
+check('mediana ignora o viral: [1,2,3,1000] dá 3 e não 251 (que seria a média)', mediana([1, 2, 3, 1000]) === 3 && mediana([1, 2, 3]) === 2 && mediana([5]) === 5 && mediana([]) === 0);
+const pl = partesLocais('2026-03-10T01:00:00Z', 'America/Sao_Paulo');
+check('converte o horário UTC para o fuso do usuário (01h de terça em Brasília ainda é segunda, 22h)', pl.dia === 1 && pl.hora === 22, JSON.stringify(pl));
+
+// Canal de teste: 5 vídeos no sábado à noite (10 mil views) e 6 na terça de manhã (mil views)
+const spIso = (data, hora) => new Date(`${data}T${String(hora).padStart(2, '0')}:00:00-03:00`).toISOString();
+const sabados = ['2026-01-03', '2026-01-10', '2026-01-17', '2026-01-24', '2026-01-31'];
+const tercas = ['2026-01-06', '2026-01-13', '2026-01-20', '2026-01-27', '2026-02-03', '2026-02-10'];
+const amostra = [
+  ...sabados.map((d, i) => ({ titulo: `Sábado ${i}`, views: 10000 + i, publicado: spIso(d, 19) })),
+  ...tercas.map((d, i) => ({ titulo: `Terça ${i}`, views: 1000 + i, publicado: spIso(d, 7) }))
+];
+const anH = analisarHorarios(amostra, { tz: 'America/Sao_Paulo', agora: '2026-06-01T00:00:00Z' });
+check('acha o melhor dia e a melhor faixa pela mediana de views', anH.melhorDia.nome === 'sábado' && anH.melhorFaixa.nome === '18h–21h', `${anH.melhorDia?.nome} / ${anH.melhorFaixa?.nome}`);
+check('acha também o pior dia e a pior faixa', anH.piorDia.nome === 'terça-feira' && anH.piorFaixa.nome === '06h–09h', `${anH.piorDia?.nome} / ${anH.piorFaixa?.nome}`);
+check('cruza dia + horário quando aquela célula tem amostra', anH.combinacao && anH.combinacao.nome === 'sábado, 18h–21h' && anH.combinacao.videos === 5, JSON.stringify(anH.combinacao));
+check('a recomendação cita a mediana, a diferença e em quantos vídeos se baseia',
+  /sábado/.test(anH.recomendacao) && /5 vídeo/.test(anH.recomendacao) && /%/.test(anH.recomendacao), anH.recomendacao);
+check('diz em que se baseou: 11 vídeos considerados e a mediana geral', anH.base.considerados === 11 && anH.base.medianaGeral === 1005, JSON.stringify(anH.base));
+check('avisa que mede o horário da publicação, não o da audiência', anH.avisos.some((a) => /publicado/i.test(a) && /assisti/i.test(a)));
+check('grupo com menos de 3 vídeos não entra como recomendação',
+  analisarHorarios([...amostra.slice(0, 2)], { agora: '2026-06-01T00:00:00Z' }).combinacao === null);
+
+const anNovo = analisarHorarios([...amostra, { titulo: 'recém-saído', views: 5, publicado: '2026-05-25T12:00:00Z' }], { agora: '2026-06-01T00:00:00Z' });
+check('vídeo novo demais fica de fora da conta (ainda está somando views)',
+  anNovo.base.considerados === 11 && anNovo.base.ignoradosNovos === 1 && anNovo.avisos.some((a) => /últimos 21 dias/.test(a)), JSON.stringify(anNovo.base));
+const anSemData = analisarHorarios([...amostra, { titulo: 'sem data', views: 9 }], { agora: '2026-06-01T00:00:00Z' });
+check('vídeo sem data válida é ignorado e contado no aviso', anSemData.base.ignoradosSemData === 1 && anSemData.base.considerados === 11);
+const anPouco = analisarHorarios(amostra.slice(0, 4), { agora: '2026-06-01T00:00:00Z' });
+check('com pouca amostra o resultado avisa em vez de recomendar com segurança', anPouco.avisos.some((a) => /uns 20/.test(a)));
+const anMesmaFaixa = analisarHorarios(tercas.map((d, i) => ({ views: 100 + i, publicado: spIso(d, 7) })), { agora: '2026-06-01T00:00:00Z' });
+check('se tudo saiu na mesma faixa, diz que não há horários para comparar', anMesmaFaixa.avisos.some((a) => /mesma faixa/.test(a)));
+check('fuso inválido não passa', (() => { try { analisarHorarios(amostra, { tz: 'Nao/Existe' }); return false; } catch (e) { return e.status === 400; } })());
+
+const b0h = (await req('/api/me', { token: t1 })).data.user.credits;
+const bt = await req('/api/tools/best_time', { method: 'POST', token: t1, body: { fuso: 'America/Sao_Paulo' } });
+check('o endpoint pega os vídeos do canal no servidor e devolve a análise',
+  bt.status === 200 && bt.data.result.fuso === 'America/Sao_Paulo' && Array.isArray(bt.data.result.dias) && bt.data.result.dias.length === 7, JSON.stringify(bt.data).slice(0, 180));
+check('canal com só um vídeo recém-postado: não inventa recomendação',
+  bt.data.result.recomendacao === null && bt.data.result.base.considerados === 0 && bt.data.result.base.ignoradosNovos === 1, JSON.stringify(bt.data.result.base));
+check('melhor horário custa 10 créditos', bt.data.credits.charged === 10 && (await req('/api/me', { token: t1 })).data.user.credits === b0h - 10);
+check('melhor horário aparece na tabela de preços',
+  (await req('/api/tools/costs')).data.costs.find((c) => c.tool === 'best_time')?.cost === 10);
+check('melhor horário exige login', (await req('/api/tools/best_time', { method: 'POST', body: {} })).status === 401);
+
 // ---------- Avisos e cards do painel ----------
 console.log('\n— Avisos e cards —');
 const vazioBl = await req('/api/blocks?pagina=home');

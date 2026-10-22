@@ -137,6 +137,16 @@ export function toolRoutes(app, db, auth) {
     return ai.channelAudit(db, dados);
   }));
 
+  // Melhor horário para publicar: conta sobre os vídeos reais do canal (sem IA)
+  app.post('/api/tools/best_time', auth.required, run('best_time', async (req) => {
+    const { myPublicVideos } = await import('./channel.js');
+    const { analisarHorarios } = await import('./schedule.js');
+    const tz = String(req.body?.fuso || req.body?.tz || 'America/Sao_Paulo').slice(0, 60);
+    const dados = await myPublicVideos(db, req.user, 50);
+    const analise = analisarHorarios(dados.videos.map((v) => ({ titulo: v.title, views: v.views, publicado: v.publishedAt })), { tz });
+    return { canal: dados.canal, totalVideos: dados.totalVideos, publicos: dados.videos.length, ...analise };
+  }));
+
   // Laboratório de título
   app.post('/api/tools/title_lab', auth.required, AI, run('title_lab', (req) => ai.titleLab(db, {
     titulo: must(req.body?.titulo ?? req.body?.title, 'título', { max: 200 }),

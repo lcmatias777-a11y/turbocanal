@@ -113,6 +113,34 @@ export async function myChannelAudit(db, user) {
   };
 }
 
+/** Vídeos públicos do próprio canal (até `max`), com data de publicação e views reais.
+ *  Usado pelo "melhor horário": a lista nunca vem do navegador. */
+export async function myPublicVideos(db, user, max = 50) {
+  const { token, channel } = await myChannel(db, user);
+  const uploads = channel.contentDetails?.relatedPlaylists?.uploads;
+  const st = channel.statistics || {};
+  const out = [];
+  const vistos = new Set();
+  let page = null;
+  for (let volta = 0; uploads && out.length < max && volta < 4; volta++) {
+    const pl = await yt(token, 'playlistItems', { params: { part: 'contentDetails', playlistId: uploads, maxResults: 50, ...(page ? { pageToken: page } : {}) } });
+    const ids = (pl.items || []).map((i) => i.contentDetails?.videoId).filter((id) => id && !vistos.has(id));
+    for (const id of ids) vistos.add(id);
+    if (ids.length) {
+      const vs = await yt(token, 'videos', { params: { part: 'snippet,statistics,status,contentDetails', id: ids.join(','), maxResults: 50 } });
+      for (const v of (vs.items || []).map(mapVideo)) if (v.privacy === 'public') out.push(v);
+    }
+    page = pl.nextPageToken || null;
+    if (!page) break;
+  }
+  return {
+    canal: channel.snippet?.title || '',
+    inscritos: st.hiddenSubscriberCount ? null : +st.subscriberCount || 0,
+    totalVideos: +st.videoCount || 0,
+    videos: out.slice(0, max)
+  };
+}
+
 async function ownedVideo(db, user, videoId) {
   const { token, channel } = await myChannel(db, user);
   const r = await yt(token, 'videos', { params: { part: 'snippet,statistics,status,contentDetails', id: videoId } });
