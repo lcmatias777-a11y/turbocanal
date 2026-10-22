@@ -156,6 +156,11 @@ function montarSino() {
     nt.ligado = true;
     document.addEventListener('click', () => { if (nt.aberto) fecharSino(); });
     nt.timer = setInterval(carregarNotificacoes, 45000);
+    // administrador fica ouvindo chamada em qualquer página do site
+    if (['owner', 'admin'].includes(state.user?.role)) {
+      nt.ligTimer = setInterval(() => { ligOuvir(); }, lig.estado === 'parado' ? 5000 : 1500);
+      ligOuvir();
+    }
   }
   carregarNotificacoes();
 }
@@ -1544,6 +1549,134 @@ views.ajuda = async () => {
 };
 
 /* ------------------------------ Admin ------------------------------ */
+/* ---------------------- Ligação de voz entre administradores ----------------------
+   O áudio vai DIRETO de um computador para o outro (WebRTC). O servidor só passa
+   os recados de conexão. Por isso não custa nada e nada fica gravado.
+   Limite honesto: sem servidor TURN (que é pago), algumas redes não deixam a
+   conexão direta acontecer. Quando isso ocorre a tela diz exatamente isso. */
+const lig = { pc: null, local: null, conversa: null, com: null, comNome: '', estado: 'parado', timer: null, prazo: null, entrando: null };
+window.lig = lig; // deixa o estado visível para diagnóstico e para os testes de navegador
+const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+
+function ligPainel() {
+  let el = $('#ligCaixa');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ligCaixa';
+    el.className = 'lig-caixa';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function ligFechar(msg) {
+  if (lig.timer) { clearInterval(lig.timer); lig.timer = null; }
+  if (lig.prazo) { clearTimeout(lig.prazo); lig.prazo = null; }
+  try { lig.pc?.close(); } catch {}
+  try { lig.local?.getTracks().forEach((t) => t.stop()); } catch {}
+  lig.pc = null; lig.local = null; lig.estado = 'parado'; lig.conversa = null; lig.com = null; lig.entrando = null;
+  const el = $('#ligCaixa');
+  if (!el) return;
+  if (msg) {
+    el.innerHTML = `<div class="lig-corpo"><b>Ligação encerrada</b><p class="small">${esc(msg)}</p>
+      <div class="lig-bts"><button class="btn sm secondary" id="ligOk">Fechar</button></div></div>`;
+    $('#ligOk').onclick = () => el.remove();
+  } else el.remove();
+}
+
+window.ligSinal = ligSinal; window.ligFechar = ligFechar;
+async function ligSinal(conversa, para, tipo, dados = {}) {
+  try { await api(`/admin/chats/${conversa}/sinal`, { method: 'POST', body: { para, tipo, dados } }); } catch {}
+}
+
+function ligDesenhar(texto, botoes = []) {
+  const el = ligPainel();
+  el.innerHTML = `<div class="lig-corpo"><span class="lig-ico">📞</span>
+      <div><b>${esc(lig.comNome || 'Ligação')}</b><p class="small muted" id="ligEstado">${esc(texto)}</p></div>
+      <div class="lig-bts">${botoes.map((b) => `<button class="btn sm ${b.cor || 'secondary'}" id="${b.id}">${esc(b.texto)}</button>`).join('')}</div>
+    </div><audio id="ligAudio" autoplay></audio>`;
+  for (const b of botoes) { const n = $('#' + b.id); if (n) n.onclick = b.acao; }
+}
+
+function ligEstado(t) { const e = $('#ligEstado'); if (e) e.textContent = t; }
+
+async function ligCriarPc(conversa, com) {
+  const pc = new RTCPeerConnection({ iceServers: STUN });
+  lig.pc = pc;
+  lig.local = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  for (const t of lig.local.getTracks()) pc.addTrack(t, lig.local);
+  pc.ontrack = (ev) => { const a = $('#ligAudio'); if (a) a.srcObject = ev.streams[0]; };
+  pc.onicecandidate = (ev) => { if (ev.candidate) ligSinal(conversa, com, 'ice', { c: ev.candidate.toJSON() }); };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected') { lig.estado = 'falando'; ligEstado('Conectado. Pode falar.'); if (lig.prazo) { clearTimeout(lig.prazo); lig.prazo = null; } }
+    if (pc.connectionState === 'failed') {
+      ligSinal(conversa, com, 'falhou', {});
+      ligFechar('Não consegui abrir a conexão direta entre os dois computadores. Isso acontece quando as duas redes bloqueiam ligação direta. Para funcionar sempre seria preciso um servidor TURN, que é pago — eu não liguei nada pago sem avisar o custo antes.');
+    }
+  };
+  return pc;
+}
+
+async function ligar(conversa, com, nome) {
+  if (lig.estado !== 'parado') return alert('Já existe uma ligação em andamento.');
+  lig.conversa = conversa; lig.com = com; lig.comNome = nome; lig.estado = 'chamando';
+  ligDesenhar('Chamando…', [{ id: 'ligCancel', texto: 'Cancelar', cor: 'secondary', acao: () => { ligSinal(conversa, com, 'desligou', {}); ligFechar(); } }]);
+  try {
+    const pc = await ligCriarPc(conversa, com);
+    await ligSinal(conversa, com, 'chamando', {});
+    const oferta = await pc.createOffer();
+    await pc.setLocalDescription(oferta);
+    await ligSinal(conversa, com, 'oferta', { sdp: pc.localDescription });
+    lig.prazo = setTimeout(() => {
+      if (lig.estado !== 'falando') ligFechar('Ninguém atendeu, ou a conexão direta não foi possível entre as duas redes.');
+    }, 45000);
+  } catch (e) {
+    ligFechar(/Permission|NotAllowed/i.test(String(e)) ? 'Você precisa permitir o microfone no navegador para ligar.' : `Não deu para ligar: ${e.message || e}`);
+  }
+}
+
+async function ligAtender(s) {
+  lig.conversa = s.conversa; lig.com = s.de; lig.comNome = s.deNome; lig.estado = 'conectando';
+  ligDesenhar('Conectando…', [{ id: 'ligFim', texto: 'Desligar', cor: 'secondary', acao: () => { ligSinal(s.conversa, s.de, 'desligou', {}); ligFechar(); } }]);
+  try {
+    const pc = await ligCriarPc(s.conversa, s.de);
+    await pc.setRemoteDescription(new RTCSessionDescription(lig.entrando.dados.sdp));
+    const resp = await pc.createAnswer();
+    await pc.setLocalDescription(resp);
+    await ligSinal(s.conversa, s.de, 'resposta', { sdp: pc.localDescription });
+    lig.prazo = setTimeout(() => { if (lig.estado !== 'falando') ligFechar('A conexão direta não foi possível entre as duas redes.'); }, 45000);
+  } catch (e) {
+    ligFechar(/Permission|NotAllowed/i.test(String(e)) ? 'Você precisa permitir o microfone no navegador para atender.' : `Não deu para atender: ${e.message || e}`);
+  }
+}
+
+/** Fica de olho em recados de ligação, mesmo com o painel fechado. */
+async function ligOuvir() {
+  if (!state.user || !['owner', 'admin'].includes(state.user.role)) return;
+  let d;
+  try { d = await api('/admin/chats/sinais'); } catch { return; }
+  for (const s of d.itens) {
+    if (s.tipo === 'oferta') {
+      if (lig.estado !== 'parado') { await ligSinal(s.conversa, s.de, 'recusou', { motivo: 'ocupado' }); continue; }
+      lig.estado = 'tocando'; lig.comNome = s.deNome; lig.entrando = s;
+      ligDesenhar('está te ligando', [
+        { id: 'ligAceita', texto: '✅ Atender', cor: '', acao: () => ligAtender(s) },
+        { id: 'ligRecusa', texto: '❌ Recusar', cor: 'secondary', acao: () => { ligSinal(s.conversa, s.de, 'recusou', {}); ligFechar(); } }
+      ]);
+    } else if (s.tipo === 'resposta' && lig.pc && !lig.pc.currentRemoteDescription) {
+      try { await lig.pc.setRemoteDescription(new RTCSessionDescription(s.dados.sdp)); ligEstado('Conectando…'); } catch {}
+    } else if (s.tipo === 'ice' && lig.pc) {
+      try { await lig.pc.addIceCandidate(s.dados.c); } catch {}
+    } else if (s.tipo === 'recusou') {
+      ligFechar(s.dados?.motivo === 'ocupado' ? 'A pessoa está em outra ligação.' : 'A pessoa recusou a ligação.');
+    } else if (s.tipo === 'desligou') {
+      ligFechar('A outra pessoa desligou.');
+    } else if (s.tipo === 'falhou') {
+      ligFechar('A conexão direta não foi possível entre as duas redes.');
+    }
+  }
+}
+
 /* ------------------------------ Chat entre administradores ------------------------------ */
 const ch = { aberta: null, lista: [], timer: null, arrastando: null };
 
@@ -1625,7 +1758,9 @@ async function chAbrir(id) {
     await chPintarLista();
   };
   $('#chLigar').onclick = () => {
-    alert('A ligação de voz ainda não está pronta. Para funcionar fora da mesma rede ela precisa de um servidor TURN, que é pago; eu não liguei nada disso sem te avisar o custo antes. Por enquanto, use a conversa escrita.');
+    const outro = c?.tipo === 'dm' ? c.membros.find((m) => m.id !== state.user.id) : null;
+    if (!outro) return alert('Por enquanto a ligação funciona só na conversa de um a um. Abra a conversa com a pessoa e ligue de lá.');
+    ligar(id, outro.id, outro.nome || outro.email);
   };
   await chPintarLista();
 }

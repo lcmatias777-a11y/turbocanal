@@ -182,6 +182,42 @@ export function chatRoutes(app, db, auth) {
     res.json({ ok: true, fixado: !!fixado, ordem });
   }));
 
+  // ---------- Ligação de voz entre administradores ----------
+  // O servidor só entrega recado de um navegador para o outro (oferta, resposta e
+  // candidatos de rede). O ÁUDIO NÃO PASSA AQUI: ele vai direto de um computador
+  // para o outro (WebRTC). Por isso não custa nada e nada é gravado.
+  const TIPOS_SINAL = ['chamando', 'oferta', 'resposta', 'ice', 'aceitou', 'recusou', 'desligou', 'falhou'];
+  const VALIDADE_SINAL = 120; // segundos
+
+  app.post('/api/admin/chats/:id/sinal', ...auth.admin, wrap(async (req, res) => {
+    if (!(await souMembro(req.params.id, req.user.id))) throw new HttpError(403, 'Você não participa desta conversa.');
+    const tipo = String(req.body?.tipo || '');
+    if (!TIPOS_SINAL.includes(tipo)) throw new HttpError(400, 'Tipo de sinal inválido.');
+    const para = String(req.body?.para || '');
+    if (!(await souMembro(req.params.id, para))) throw new HttpError(400, 'Essa pessoa não participa desta conversa.');
+    const dados = JSON.stringify(req.body?.dados ?? {}).slice(0, 20000);
+    await db.run('INSERT INTO sinais(id,conversa_id,de_user,para_user,tipo,dados,created_at) VALUES(?,?,?,?,?,?,?)',
+      [uid(), req.params.id, req.user.id, para, tipo, dados, now()]);
+    // limpeza: sinal velho não serve para nada
+    await db.run('DELETE FROM sinais WHERE created_at < ?', [new Date(Date.now() - VALIDADE_SINAL * 1000).toISOString()]);
+    res.json({ ok: true });
+  }));
+
+  // Recados endereçados a mim (em qualquer conversa). Lidos uma vez e apagados.
+  app.get('/api/admin/chats/sinais', ...auth.admin, wrap(async (req, res) => {
+    const rows = await db.all(
+      `SELECT s.*, u.name, u.email FROM sinais s JOIN users u ON u.id=s.de_user
+        WHERE s.para_user=? AND s.created_at >= ? ORDER BY s.created_at`,
+      [req.user.id, new Date(Date.now() - VALIDADE_SINAL * 1000).toISOString()]);
+    if (rows.length) await db.run(`DELETE FROM sinais WHERE id IN (${rows.map(() => '?').join(',')})`, rows.map((r) => r.id));
+    res.json({
+      itens: rows.map((r) => ({
+        id: r.id, conversa: r.conversa_id, de: r.de_user, deNome: r.name || r.email,
+        tipo: r.tipo, dados: (() => { try { return JSON.parse(r.dados); } catch { return {}; } })(), quando: r.created_at
+      }))
+    });
+  }));
+
   // Só para saber se chegou coisa nova, sem baixar a lista toda
   app.get('/api/admin/chats/novidades', ...auth.admin, wrap(async (req, res) => {
     const r = await db.get(

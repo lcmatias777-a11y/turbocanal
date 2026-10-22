@@ -267,6 +267,17 @@ CREATE TABLE IF NOT EXISTS acoes_dispensadas (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_disp_user ON acoes_dispensadas(user_id, ate);
+
+CREATE TABLE IF NOT EXISTS sinais (
+  id TEXT PRIMARY KEY,
+  conversa_id TEXT NOT NULL,
+  de_user TEXT NOT NULL,
+  para_user TEXT NOT NULL,
+  tipo TEXT NOT NULL,
+  dados TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sinais ON sinais(para_user, created_at);
 `;
 
 const PLAN_SEED = [

@@ -51,6 +51,8 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
   // --- o contador na aba avisa antes de abrir ---
   await dono.p.goto(LOCAL + '/#/admin/geral');
   await dono.p.waitForSelector('[data-contador="pedidos"]:not([hidden])', { timeout: 20000 });
+  const bolinhasVisiveis = await dono.p.$$eval('.aba-n', (ns) => ns.filter((n) => getComputedStyle(n).display !== 'none').length);
+  check('só as abas que têm pendência mostram bolinha (nenhuma bolinha vazia)', bolinhasVisiveis === 1, `visíveis: ${bolinhasVisiveis}`);
   check('a aba Pedidos mostra contador de pedidos esperando resposta',
     (await dono.p.textContent('[data-contador="pedidos"]')).trim() === '1', await dono.p.textContent('[data-contador="pedidos"]'));
 
@@ -114,15 +116,19 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
   const vistaAna = (await (await ana.req.get(LOCAL + '/api/admin/chats')).json()).itens.find((c) => c.id === dmId);
   check('e isso é só meu: a mesma conversa NÃO fica fixada para a outra pessoa', vistaAna && vistaAna.fixado === false, JSON.stringify(vistaAna?.fixado));
 
-  // o botão de ligação diz a verdade em vez de fingir
-  await dono.p.click('.ch-conv');
+  // o botão de ligação na conversa geral
+  const convGeral2 = (await (await dono.req.get(LOCAL + '/api/admin/chats')).json()).itens.find((c) => c.tipo === 'geral').id;
+  // abre explicitamente a conversa GERAL (ligação em grupo ainda não existe)
+  await dono.p.reload();
+  await dono.p.waitForSelector(`[data-conv="${convGeral2}"]`, { timeout: 20000 });
+  await dono.p.click(`[data-conv="${convGeral2}"]`);
   await dono.p.waitForSelector('#chLigar', { timeout: 20000 });
   let textoDialogo = '';
   dono.p.once('dialog', (d) => { textoDialogo = d.message(); d.accept(); });
   await dono.p.click('#chLigar');
-  await dono.p.waitForTimeout(600);
-  check('o botão de ligar avisa honestamente que ainda não está pronto, e por quê',
-    /ainda não está pronta/.test(textoDialogo) && /TURN/.test(textoDialogo), textoDialogo.slice(0, 120));
+  await dono.p.waitForTimeout(800);
+  check('ligar na conversa geral explica que a ligação é de um a um, em vez de falhar calado',
+    /um a um/.test(textoDialogo), textoDialogo.slice(0, 160));
 
   // página de notificações
   await ana.p.goto(LOCAL + '/#/notificacoes');
