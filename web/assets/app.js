@@ -1979,7 +1979,7 @@ views.resultados = async () => {
           <span class="bt-trilho"><span class="bt-barra" style="width:${w}%;background:${cor}"></span></span>
           <span class="bt-val muted small">${c.percentual}% · ${fmt(c.quantidade)}</span></div>`;
       }).join('')}
-      <p class="muted small">Soma: ${dist.categorias.reduce((s, c) => s + c.percentual, 0)}%. Cada canal entra em uma categoria só, e o denominador é apenas deste grupo.</p>`;
+      <p class="muted small">Soma: ${dist.categorias.reduce((s, c) => s + c.percentual, 0)}%. Cada ${dist.unidade === 'conquistas' ? 'conquista entra' : 'canal entra'} em uma categoria só, e o denominador é apenas deste grupo.</p>`;
   };
 
   const porMeta = (lista) => (lista.length
