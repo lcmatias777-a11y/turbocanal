@@ -31,6 +31,7 @@ export function mediana(ns) {
 }
 
 const r1 = (n) => Math.round(n * 10) / 10;
+const br = (n) => Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 
 /** Recebe a lista de vídeos com os números do Analytics e devolve a análise. */
 export function analisarVideos(videos, opts = {}) {
@@ -78,9 +79,14 @@ export function analisarVideos(videos, opts = {}) {
       suficiente: vs.length >= MIN_GRUPO
     };
   });
+  // Short roda em loop (a mesma pessoa assiste varias vezes), entao a retencao dele
+  // passa de 100% e NAO da para comparar com video longo na mesma regua.
   const comAmostra = faixas.filter((f) => f.suficiente);
-  const melhorFaixa = [...comAmostra].sort((a, b) => b.retencaoMediana - a.retencaoMediana)[0] || null;
-  const piorFaixa = comAmostra.length > 1 ? [...comAmostra].sort((a, b) => a.retencaoMediana - b.retencaoMediana)[0] : null;
+  const longas = comAmostra.filter((f) => f.id > 0);
+  const melhorFaixa = [...longas].sort((a, b) => b.retencaoMediana - a.retencaoMediana)[0] || null;
+  const piorFaixa = longas.length > 1 ? [...longas].sort((a, b) => a.retencaoMediana - b.retencaoMediana)[0] : null;
+  const faixaShorts = comAmostra.find((f) => f.id === 0) || null;
+  const temAcimaDeCem = comparaveis.some((v) => v.percentualMedio > 100);
 
   const retencaoGeral = r1(mediana(comparaveis.map((v) => v.percentualMedio)));
   const prendemMais = [...comparaveis].sort((a, b) => b.percentualMedio - a.percentualMedio).slice(0, 5);
@@ -88,13 +94,16 @@ export function analisarVideos(videos, opts = {}) {
 
   const conclusoes = [];
   if (campeoes.length) {
-    conclusoes.push(`“${campeoes[0].titulo}” é o que mais converte: ${campeoes[0].inscritosPorMil} inscritos por mil views, contra ${medianaPorMil} na mediana do canal. Vale olhar o que esse vídeo faz de diferente.`);
+    conclusoes.push(`“${campeoes[0].titulo}” é o que mais converte: ${br(campeoes[0].inscritosPorMil)} inscritos por mil views, contra ${br(medianaPorMil)} na mediana do canal. Vale olhar o que esse vídeo faz de diferente.`);
   }
   if (melhorFaixa && piorFaixa && melhorFaixa.id !== piorFaixa.id) {
-    conclusoes.push(`Seus vídeos de ${melhorFaixa.nome} seguram ${melhorFaixa.retencaoMediana}% do público, contra ${piorFaixa.retencaoMediana}% nos de ${piorFaixa.nome} (${melhorFaixa.videos} e ${piorFaixa.videos} vídeos).`);
+    conclusoes.push(`Entre os vídeos normais, os de ${melhorFaixa.nome} seguram ${br(melhorFaixa.retencaoMediana)}% do público, contra ${br(piorFaixa.retencaoMediana)}% nos de ${piorFaixa.nome} (${melhorFaixa.videos} e ${piorFaixa.videos} vídeos).`);
+  }
+  if (faixaShorts) {
+    conclusoes.push(`Seus Shorts têm ${br(faixaShorts.retencaoMediana)}% de retenção mediana em ${faixaShorts.videos} vídeos. Short roda em loop, então esse número passa de 100% quando a mesma pessoa assiste mais de uma vez: compare Short com Short, nunca com vídeo longo.`);
   }
   if (soView.length && campeoes.length) {
-    conclusoes.push(`“${soView[0].titulo}” traz muita view e pouco inscrito (${soView[0].inscritosPorMil} por mil). Esse público chega e não fica: pode ser assunto fora do seu nicho.`);
+    conclusoes.push(`“${soView[0].titulo}” traz muita view e pouco inscrito (${br(soView[0].inscritosPorMil)} por mil). Esse público chega e não fica: pode ser assunto fora do seu nicho.`);
   }
 
   const avisos = [
@@ -102,12 +111,13 @@ export function analisarVideos(videos, opts = {}) {
     'CTR e impressões não aparecem porque a API de Analytics do YouTube não entrega esses dois para canais comuns — só o Studio mostra. Preferi deixar faltando a inventar um número.',
     'Retenção média não diz em que segundo a pessoa saiu, só quanto do vídeo ela viu em média.'
   ];
+  if (temAcimaDeCem) avisos.push('Alguns vídeos aparecem com retenção acima de 100%. Não é erro: Shorts e vídeos curtos repetem sozinhos, então a mesma pessoa assiste mais de uma vez e a média passa de 100%.');
   if (comparaveis.length < MIN_GRUPO) avisos.push(`Só ${comparaveis.length} vídeo(s) com pelo menos ${opts.minViews ?? MIN_VIEWS} views no período: ainda é pouco para comparar.`);
   if (todos.length > comparaveis.length) avisos.push(`${todos.length - comparaveis.length} vídeo(s) com menos de ${opts.minViews ?? MIN_VIEWS} views ficaram de fora da comparação.`);
 
   return {
     base: { analisados: comparaveis.length, total: todos.length, medianaInscritosPorMil: medianaPorMil, retencaoMediana: retencaoGeral, minGrupo: MIN_GRUPO },
-    campeoes, soView, prendemMais, prendemMenos, faixas, melhorFaixa, piorFaixa, conclusoes, avisos
+    campeoes, soView, prendemMais, prendemMenos, faixas, melhorFaixa, piorFaixa, faixaShorts, temAcimaDeCem, conclusoes, avisos
   };
 }
 

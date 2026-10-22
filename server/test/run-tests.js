@@ -801,8 +801,10 @@ check('acha os videos que mais trazem inscrito por mil views',
 check('separa o que traz view mas nao traz inscrito',
   ax.soView.some((v) => v.id === 'viral'), JSON.stringify(ax.soView.map((v) => v.id)));
 check('inscritos por mil desconta quem deu unfollow', vidsX.length && ax.soView.find((v) => v.id === 'viral')?.inscritosPorMil === 0);
-check('acha a faixa de duracao que mais prende',
-  ax.melhorFaixa?.nome === 'até 1 min (Shorts)' && ax.melhorFaixa.retencaoMediana === 80, JSON.stringify(ax.melhorFaixa));
+check('Short NAO entra na comparacao de retencao (ele roda em loop)',
+  ax.melhorFaixa?.nome !== 'até 1 min (Shorts)' && ax.faixaShorts?.nome === 'até 1 min (Shorts)', JSON.stringify([ax.melhorFaixa?.nome, ax.faixaShorts?.nome]));
+check('mas o Short aparece separado, com a explicacao do loop',
+  ax.conclusoes.some((c) => /Shorts/.test(c) && /loop/.test(c)), JSON.stringify(ax.conclusoes).slice(0, 220));
 check('faixa com menos de 3 videos nao vira conclusao', ax.faixas.filter((f) => f.suficiente).every((f) => f.videos >= 3));
 check('escreve conclusoes citando o numero que as sustenta',
   ax.conclusoes.length >= 2 && ax.conclusoes.every((c) => /\d/.test(c)), JSON.stringify(ax.conclusoes).slice(0, 200));
@@ -810,6 +812,16 @@ check('avisa que CTR e impressoes nao existem na API, em vez de inventar',
   ax.avisos.some((a) => /CTR/.test(a) && /não entrega|nao entrega/.test(a)), JSON.stringify(ax.avisos).slice(0, 200));
 const vazio = analisarVideos([]);
 check('canal sem dados nao inventa conclusao', vazio.conclusoes.length === 0 && vazio.campeoes.length === 0 && vazio.avisos.some((a) => /ainda é pouco/.test(a)));
+// retencao acima de 100% e real (Short em loop): explicar, nao esconder nem cortar
+const acima = analisarVideos([
+  { id: 's1', titulo: 'Short 1', views: 500, duracaoSeg: 30, duracaoMediaSeg: 45, percentualMedio: 150, inscritosGanhos: 1 },
+  { id: 's2', titulo: 'Short 2', views: 500, duracaoSeg: 30, duracaoMediaSeg: 40, percentualMedio: 130, inscritosGanhos: 1 },
+  { id: 's3', titulo: 'Short 3', views: 500, duracaoSeg: 30, duracaoMediaSeg: 35, percentualMedio: 120, inscritosGanhos: 1 }
+]);
+check('retencao acima de 100% nao e cortada nem escondida', acima.faixaShorts?.retencaoMediana === 130);
+check('e a tela explica por que passa de 100%, em vez de parecer defeito',
+  acima.temAcimaDeCem === true && acima.avisos.some((a) => /acima de 100%/.test(a) && /repetem sozinhos/.test(a)));
+check('so com Shorts, nao existe comparacao entre faixas longas', acima.melhorFaixa === null && acima.piorFaixa === null);
 const rx = await req('/api/channel/raiox', { token: t1 });
 check('o endpoint do raio-X responde para quem tem canal ligado', [200, 400, 403, 409].includes(rx.status), String(rx.status));
 check('periodo fora do limite e recusado', (await req('/api/channel/raiox?dias=5', { token: t1 })).status === 400);
@@ -838,6 +850,8 @@ console.log('\n— Sua próxima ação —');
     acoes.filter((a) => a.tipo === 'oportunidade').every((a) => a.dado && /\d/.test(a.dado)));
   check('a sugestao de formato cita as duas faixas e os dois numeros',
     acoes.some((a) => a.chave.startsWith('formato_') && /80%/.test(a.dado) && /20%/.test(a.dado)));
+  check('a sugestao de formato avisa que Shorts ficam fora da conta',
+    acoes.find((a) => a.chave.startsWith('formato_'))?.porque.includes('Shorts ficam de fora'));
   check('a sugestao de horario cita a mediana e quantos videos', acoes.some((a) => a.chave.startsWith('horario_') && /5 vídeos/.test(a.dado)));
   check('o video que traz view e nao traz inscrito vira alerta', acoes.some((a) => a.tipo === 'atencao' && a.chave.startsWith('fora_nicho_')));
   check('comentarios sem resposta viram tarefa', acoes.some((a) => a.chave === 'responder_comentarios' && /3 comentário/.test(a.titulo)));

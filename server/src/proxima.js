@@ -40,11 +40,13 @@ export function escolherAcoes({ canalLigado, xray, horarios, comentariosSemRespo
     });
   }
 
+  // melhorFaixa/piorFaixa já vêm sem os Shorts (que rodam em loop e não dão para
+  // comparar com vídeo longo), então aqui a comparação é entre iguais.
   if (melhorF && piorF && melhorF.id !== piorF.id && melhorF.retencaoMediana >= piorF.retencaoMediana * 1.3) {
     fora.push({
       chave: 'formato_' + melhorF.id, tipo: 'oportunidade',
-      titulo: `Seu próximo vídeo cabe melhor em ${melhorF.nome}`,
-      porque: 'Nessa duração o seu público fica até bem mais tarde. Não é regra do YouTube, é o que o seu canal vem mostrando.',
+      titulo: `Seu próximo vídeo normal cabe melhor em ${melhorF.nome}`,
+      porque: 'Nessa duração o seu público fica até bem mais tarde. Não é regra do YouTube, é o que o seu canal vem mostrando. (Shorts ficam de fora desta conta: eles repetem sozinhos.)',
       dado: `${melhorF.retencaoMediana}% assistido em ${melhorF.videos} vídeos de ${melhorF.nome}, contra ${piorF.retencaoMediana}% em ${piorF.videos} de ${piorF.nome}.`,
       botao: { texto: 'Ver retenção por tamanho', href: '#/ferramentas/raiox' }
     });

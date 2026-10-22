@@ -913,16 +913,17 @@ views['ferramentas/raiox'] = async (params) => {
         <p class="muted small">Esses trazem gente que assiste e vai embora. Pode ser público fora do seu nicho.</p>
         ${tabela(r.soView, (v) => v.inscritosPorMil, 'por mil views', '')}</div>
       <div class="card"><h3>⏳ Os que mais prendem</h3>
-        <p class="muted small">Percentual médio assistido. A mediana do canal é ${r.base.retencaoMediana}%.</p>
+        <p class="muted small">Percentual médio assistido. A mediana do canal é ${r.base.retencaoMediana}%.${r.temAcimaDeCem ? ' Acima de 100% quer dizer que a mesma pessoa assistiu mais de uma vez (Shorts repetem sozinhos).' : ''}</p>
         ${tabela(r.prendemMais, (v) => Math.round(v.percentualMedio), 'assistido', '%')}</div>
       <div class="card"><h3>💤 Os que menos prendem</h3>
         ${tabela(r.prendemMenos, (v) => Math.round(v.percentualMedio), 'assistido', '%')}</div>
     </div>
 
     <div class="card" style="margin-top:12px"><h3>Retenção por tamanho de vídeo</h3>
+      <p class="muted small">Shorts aparecem separados de propósito: eles rodam em loop, então a retenção deles não dá para comparar com a de vídeo longo.</p>
       ${r.faixas.map((f) => {
         const w = Math.round((f.retencaoMediana / maxRet) * 100);
-        const cor = !f.videos ? 'var(--line)' : f.suficiente ? (f.id === r.melhorFaixa?.id ? 'var(--ok)' : 'var(--accent)') : 'var(--line)';
+        const cor = !f.videos ? 'var(--line)' : f.suficiente ? (f.id === r.melhorFaixa?.id ? 'var(--ok)' : f.id === 0 ? 'var(--warn)' : 'var(--accent)') : 'var(--line)';
         return `<div class="bt-linha"><span class="bt-nome">${esc(f.nome)}</span>
           <span class="bt-trilho"><span class="bt-barra" style="width:${w}%;background:${cor}"></span></span>
           <span class="bt-val muted small">${f.videos ? `${f.retencaoMediana}% · ${f.videos} vídeo${f.videos > 1 ? 's' : ''}${f.suficiente ? '' : ' (pouco para comparar)'}` : 'nenhum vídeo'}</span></div>`;
