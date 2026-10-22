@@ -11,6 +11,7 @@
 import { HttpError, uid, now } from './util.js';
 
 const DIAS_DISPENSA = 14;
+const CACHE_MIN = 180; // 3 horas: ler o Analytics a cada visita queimaria a cota do YouTube
 const n = (v) => Number(v || 0).toLocaleString('pt-BR');
 
 /** Monta as candidatas a partir dos sinais já calculados. A ordem da lista é a
@@ -118,6 +119,16 @@ export function proximaRoutes(app, db, auth) {
     const user = req.user;
     const canalLigado = !!(await db.get('SELECT 1 AS x FROM yt_tokens WHERE user_id=?', [user.id]));
 
+    // A cota da YouTube Data API é compartilhada por TODO o site (10 mil unidades
+    // por dia). Ler o canal a cada abertura do painel queimaria a cota com poucos
+    // usuários, então o resultado fica guardado por algumas horas. "atualizar=1"
+    // força a releitura quando a pessoa pedir.
+    const chave = 'prox:' + user.id;
+    if (req.query.atualizar !== '1') {
+      const c = await db.get('SELECT dados FROM cache_resposta WHERE chave=? AND ate > ?', [chave, now()]);
+      if (c) { try { return res.json({ ...JSON.parse(c.dados), doCache: true }); } catch {} }
+    }
+
     let xray = null, horarios = null;
     if (canalLigado) {
       try {
@@ -147,7 +158,13 @@ export function proximaRoutes(app, db, auth) {
     const fora = new Set(dispensadas.map((d) => d.chave));
     const validas = todas.filter((a) => !fora.has(a.chave));
 
-    res.json({ acao: validas[0] || null, total: validas.length, dispensadas: fora.size, canalLigado });
+    const corpo = { acao: validas[0] || null, total: validas.length, dispensadas: fora.size, canalLigado };
+    if (canalLigado) {
+      const ate = new Date(Date.now() + CACHE_MIN * 60000).toISOString();
+      await db.run('INSERT INTO cache_resposta(chave,dados,ate) VALUES(?,?,?) ON CONFLICT(chave) DO UPDATE SET dados=EXCLUDED.dados, ate=EXCLUDED.ate',
+        [chave, JSON.stringify(corpo), ate]);
+    }
+    res.json(corpo);
   }));
 
   app.post('/api/proxima-acao/dispensar', auth.required, wrap(async (req, res) => {
@@ -156,6 +173,7 @@ export function proximaRoutes(app, db, auth) {
     const ate = new Date(Date.now() + DIAS_DISPENSA * 86400e3).toISOString();
     await db.run('DELETE FROM acoes_dispensadas WHERE user_id=? AND chave=?', [req.user.id, chave]);
     await db.run('INSERT INTO acoes_dispensadas(id,user_id,chave,ate,created_at) VALUES(?,?,?,?,?)', [uid(), req.user.id, chave, ate, now()]);
+    await db.run('DELETE FROM cache_resposta WHERE chave=?', ['prox:' + req.user.id]);
     res.json({ ok: true, ate, dias: DIAS_DISPENSA });
   }));
 }

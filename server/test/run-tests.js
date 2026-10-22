@@ -1013,7 +1013,15 @@ console.log('\n— Sua próxima ação —');
   check('conta com canal ligado le o YouTube de verdade e responde', pa.status === 200 && pa.data.canalLigado === true, JSON.stringify(pa.data).slice(0, 140));
   check('com canal ligado mas poucos dados, admite em vez de inventar oportunidade',
     pa.data.acao && pa.data.acao.tipo !== 'oportunidade', JSON.stringify(pa.data.acao).slice(0, 160));
+  check('a segunda visita vem do cache (nao queima cota do YouTube de novo)',
+    (await req('/api/proxima-acao', { token: t1 })).data.doCache === true);
+  check('"atualizar=1" ignora o cache e le de novo',
+    (await req('/api/proxima-acao?atualizar=1', { token: t1 })).data.doCache === undefined);
+  check('conta sem canal nao usa cache (nao ha o que ler no YouTube)',
+    (await req('/api/proxima-acao', { token: semYt.data.token })).data.doCache === undefined);
   const disp = await req('/api/proxima-acao/dispensar', { method: 'POST', token: t1, body: { chave: pa.data.acao.chave } });
+  check('dispensar limpa o cache na hora (a acao nao volta ate o cache vencer)',
+    (await req('/api/proxima-acao', { token: t1 })).data.doCache === undefined);
   check('dispensar responde com ate quando', disp.status === 200 && disp.data.dias === 14 && disp.data.ate);
   const depoisDisp = await req('/api/proxima-acao', { token: t1 });
   check('a acao dispensada some da vez seguinte', depoisDisp.data.acao?.chave !== pa.data.acao.chave, JSON.stringify(depoisDisp.data.acao));

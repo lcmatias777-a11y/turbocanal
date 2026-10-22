@@ -313,7 +313,7 @@ async function carregarProximaAcao() {
     return;
   }
   box.innerHTML = `<div class="prox-cab"><span class="prox-ico">${ICONE_ACAO[a.tipo] || '🎯'}</span>
-      <div><span class="muted small">Sua próxima ação${d.total > 1 ? ` · ${d.total} sugestões na fila` : ''}</span>
+      <div><span class="muted small">Sua próxima ação${d.total > 1 ? ` · ${d.total} sugestões na fila` : ''}${d.doCache ? ' · <a href="#" id="proxAtualiza">atualizar agora</a>' : ''}</span>
         <h3 style="margin:2px 0 0">${esc(a.titulo)}</h3></div></div>
     <p>${esc(a.porque)}</p>
     ${a.dado ? `<p class="prox-dado">📊 ${esc(a.dado)}</p>` : ''}
@@ -321,6 +321,13 @@ async function carregarProximaAcao() {
       <a class="btn sm" href="${esc(a.botao.href)}"${a.botao.externo ? ' rel="noopener"' : ''}>${esc(a.botao.texto)}</a>
       <button class="btn sm ghost" id="proxDisp">dispensar por 14 dias</button>
     </div>`;
+  const at = $('#proxAtualiza');
+  if (at) at.onclick = async (ev) => {
+    ev.preventDefault();
+    box.innerHTML = '<p class="center"><span class="spin"></span></p>';
+    try { await api('/proxima-acao?atualizar=1'); } catch {}
+    carregarProximaAcao();
+  };
   $('#proxDisp').onclick = async () => {
     try { await api('/proxima-acao/dispensar', { method: 'POST', body: { chave: a.chave } }); } catch (e) { alert(e.message); }
     carregarProximaAcao();

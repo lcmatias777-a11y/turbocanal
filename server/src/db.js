@@ -294,6 +294,12 @@ CREATE TABLE IF NOT EXISTS experimentos (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_exp_user ON experimentos(user_id, status, revisar_em);
+
+CREATE TABLE IF NOT EXISTS cache_resposta (
+  chave TEXT PRIMARY KEY,
+  dados TEXT NOT NULL,
+  ate TEXT NOT NULL
+);
 `;
 
 const PLAN_SEED = [
