@@ -1938,8 +1938,8 @@ const adminTabs = {
       <section class="grid cols3">
         <div class="card"><h3>Usuários</h3><div class="kpi">${fmt(o.users)}</div>
           <p class="muted small">${o.byPlan.map((p) => `${esc(p.plan_id)}: ${p.n}`).join(' · ')}</p></div>
-        <div class="card"><h3>Créditos gastos (30 dias)</h3><div class="kpi">${fmt(o.creditsSpent30d)}</div>
-          <p class="muted small">Indicador de uso e de custo operacional das APIs.</p></div>
+        <div class="card"><h3>Créditos gastos em ferramentas (30 dias)</h3><div class="kpi">${fmt(o.creditsSpent30d)}</div>
+          <p class="muted small">Só uso de ferramenta: é o indicador de custo operacional das APIs.${o.creditsAdjusted30d ? ` Fora isso, ${fmt(o.creditsAdjusted30d)} crédito(s) foram retirados por ajuste manual, que não gasta API nenhuma.` : ''}</p></div>
         <div class="card"><h3>Pagamentos aprovados</h3><div class="kpi">${money(o.payments.approvedTotalCents)}</div>
           <p class="muted small">${o.payments.approvedCount} pagamentos confirmados.</p></div>
         <div class="card"><h3>Cota do YouTube hoje</h3><div class="kpi">${fmt(o.youtubeQuota?.usedToday || 0)} <small class="muted">/ ${fmt(o.youtubeQuota?.dailyLimit || 10000)}</small></div>

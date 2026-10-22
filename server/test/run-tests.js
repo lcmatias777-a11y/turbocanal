@@ -828,6 +828,23 @@ check('periodo fora do limite e recusado', (await req('/api/channel/raiox?dias=5
 check('raio-X exige login', (await req('/api/channel/raiox')).status === 401);
 }
 
+// ---------- KPI de creditos: ajuste manual nao e consumo de API ----------
+console.log('\n— KPI de créditos gastos —');
+{
+  const antes = (await req('/api/admin/overview', { token: tOwn })).data;
+  await req('/api/admin/users/' + u2.data.user.id + '/credits', { method: 'POST', token: tOwn, body: { delta: 1000000, note: 'teste KPI' } });
+  await req('/api/admin/users/' + u2.data.user.id + '/credits', { method: 'POST', token: tOwn, body: { delta: -1000000, note: 'desfazer teste KPI' } });
+  const dep = (await req('/api/admin/overview', { token: tOwn })).data;
+  check('tirar 1 milhao na mao NAO entra em "creditos gastos em ferramentas"',
+    dep.creditsSpent30d === antes.creditsSpent30d, `antes ${antes.creditsSpent30d}, depois ${dep.creditsSpent30d}`);
+  check('mas aparece separado, como ajuste manual', dep.creditsAdjusted30d >= 1000000, String(dep.creditsAdjusted30d));
+  const saldoAntes = (await req('/api/me', { token: t2 })).data.user.credits;
+  await req('/api/tools/trends', { method: 'POST', token: t2, body: {} });
+  const dep2 = (await req('/api/admin/overview', { token: tOwn })).data;
+  check('usar uma ferramenta SOMA no indicador de custo de API',
+    dep2.creditsSpent30d > dep.creditsSpent30d && (await req('/api/me', { token: t2 })).data.user.credits < saldoAntes);
+}
+
 // ---------- Sua proxima acao ----------
 console.log('\n— Sua próxima ação —');
 {

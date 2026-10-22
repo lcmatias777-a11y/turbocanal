@@ -108,12 +108,14 @@ export function adminRoutes(app, db, auth) {
     const users = (await db.get('SELECT COUNT(*)::int AS n FROM users')).n;
     const byPlan = await db.all('SELECT plan_id, COUNT(*)::int AS n FROM users GROUP BY plan_id');
     const byRole = await db.all('SELECT role, COUNT(*)::int AS n FROM users GROUP BY role');
-    const spent30d = (await db.get('SELECT COALESCE(SUM(-delta),0)::int AS s FROM transactions WHERE delta<0 AND created_at >= ?', [daysAgo(30)])).s;
+    // Só uso de ferramenta: ajuste manual do administrador NÃO é consumo de API.
+    const spent30d = (await db.get('SELECT COALESCE(SUM(-delta),0)::int AS s FROM transactions WHERE delta<0 AND tool IS NOT NULL AND created_at >= ?', [daysAgo(30)])).s;
+    const ajustes30d = (await db.get('SELECT COALESCE(SUM(-delta),0)::int AS s FROM transactions WHERE delta<0 AND tool IS NULL AND created_at >= ?', [daysAgo(30)])).s;
     const usage30d = await db.all('SELECT tool, COUNT(*)::int AS n FROM transactions WHERE tool IS NOT NULL AND created_at >= ? GROUP BY tool ORDER BY n DESC', [daysAgo(30)]);
     const paid = await db.get("SELECT COALESCE(SUM(amount_cents),0)::int AS s, COUNT(*)::int AS n FROM payments WHERE status='approved'");
     const ytUnitsToday = parseInt((await getSetting(db, 'yt_units_' + new Date().toISOString().slice(0, 10))) || '0', 10);
     res.json({
-      users, byPlan, byRole, creditsSpent30d: spent30d, usage30d,
+      users, byPlan, byRole, creditsSpent30d: spent30d, creditsAdjusted30d: ajustes30d, usage30d,
       youtubeQuota: { usedToday: ytUnitsToday, dailyLimit: 10000 },
       payments: { approvedCount: paid.n, approvedTotalCents: paid.s },
       config: {
