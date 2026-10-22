@@ -129,7 +129,7 @@ export const ACOES = {
     async executar(db, p, quem) {
       await db.run("UPDATE users SET role='user' WHERE id=?", [p.alvo_user]);
       await notificar(db, p.alvo_user, 'deixou_admin', 'Seu acesso de administrador foi removido', {
-        corpo: 'Sua conta continua normal, só não abre mais o painel administrativo.', link: '#/painel'
+        corpo: 'Sua conta continua normal, só não abre mais o painel administrativo.', link: '#/dashboard'
       });
       await audit(db, quem, 'admin.demote', p.payload.email);
       return { removido: true };

@@ -71,12 +71,92 @@ function renderNav() {
       </div>
       <div class="spacer"></div>
       ${u
-        ? `<span class="badge credits" title="Seu saldo de créditos">💎 ${u.unlimited ? 'Ilimitado' : fmt(u.credits)}</span>
+        ? `<button class="sino" id="sino" title="Notificações" aria-label="Notificações">🔔<span class="sino-n" id="sinoN" hidden>0</span></button>
+           <span class="badge credits" title="Seu saldo de créditos">💎 ${u.unlimited ? 'Ilimitado' : fmt(u.credits)}</span>
            ${u.role !== 'user' ? `<span class="badge role">${u.role === 'owner' ? 'Administrador principal' : 'Administrador'}</span>` : ''}
            <a class="navlink" href="#/conta">⚙️ Conta</a>
            <a class="navlink" href="#/sair">Sair</a>`
         : `<a class="btn sm" href="#/login">Entrar com Google</a>`}
     </div>`;
+  montarSino();
+}
+
+/* ------------------------------ Notificações ------------------------------ */
+const nt = { itens: [], naoLidas: 0, aberto: false, timer: null };
+
+function ntHtml(x) {
+  const quando = new Date(x.criado_em);
+  const min = Math.round((Date.now() - quando.getTime()) / 60000);
+  const idade = min < 1 ? 'agora' : min < 60 ? `há ${min} min` : min < 1440 ? `há ${Math.round(min / 60)} h` : quando.toLocaleDateString('pt-BR');
+  return `<div class="nt-item ${x.lida ? '' : 'nova'}" data-nt="${esc(x.id)}" data-link="${esc(x.link || '')}">
+    <span class="nt-emoji">${esc(x.emoji)}</span>
+    <div class="nt-txt"><b>${esc(x.titulo)}</b>${x.corpo ? `<p>${esc(x.corpo)}</p>` : ''}<span class="muted small">${idade}</span></div>
+    <button class="nt-x" data-ntdel="${esc(x.id)}" title="Apagar">×</button>
+  </div>`;
+}
+
+async function carregarNotificacoes() {
+  if (!state.user) return;
+  try {
+    const d = await api('/notifications?limit=20');
+    nt.itens = d.itens; nt.naoLidas = d.naoLidas;
+    const b = $('#sinoN');
+    if (b) { b.textContent = d.naoLidas > 9 ? '9+' : String(d.naoLidas); b.hidden = !d.naoLidas; }
+    const cx = $('#ntcaixa');
+    if (cx && nt.aberto) pintarCaixa(cx);
+  } catch {}
+}
+
+function pintarCaixa(cx) {
+  cx.innerHTML = `<div class="nt-cab"><b>Notificações</b>${nt.naoLidas ? '<button class="btn sm ghost" id="ntTodas">marcar todas como lidas</button>' : ''}</div>
+    <div class="nt-lista">${nt.itens.length ? nt.itens.map(ntHtml).join('') : '<p class="muted" style="padding:14px">Nada por aqui ainda.</p>'}</div>`;
+  const todas = $('#ntTodas');
+  if (todas) todas.onclick = async (ev) => { ev.stopPropagation(); await api('/notifications/todas-lidas', { method: 'POST' }); await carregarNotificacoes(); };
+  for (const el of cx.querySelectorAll('[data-nt]')) el.onclick = async (ev) => {
+    if (ev.target.closest('[data-ntdel]')) return;
+    try { await api(`/notifications/${el.dataset.nt}/lida`, { method: 'POST' }); } catch {}
+    const destino = el.dataset.link;
+    fecharSino();
+    await carregarNotificacoes();
+    if (destino) location.hash = destino.replace(/^#/, '');
+  };
+  for (const b of cx.querySelectorAll('[data-ntdel]')) b.onclick = async (ev) => {
+    ev.stopPropagation();
+    try { await api(`/notifications/${b.dataset.ntdel}`, { method: 'DELETE' }); } catch {}
+    await carregarNotificacoes();
+  };
+}
+
+function fecharSino() {
+  nt.aberto = false;
+  const cx = $('#ntcaixa');
+  if (cx) cx.remove();
+}
+
+function montarSino() {
+  const s = $('#sino');
+  if (!s) return;
+  s.onclick = (ev) => {
+    ev.stopPropagation();
+    if (nt.aberto) return fecharSino();
+    nt.aberto = true;
+    const cx = document.createElement('div');
+    cx.id = 'ntcaixa';
+    cx.className = 'nt-caixa';
+    cx.onclick = (e) => e.stopPropagation();
+    document.body.appendChild(cx);
+    const r = s.getBoundingClientRect();
+    cx.style.top = `${r.bottom + 8}px`;
+    cx.style.right = `${Math.max(8, window.innerWidth - r.right - 8)}px`;
+    pintarCaixa(cx);
+    carregarNotificacoes();
+  };
+  if (!nt.ligado) {
+    nt.ligado = true;
+    document.addEventListener('click', () => { if (nt.aberto) fecharSino(); });
+    nt.timer = setInterval(carregarNotificacoes, 45000);
+  }
+  carregarNotificacoes();
 }
 
 async function refreshMe() {
@@ -86,6 +166,30 @@ async function refreshMe() {
 
 /* ------------------------------ Páginas ------------------------------ */
 const views = {};
+
+views.notificacoes = async () => {
+  if (!state.user) return needLogin();
+  const d = await api('/notifications?limit=50');
+  nt.itens = d.itens; nt.naoLidas = d.naoLidas;
+  appEl().innerHTML = `<h1>🔔 Notificações</h1>
+    <div class="card"><div id="ntpag" class="nt-lista nt-pagina">${d.itens.length ? d.itens.map(ntHtml).join('') : '<p class="muted">Nada por aqui ainda. Avisos sobre créditos, pagamentos e respostas aparecem aqui.</p>'}</div>
+      ${d.naoLidas ? '<p style="margin-top:12px"><button class="btn sm secondary" id="ntTodasPag">Marcar todas como lidas</button></p>' : ''}</div>`;
+  const t = $('#ntTodasPag');
+  if (t) t.onclick = async () => { await api('/notifications/todas-lidas', { method: 'POST' }); await carregarNotificacoes(); views.notificacoes(); };
+  for (const el of $('#ntpag').querySelectorAll('[data-nt]')) el.onclick = async (ev) => {
+    if (ev.target.closest('[data-ntdel]')) return;
+    try { await api(`/notifications/${el.dataset.nt}/lida`, { method: 'POST' }); } catch {}
+    await carregarNotificacoes();
+    if (el.dataset.link) location.hash = el.dataset.link.replace(/^#/, '');
+    else views.notificacoes();
+  };
+  for (const b of $('#ntpag').querySelectorAll('[data-ntdel]')) b.onclick = async (ev) => {
+    ev.stopPropagation();
+    try { await api(`/notifications/${b.dataset.ntdel}`, { method: 'DELETE' }); } catch {}
+    await carregarNotificacoes(); views.notificacoes();
+  };
+};
+
 
 views.home = async () => {
   const plans = (await api('/plans')).items;
@@ -1322,9 +1426,135 @@ views.ajuda = async () => {
 };
 
 /* ------------------------------ Admin ------------------------------ */
+/* ------------------------------ Chat entre administradores ------------------------------ */
+const ch = { aberta: null, lista: [], timer: null, arrastando: null };
+
+async function chPintarLista() {
+  const alvo = $('#chLista');
+  if (!alvo) return;
+  const d = await api('/admin/chats');
+  ch.lista = d.itens;
+  const cartao = (c) => `<div class="ch-conv ${ch.aberta === c.id ? 'on' : ''}" data-conv="${esc(c.id)}" draggable="true">
+      <span class="ch-ava">${c.tipo === 'dm' ? '👤' : c.tipo === 'geral' ? '🏛' : '👥'}</span>
+      <div class="ch-info"><b>${esc(c.nome)}</b>
+        <span class="muted small">${c.ultima ? `${c.ultima.minha ? 'você: ' : ''}${esc(String(c.ultima.texto).slice(0, 40))}` : esc(c.subtitulo)}</span></div>
+      ${c.naoLidas ? `<span class="ch-n">${c.naoLidas}</span>` : ''}
+      <button class="ch-pin" data-pin="${esc(c.id)}" data-fix="${c.fixado ? 1 : 0}" title="${c.fixado ? 'Tirar dos principais' : 'Deixar nos principais'}">${c.fixado ? '📌' : '📍'}</button>
+    </div>`;
+  const fix = d.itens.filter((c) => c.fixado), resto = d.itens.filter((c) => !c.fixado);
+  alvo.innerHTML = `<div class="ch-sec" id="chFix" data-zona="fix"><span class="ch-sec-t">Principais</span>
+      ${fix.length ? fix.map(cartao).join('') : '<p class="muted small ch-vazio">Arraste uma conversa para cá.</p>'}</div>
+    <div class="ch-sec" id="chTodos" data-zona="todos"><span class="ch-sec-t">Todas</span>
+      ${resto.length ? resto.map(cartao).join('') : '<p class="muted small ch-vazio">Nada aqui.</p>'}</div>
+    <div class="ch-sec"><span class="ch-sec-t">Começar conversa</span><div id="chPessoas"><span class="spin"></span></div></div>`;
+
+  for (const el of alvo.querySelectorAll('[data-conv]')) {
+    el.onclick = (ev) => { if (!ev.target.closest('[data-pin]')) chAbrir(el.dataset.conv); };
+    el.ondragstart = () => { ch.arrastando = el.dataset.conv; };
+    el.ondragend = () => { ch.arrastando = null; };
+  }
+  for (const b of alvo.querySelectorAll('[data-pin]')) b.onclick = async (ev) => {
+    ev.stopPropagation();
+    await api(`/admin/chats/${b.dataset.pin}/fixar`, { method: 'POST', body: { fixado: b.dataset.fix !== '1' } });
+    await chPintarLista();
+  };
+  for (const z of alvo.querySelectorAll('[data-zona]')) {
+    z.ondragover = (ev) => { ev.preventDefault(); z.classList.add('ch-alvo'); };
+    z.ondragleave = () => z.classList.remove('ch-alvo');
+    z.ondrop = async (ev) => {
+      ev.preventDefault(); z.classList.remove('ch-alvo');
+      if (!ch.arrastando) return;
+      await api(`/admin/chats/${ch.arrastando}/fixar`, { method: 'POST', body: { fixado: z.dataset.zona === 'fix' } });
+      ch.arrastando = null;
+      await chPintarLista();
+    };
+  }
+  try {
+    const p = await api('/admin/chats/pessoas');
+    const jaTem = new Set(ch.lista.filter((c) => c.tipo === 'dm').flatMap((c) => c.membros.map((m) => m.id)));
+    $('#chPessoas').innerHTML = p.itens.map((x) => `<div class="ch-pessoa" data-dm="${esc(x.id)}">
+        <span class="ch-ava">${x.papel === 'owner' ? '👑' : '🛠'}</span>
+        <div class="ch-info"><b>${esc(x.nome || x.email)}</b><span class="muted small">${esc(x.email)}${jaTem.has(x.id) ? ' · já tem conversa' : ''}</span></div></div>`).join('')
+      || '<p class="muted small">Você é o único administrador por enquanto.</p>';
+    for (const el of $('#chPessoas').querySelectorAll('[data-dm]')) el.onclick = async () => {
+      const r = await api('/admin/chats/dm', { method: 'POST', body: { com: el.dataset.dm } });
+      await chPintarLista();
+      await chAbrir(r.conversa);
+    };
+  } catch {}
+}
+
+async function chAbrir(id) {
+  ch.aberta = id;
+  const c = ch.lista.find((x) => x.id === id);
+  const p = $('#chPainel');
+  if (!p) return;
+  p.innerHTML = `<div class="ch-cab"><b>${esc(c?.nome || 'Conversa')}</b>
+      <span class="muted small">${esc(c?.subtitulo || '')}</span>
+      <span class="spacer"></span>
+      <button class="btn sm ghost" id="chLigar" title="Ligação de voz entre administradores">📞 Ligar</button></div>
+    <div class="ch-msgs" id="chMsgs"><span class="spin"></span></div>
+    <form class="ch-escrever" id="chForm"><input id="chTxt" maxlength="2000" placeholder="Escreva para ${esc(c?.nome || '')}" autocomplete="off">
+      <button class="btn sm" type="submit">Enviar</button></form>`;
+  await chMensagens(id);
+  $('#chForm').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const t = $('#chTxt').value.trim();
+    if (!t) return;
+    $('#chTxt').value = '';
+    try { await api(`/admin/chats/${id}/mensagens`, { method: 'POST', body: { texto: t } }); } catch (e) { alert(e.message); }
+    await chMensagens(id);
+    await chPintarLista();
+  };
+  $('#chLigar').onclick = () => {
+    alert('A ligação de voz ainda não está pronta. Para funcionar fora da mesma rede ela precisa de um servidor TURN, que é pago; eu não liguei nada disso sem te avisar o custo antes. Por enquanto, use a conversa escrita.');
+  };
+  await chPintarLista();
+}
+
+async function chMensagens(id, silencioso = false) {
+  const box = $('#chMsgs');
+  if (!box) return;
+  try {
+    const d = await api(`/admin/chats/${id}/mensagens?limit=80`);
+    const antes = box.scrollHeight - box.scrollTop;
+    box.innerHTML = d.itens.map((m) => m.sistema
+      ? `<p class="ch-sis">${esc(m.texto)}</p>`
+      : `<div class="ch-msg ${m.minha ? 'minha' : ''}" data-msg="${esc(m.id)}">
+          <div class="ch-bolha"><span class="ch-autor">${esc(m.autor)}${m.papel === 'owner' ? ' 👑' : ''}</span>
+            <p>${esc(m.texto)}</p>
+            <span class="ch-hora">${new Date(m.quando).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+            ${m.minha || state.user?.role === 'owner' ? `<button class="ch-del" data-msgdel="${esc(m.id)}" title="Apagar">×</button>` : ''}</div>
+        </div>`).join('') || '<p class="muted" style="padding:16px">Ainda não tem mensagem aqui. Escreva a primeira.</p>';
+    if (!silencioso || antes < 80) box.scrollTop = box.scrollHeight;
+    for (const b of box.querySelectorAll('[data-msgdel]')) b.onclick = async () => {
+      if (!confirm('Apagar esta mensagem? Some para todo mundo e fica registrado na auditoria.')) return;
+      try { await api(`/admin/chats/${id}/mensagens/${b.dataset.msgdel}`, { method: 'DELETE' }); } catch (e) { alert(e.message); }
+      await chMensagens(id);
+    };
+  } catch (e) { if (!silencioso) showErr(box, e); }
+}
+
+async function chNovoGrupo() {
+  const p = await api('/admin/chats/pessoas');
+  if (!p.itens.length) return alert('Você é o único administrador: não há com quem montar um grupo.');
+  const nome = prompt('Nome do grupo:');
+  if (!nome) return;
+  const escolha = prompt(`Quem entra? Escreva os números separados por vírgula:\n${p.itens.map((x, i) => `${i + 1}. ${x.email}`).join('\n')}`);
+  if (!escolha) return;
+  const membros = escolha.split(',').map((x) => p.itens[parseInt(x.trim(), 10) - 1]?.id).filter(Boolean);
+  if (!membros.length) return alert('Nenhuma pessoa válida escolhida.');
+  try {
+    const r = await api('/admin/chats/grupo', { method: 'POST', body: { nome, membros } });
+    alert(r.executado ? 'Grupo criado.' : 'Pedido enviado ao administrador principal. O grupo nasce quando ele disser Sim.');
+    await chPintarLista();
+    await carregarNotificacoes();
+  } catch (e) { alert(e.message); }
+}
+
 const ADMIN_TABS = [
   ['geral', 'Visão geral'], ['usuarios', 'Usuários'], ['planos', 'Planos'], ['custos', 'Custos'],
-  ['pagamentos', 'Pagamentos'], ['avaliacoes', 'Avaliações'], ['blocos', 'Avisos e cards'], ['config', 'Configurações'], ['admins', 'Administradores'], ['auditoria', 'Auditoria']
+  ['pagamentos', 'Pagamentos'], ['pedidos', '🙋 Pedidos'], ['chats', '💬 Chats'], ['avaliacoes', 'Avaliações'], ['blocos', 'Avisos e cards'], ['config', 'Configurações'], ['admins', 'Administradores'], ['auditoria', 'Auditoria']
 ];
 
 // Mostra a versão atual no botão de baixar, para dar para comparar com a instalada
@@ -1377,6 +1607,67 @@ views.admin = async (params, sub) => {
 };
 
 const adminTabs = {
+  // ---------- Pedidos que esperam o Sim do administrador principal ----------
+  async pedidos(el) {
+    const d = await api('/admin/pedidos');
+    const cor = { pendente: 'warn', aprovado: 'ok', recusado: 'err', falhou: 'err' };
+    const rot = { pendente: 'esperando você', aprovado: 'aprovado', recusado: 'recusado', falhou: 'aprovado, mas falhou' };
+    const linha = (p) => `<div class="rv-item" data-ped="${esc(p.id)}">
+      <div class="rv-cab"><span class="pill ${cor[p.status] || ''}">${rot[p.status] || esc(p.status)}</span>
+        <b>${esc(p.pedido_por)}</b> quer ${esc(p.frase)}</div>
+      ${p.motivo ? `<p class="small">Motivo: ${esc(p.motivo)}</p>` : '<p class="small muted">Sem motivo informado.</p>'}
+      <p class="small muted">${new Date(p.criado_em).toLocaleString('pt-BR')}${p.resposta ? ` · sua resposta: "${esc(p.resposta)}"` : ''}${p.erro ? ` · erro: ${esc(p.erro)}` : ''}</p>
+      ${d.sou_dono && p.status === 'pendente' ? `<div class="rv-acoes">
+        <button class="btn sm" data-sim="${esc(p.id)}">✅ Sim</button>
+        <button class="btn sm secondary" data-nao="${esc(p.id)}">❌ Não</button>
+        <button class="btn sm ghost" data-papo="${esc(p.pedido_por_id)}">💬 Conversar</button></div>` : ''}
+    </div>`;
+    const pend = d.itens.filter((p) => p.status === 'pendente');
+    const resto = d.itens.filter((p) => p.status !== 'pendente');
+    el.innerHTML = `<div class="card">
+        <h3>${d.sou_dono ? 'Pedidos esperando você' : 'Pedidos que você mandou'}</h3>
+        <p class="muted small">${d.sou_dono
+          ? 'Administrador comum não mexe sozinho na conta de ninguém: ajustar créditos, banir, remover comentário, adicionar administrador e criar grupo chegam aqui primeiro. Nada acontece até você dizer Sim.'
+          : 'Suas ações que mexem na conta de outras pessoas passam pelo administrador principal. Você vê aqui em que pé estão.'}</p>
+        ${pend.length ? pend.map(linha).join('') : '<p class="muted">Nenhum pedido pendente.</p>'}
+      </div>
+      ${resto.length ? `<div class="card" style="margin-top:12px"><h3>Já decididos</h3>${resto.map(linha).join('')}</div>` : ''}`;
+    for (const b of el.querySelectorAll('[data-sim]')) b.onclick = async () => {
+      const resposta = prompt('Quer deixar um recado junto do Sim? (pode deixar em branco)') ?? '';
+      b.disabled = true;
+      try { await api(`/admin/pedidos/${b.dataset.sim}/decidir`, { method: 'POST', body: { decisao: 'sim', resposta } }); await carregarNotificacoes(); adminTabs.pedidos(el); }
+      catch (e) { alert(e.message); b.disabled = false; }
+    };
+    for (const b of el.querySelectorAll('[data-nao]')) b.onclick = async () => {
+      const resposta = prompt('Por que não? (a pessoa recebe esse texto)') ?? '';
+      b.disabled = true;
+      try { await api(`/admin/pedidos/${b.dataset.nao}/decidir`, { method: 'POST', body: { decisao: 'nao', resposta } }); await carregarNotificacoes(); adminTabs.pedidos(el); }
+      catch (e) { alert(e.message); b.disabled = false; }
+    };
+    for (const b of el.querySelectorAll('[data-papo]')) b.onclick = async () => {
+      try { const r = await api('/admin/chats/dm', { method: 'POST', body: { com: b.dataset.papo } }); ch.aberta = r.conversa; location.hash = '/admin/chats'; }
+      catch (e) { alert(e.message); }
+    };
+  },
+
+  // ---------- Chats entre administradores ----------
+  async chats(el) {
+    el.innerHTML = `<div class="ch-tela">
+        <aside class="ch-lado"><div class="ch-topo"><b>Conversas</b><button class="btn sm ghost" id="chNovo">+ grupo</button></div>
+          <div id="chLista"><span class="spin"></span></div></aside>
+        <section class="ch-painel" id="chPainel"><p class="muted" style="padding:20px">Escolha uma conversa à esquerda.</p></section>
+      </div>`;
+    await chPintarLista();
+    $('#chNovo').onclick = chNovoGrupo;
+    if (ch.aberta) await chAbrir(ch.aberta);
+    if (ch.timer) clearInterval(ch.timer);
+    ch.timer = setInterval(async () => {
+      if (!location.hash.startsWith('#/admin/chats')) { clearInterval(ch.timer); ch.timer = null; return; }
+      await chPintarLista();
+      if (ch.aberta) await chMensagens(ch.aberta, true);
+    }, 8000);
+  },
+
   async blocos(el) {
     const d = await api('/admin/blocks');
     const nomeSlot = (id) => d.slots.find((x) => x.id === id)?.nome || id;

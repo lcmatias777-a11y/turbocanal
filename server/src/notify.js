@@ -54,7 +54,7 @@ const n = (v) => Number(v || 0).toLocaleString('pt-BR');
 export const avisos = {
   boasVindas: (db, user) => notificar(db, user.id, 'boas_vindas', `Boas-vindas, ${String(user.name || '').split(' ')[0] || 'criador'}!`, {
     corpo: `Sua conta está pronta com ${n(user.credits)} créditos. Vincule seu canal do YouTube para liberar as ferramentas que leem os seus próprios números.`,
-    link: '#/painel'
+    link: '#/dashboard'
   }),
   recarga: (db, userId, quanto, teto) => notificar(db, userId, 'creditos_recarregados', `Seus créditos do mês foram restaurados`, {
     corpo: `Entraram ${n(quanto)} créditos para completar o saldo até ${n(teto)}, que é o limite mensal do plano Free. Isso acontece sozinho no primeiro uso de cada mês.`,
@@ -82,7 +82,7 @@ export const avisos = {
   }),
   deixouAdmin: (db, userId) => notificar(db, userId, 'deixou_admin', 'Seu acesso de administrador foi removido', {
     corpo: 'Sua conta continua normal, só não abre mais o painel administrativo.',
-    link: '#/painel'
+    link: '#/dashboard'
   }),
   resposta: (db, userId, { autor, trecho, alvo }) => notificar(db, userId, 'resposta_recebida', `${autor} respondeu você`, {
     corpo: trecho ? `"${String(trecho).slice(0, 180)}"` : '',
