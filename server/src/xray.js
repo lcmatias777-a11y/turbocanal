@@ -144,8 +144,39 @@ export function analisarVideos(videos, opts = {}) {
   };
 }
 
+/** Um vídeo só, comparado com a mediana do próprio canal. É o que a extensão
+ *  mostra quando o vídeo aberto no YouTube é do canal da pessoa. */
+export function compararUm(videoId, analise, videos) {
+  const v = (videos || []).find((x) => String(x.id) === String(videoId));
+  if (!v) return null;
+  const views = Math.max(0, +v.views || 0);
+  const ganhos = Math.max(0, +v.inscritosGanhos || 0) - Math.max(0, +v.inscritosPerdidos || 0);
+  const porMil = views >= 1 ? Math.round((ganhos / views) * 1000 * 10) / 10 : 0;
+  const ret = Math.max(0, +v.percentualMedio || 0);
+  const cmp = (valor, base) => (base > 0 ? Math.round(((valor - base) / base) * 100) : null);
+  return {
+    id: v.id, titulo: v.titulo || '', views,
+    retencao: Math.round(ret * 10) / 10,
+    retencaoVsCanal: cmp(ret, analise.base.retencaoMediana),
+    inscritos: ganhos, inscritosPorMil: porMil,
+    inscritosVsCanal: cmp(porMil, analise.base.medianaInscritosPorMil),
+    medianaCanal: { retencao: analise.base.retencaoMediana, inscritosPorMil: analise.base.medianaInscritosPorMil, videos: analise.base.analisados },
+    aviso: ret > 100 ? 'Acima de 100% porque vídeo curto repete sozinho: a mesma pessoa assiste mais de uma vez.' : ''
+  };
+}
+
 export function xrayRoutes(app, db, auth) {
   const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
+  // Um vídeo do meu canal, comparado com a mediana do canal (usado pela extensão)
+  app.get('/api/channel/raiox/:videoId', auth.required, wrap(async (req, res) => {
+    const { myVideoXray } = await import('./channel.js');
+    const dados = await myVideoXray(db, req.user, 365);
+    const analise = analisarVideos(dados.videos);
+    const um = compararUm(req.params.videoId, analise, dados.videos);
+    if (!um) return res.json({ meu: false, motivo: 'Este vídeo não é do seu canal, ou ainda não tem números no Analytics.' });
+    res.json({ meu: true, canal: dados.canal, ...um });
+  }));
+
   app.get('/api/channel/raiox', auth.required, wrap(async (req, res) => {
     const { myVideoXray } = await import('./channel.js');
     const dias = parseInt(req.query.dias, 10) || 90;

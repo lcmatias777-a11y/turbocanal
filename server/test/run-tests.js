@@ -862,6 +862,33 @@ console.log('\n— KPI de créditos gastos —');
     dep2.creditsSpent30d > dep.creditsSpent30d && (await req('/api/me', { token: t2 })).data.user.credits < saldoAntes);
 }
 
+// ---------- Meu desempenho num video (o que a extensao mostra) ----------
+console.log('\n— Meu desempenho no vídeo —');
+{
+  const { compararUm, analisarVideos: anVid } = await import('../src/xray.js');
+  const vs = [
+    { id: 'bom', titulo: 'Bom', views: 2000, duracaoSeg: 400, duracaoMediaSeg: 200, percentualMedio: 50, inscritosGanhos: 40, inscritosPerdidos: 0 },
+    { id: 'medio', titulo: 'Médio', views: 2000, duracaoSeg: 400, duracaoMediaSeg: 100, percentualMedio: 25, inscritosGanhos: 10, inscritosPerdidos: 0 },
+    { id: 'ruim', titulo: 'Ruim', views: 2000, duracaoSeg: 400, duracaoMediaSeg: 40, percentualMedio: 10, inscritosGanhos: 0, inscritosPerdidos: 4 }
+  ];
+  const an = anVid(vs);
+  const bom = compararUm('bom', an, vs);
+  check('compara o video com a mediana do proprio canal',
+    bom && bom.retencao === 50 && bom.retencaoVsCanal === 100, JSON.stringify(bom && { r: bom.retencao, vs: bom.retencaoVsCanal }));
+  check('mostra inscritos por mil views e a diferenca para o canal',
+    bom.inscritosPorMil === 20 && bom.inscritosVsCanal === 300, JSON.stringify({ pm: bom.inscritosPorMil, vs: bom.inscritosVsCanal }));
+  const ruim = compararUm('ruim', an, vs);
+  check('video abaixo do canal aparece com numero negativo', ruim.retencaoVsCanal < 0 && ruim.inscritos === -4, JSON.stringify({ r: ruim.retencaoVsCanal, i: ruim.inscritos }));
+  check('video de outra pessoa devolve nulo', compararUm('nao-existe', an, vs) === null);
+  const curto = compararUm('s', anVid([{ id: 's', titulo: 'S', views: 2000, duracaoSeg: 30, duracaoMediaSeg: 45, percentualMedio: 150, inscritosGanhos: 5 }]), [{ id: 's', titulo: 'S', views: 2000, percentualMedio: 150, inscritosGanhos: 5, inscritosPerdidos: 0 }]);
+  check('acima de 100% vem com a explicacao do loop', /repete sozinho/.test(curto.aviso || ''), curto.aviso);
+
+  const rotaOutro = await req('/api/channel/raiox/vidAlheio01', { token: t1 });
+  check('pedir um video que nao e do canal responde "nao e seu", sem vazar numero',
+    rotaOutro.status === 200 && rotaOutro.data.meu === false && !rotaOutro.data.retencao, JSON.stringify(rotaOutro.data));
+  check('a rota exige login', (await req('/api/channel/raiox/qualquer')).status === 401);
+}
+
 // ---------- Diario de experimentos ----------
 console.log('\n— Diário de experimentos —');
 {

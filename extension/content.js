@@ -423,8 +423,36 @@
           ch.keywords?.length ? h('div', { class: 'tc-sec' }, h('b', null, 'Tags do canal '), copyBtn('copiar', () => ch.keywords.join(', '), 'tc-mini'), h('div', { class: 'tc-tags' }, ch.keywords.map((k) => h('span', null, k)))) : null,
           h('div', { class: 'tc-actions' }, add),
           msg,
+          meuDesempenho(vid),
           h('p', { class: 'tc-muted' }, creditLine(r.credits)));
       } catch (e) { clear(box).append(errBox(e)); }
+    })();
+    return box;
+  }
+
+  /** Se o vídeo aberto for do SEU canal, mostra o que só o Analytics sabe:
+   *  retenção e inscritos por mil views, comparados com a mediana do canal.
+   *  Não custa crédito. Em vídeo de outra pessoa não aparece nada. */
+  function meuDesempenho(vid) {
+    const box = h('div', { class: 'tc-sec' });
+    box.append(h('p', { class: 'tc-muted' }, 'Verificando se este vídeo é do seu canal…'));
+    (async () => {
+      try {
+        const r = await api('/channel/raiox/' + encodeURIComponent(vid));
+        if (!r.meu) { box.remove(); return; }
+        const sinal = (n) => (n == null ? '—' : `${n >= 0 ? '+' : ''}${n}%`);
+        const classe = (n) => (n == null ? 'tc-muted' : n >= 0 ? 'tc-ok' : 'tc-muted');
+        poe(clear(box),
+          h('b', null, '📊 Seu desempenho neste vídeo'),
+          h('div', { class: 'tc-grid' },
+            stat('⏳ Retenção', r.retencao + '%', 'Percentual médio assistido (YouTube Analytics)'),
+            stat('🧲 Inscritos/mil', dec(r.inscritosPorMil), 'Inscritos ganhos menos perdidos, por mil views'),
+            stat('👥 Inscritos', fmt(r.inscritos), 'Ganhos menos perdidos neste vídeo')),
+          h('p', { class: classe(r.retencaoVsCanal) }, `Retenção: ${sinal(r.retencaoVsCanal)} em relação à mediana do canal (${dec(r.medianaCanal.retencao)}%, em ${r.medianaCanal.videos} vídeos).`),
+          h('p', { class: classe(r.inscritosVsCanal) }, `Inscritos por mil views: ${sinal(r.inscritosVsCanal)} em relação à mediana do canal (${dec(r.medianaCanal.inscritosPorMil)}).`),
+          r.aviso ? h('p', { class: 'tc-muted' }, r.aviso) : null,
+          h('p', { class: 'tc-muted' }, 'Direto do YouTube Analytics do seu canal. Não gasta crédito. CTR não aparece porque a API não entrega esse número.'));
+      } catch { box.remove(); }
     })();
     return box;
   }
