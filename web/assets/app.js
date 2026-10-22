@@ -1718,11 +1718,29 @@ views.admin = async (params, sub) => {
   const tab = sub || 'geral';
   appEl().innerHTML = `
     <h1>🛠 Painel administrativo</h1>
-    <div class="tabs">${ADMIN_TABS.map(([k, l]) => `<a href="#/admin/${k}" class="${tab === k ? 'active' : ''}">${l}</a>`).join('')}</div>
+    <div class="tabs">${ADMIN_TABS.map(([k, l]) => `<a href="#/admin/${k}" class="${tab === k ? 'active' : ''}">${l}<span class="aba-n" data-contador="${k}" hidden></span></a>`).join('')}</div>
     <div id="atab"><span class="spin"></span></div>`;
   const el = $('#atab');
+  contarPendentes();
   try { await adminTabs[tab]?.(el); } catch (e) { showErr(el, e); }
 };
+
+/** Contador nas abas do painel: quantos pedidos esperam resposta e quantas
+ *  mensagens de chat ainda não foram lidas. Sem isso o administrador só
+ *  descobre abrindo a aba. */
+async function contarPendentes() {
+  const pinta = (k, n) => {
+    const el = document.querySelector(`[data-contador="${k}"]`);
+    if (!el) return;
+    el.textContent = n > 9 ? '9+' : String(n);
+    el.hidden = !n;
+  };
+  try {
+    const p = await api('/admin/pedidos');
+    pinta('pedidos', p.sou_dono ? p.pendentes : p.itens.filter((x) => x.status === 'pendente').length);
+  } catch { pinta('pedidos', 0); }
+  try { pinta('chats', (await api('/admin/chats/novidades')).naoLidas); } catch { pinta('chats', 0); }
+}
 
 const adminTabs = {
   // ---------- Pedidos que esperam o Sim do administrador principal ----------

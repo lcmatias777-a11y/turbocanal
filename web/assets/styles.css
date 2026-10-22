@@ -275,3 +275,7 @@ a.bl-card:hover { border-color: var(--accent2); text-decoration: none; }
 .prox-ico { font-size: 1.7rem; line-height: 1.2; }
 .prox-dado { background: var(--bg2); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 8px 12px; font-size: .9rem; color: var(--muted); }
 .prox-acoes { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+
+/* Contador nas abas do painel (pedidos pendentes, mensagens não lidas) */
+.tabs a { position: relative; }
+.aba-n { display: inline-block; margin-left: 6px; background: var(--accent); color: #fff; border-radius: 999px; font-size: .68rem; font-weight: 700; min-width: 18px; height: 18px; line-height: 18px; text-align: center; padding: 0 5px; vertical-align: middle; }

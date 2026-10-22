@@ -48,6 +48,12 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
   const r1 = await ana.req.post(LOCAL + '/api/admin/users/' + anaId + '/credits', { data: { delta: 1000, note: 'teste de interface' } });
   check('a interface do admin comum recebe 202 (virou pedido)', r1.status() === 202, String(r1.status()));
 
+  // --- o contador na aba avisa antes de abrir ---
+  await dono.p.goto(LOCAL + '/#/admin/geral');
+  await dono.p.waitForSelector('[data-contador="pedidos"]:not([hidden])', { timeout: 20000 });
+  check('a aba Pedidos mostra contador de pedidos esperando resposta',
+    (await dono.p.textContent('[data-contador="pedidos"]')).trim() === '1', await dono.p.textContent('[data-contador="pedidos"]'));
+
   // --- dono vê o pedido na aba Pedidos ---
   await dono.p.goto(LOCAL + '/#/admin/pedidos');
   await dono.p.waitForSelector('[data-ped]', { timeout: 20000 });
@@ -125,6 +131,16 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
   await ana.p.click('#ntTodasPag');
   await ana.p.waitForTimeout(900);
   check('marcar todas como lidas some com o contador do sino', await ana.p.$eval('#sinoN', (e) => e.hidden) === true);
+
+  // o contador de chat tambem aparece para quem tem mensagem nao lida
+  // (Ana ja leu as anteriores, entao o dono manda uma nova agora)
+  const convGeral = (await (await dono.req.get(LOCAL + '/api/admin/chats')).json()).itens.find((c) => c.tipo === 'geral');
+  await dono.req.post(LOCAL + `/api/admin/chats/${convGeral.id}/mensagens`, { data: { texto: 'Mensagem nova, ainda nao lida pela Ana.' } });
+  await ana.p.goto(LOCAL + '/#/admin/usuarios');
+  await ana.p.waitForSelector('[data-contador="chats"]', { timeout: 20000 });
+  await ana.p.waitForTimeout(1500);
+  const nChats = await ana.p.$eval('[data-contador="chats"]', (e) => ({ txt: e.textContent, escondido: e.hidden }));
+  check('a aba Chats mostra contador de mensagem nao lida', nChats.escondido === false && Number(nChats.txt) >= 1, JSON.stringify(nChats));
 
   check('nenhum erro de JavaScript em nenhuma das telas', erros.length === 0, erros.slice(0, 3).join(' | '));
   await browser.close();
