@@ -2323,12 +2323,19 @@ views.avaliacoes = async () => {
     if (!texto) { $('#rvcmsg').innerHTML = alertBox('warn', 'Escreva alguma coisa antes de enviar.'); return; }
     comentar.disabled = true;
     try {
-      await api('/comments', { method: 'POST', body: { texto } });
-      $('#rvctxt').value = '';
-      $('#rvcmsg').innerHTML = alertBox('ok', 'Comentário publicado.');
+      const salvo = await api('/comments', { method: 'POST', body: { texto } });
       rv.ordem = 'recentes';
       $('#rvordem').value = 'recentes';
       await rvCarregar(true);
+      // Confere no servidor que o comentário está mesmo na lista. Se não estiver,
+      // diz isso e devolve o texto, em vez de dizer "publicado" e o texto sumir.
+      const achou = rv.itens.some((x) => x.id === salvo.comentario?.id);
+      if (achou) {
+        $('#rvctxt').value = '';
+        $('#rvcmsg').innerHTML = alertBox('ok', 'Comentário publicado e confirmado no servidor.');
+      } else {
+        $('#rvcmsg').innerHTML = alertBox('err', 'O servidor aceitou, mas o comentário não voltou na lista. Não apaguei o seu texto: copie antes de tentar de novo e me avise, porque isso é um problema de verdade.');
+      }
     } catch (e) { showErr($('#rvcmsg'), e); }
     comentar.disabled = false;
   };
