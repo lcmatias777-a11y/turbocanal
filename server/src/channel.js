@@ -25,8 +25,7 @@ async function yt(token, path, { method = 'GET', params = {}, body, raw } = {}) 
   // as 28 chamadas abaixo e todas as ferramentas continuem exatamente iguais,
   // sem cada uma precisar saber se o canal é de verdade ou simulado.
   if (ehTokenDeTeste(token)) {
-    if (raw) throw new HttpError(422, 'No canal de teste não dá para enviar arquivo: não existe vídeo de verdade do outro lado.');
-    return apiDeTeste(DB, escopoDoToken(token), path, { method, params, body });
+    return apiDeTeste(DB, escopoDoToken(token), path, { method, params, body, raw });
   }
   const u = new URL(path.startsWith('http') ? path : API + path);
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) u.searchParams.set(k, v);
@@ -454,6 +453,12 @@ export function studioRoutes(app, db, auth, charged) {
     const status = { privacyStatus: publishAt ? 'private' : privacy, selfDeclaredMadeForKids: false };
     if (publishAt) status.publishAt = publishAt.toISOString();
     const metadata = { snippet: { title, description, tags, categoryId, defaultLanguage: 'pt' }, status };
+    // Canal de teste: o envio acontece dentro do próprio site.
+    if (ehTokenDeTeste(token)) {
+      const r = await apiDeTeste(DB, escopoDoToken(token), 'videos?uploadType=resumable', { method: 'POST', body: metadata });
+      await audit(db, req.user, 'youtube.upload_start', title, 'canal de teste');
+      return { uploadUrl: r.__uploadUrl, title, scheduled: !!publishAt, privacy: status.privacyStatus, teste: true };
+    }
     let resp;
     try {
       resp = await fetch(UPLOAD + 'videos?uploadType=resumable&part=snippet,status', {

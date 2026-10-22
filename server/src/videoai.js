@@ -7,6 +7,10 @@ const IMG_BASE = () => (process.env.YT_IMG_BASE || 'https://i.ytimg.com/vi/').re
 
 /** Quadros reais do vídeo gerados pelo YouTube (início/meio/fim) e a capa atual. */
 export async function videoFrames(videoId, { thumb = true } = {}) {
+  // Vídeo do canal de teste não tem quadro nenhum: ele não existe. Sair
+  // buscando a imagem no YouTube só geraria 4 chamadas perdidas.
+  const { ehVideoDeTeste } = await import('./canalteste.js');
+  if (ehVideoDeTeste(videoId)) return [];
   const names = ['hq1.jpg', 'hq2.jpg', 'hq3.jpg', ...(thumb ? ['hqdefault.jpg'] : [])];
   const out = await Promise.all(names.map(async (name) => {
     try {

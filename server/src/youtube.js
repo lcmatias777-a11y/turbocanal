@@ -29,6 +29,15 @@ async function authFor(db, user) {
   if (user) {
     try {
       const token = await youtubeAccessToken(db, user);
+      // Token do canal de teste não serve para falar com o YouTube de verdade:
+      // aqui a chamada é sobre OUTRO canal (busca, tendências), então usa a
+      // chave do site. Mandar o token falso daria 401 e uma mensagem errada.
+      const { ehTokenDeTeste } = await import('./canalteste.js');
+      if (ehTokenDeTeste(token)) {
+        const key = await apiKey(db);
+        if (key) return { key };
+        throw new HttpError(409, 'Esta ferramenta consulta o YouTube de verdade e o site ainda não tem a chave da API configurada. Ela não usa o canal de teste.');
+      }
       return { headers: { Authorization: `Bearer ${token}` } };
     } catch (e) {
       const key = await apiKey(db);
@@ -76,6 +85,17 @@ export function quotaError(msg) {
 }
 
 async function yt(db, endpoint, params, user) {
+  // Canal de teste: id que só existe aqui dentro NÃO vai para o YouTube. Era
+  // isto que fazia "Sua sessão com o Google expirou" aparecer na IA do vídeo,
+  // na análise de vídeo, no painel da extensão e na análise de canal: o site
+  // perguntava lá fora por um vídeo que nunca existiu, levava 401, e repetia
+  // a mensagem do YouTube como se a culpa fosse da conta da pessoa.
+  if (user) {
+    const ct = await import('./canalteste.js');
+    if (ct.mencionaCanalDeTeste(params) && (await ct.ligado(db, user))) {
+      return ct.apiDeTeste(db, ct.escopoDe(user), endpoint, { method: 'GET', params });
+    }
+  }
   const cacheKey = endpoint + '?' + Object.keys(params).sort().map((k) => `${k}=${params[k]}`).join('&');
   const ttl = endpoint === 'videos' && params.chart ? 60 * 60e3 : TTL_MS[endpoint];
   if (ttl) {

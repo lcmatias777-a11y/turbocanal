@@ -63,7 +63,11 @@ const c = CT.canalBase();
 const somaViews = vs.reduce((s, v) => s + v.views, 0);
 check('o total de views do canal bate com a soma dos vídeos (nada de número solto)', c.totalViews === somaViews);
 check('o total de vídeos bate com a lista', c.totalVideos === vs.length);
-check('o nome deixa claro que é simulado', /simulado/i.test(c.titulo), c.titulo);
+// O nome é nome de canal normal de propósito: o aviso de que é simulado fica
+// na faixa laranja do topo e na própria página, não no nome, senão o canal de
+// teste não serve para ver como as telas ficam de verdade.
+check('o canal tem nome de canal normal, não "teste"', !/teste|simulad/i.test(c.titulo), c.titulo);
+
 
 /* ===================== 2) Ligar e desligar ===================== */
 console.log('\n== Ligar, desligar e o aviso de que é inventado ==');
@@ -74,6 +78,9 @@ const bia = await criar('bia@example.com');
 
 const desligado = await req('/api/canal-teste', { token: ana.token });
 check('começa desligado', desligado.data.ligado === false);
+check('o nome do canal é normal, mas a API avisa que ele não existe no YouTube',
+  !/teste|simulad/i.test(desligado.data.canal.titulo) && /não existe no YouTube/i.test(desligado.data.aviso || ''),
+  desligado.data.canal.titulo);
 check('a resposta avisa, com todas as letras, que o canal não existe',
   /não existe no YouTube/i.test(desligado.data.aviso || ''), desligado.data.aviso);
 check('e avisa o que é de graça e o que continua cobrando',
@@ -85,7 +92,7 @@ check('sem canal ligado e sem modo teste, a ferramenta recusa (não inventa cana
 await ligar(ana);
 const meu = await req('/api/channel/videos?max=3', { token: ana.token });
 check('com o modo teste ligado, "Meu canal" abre', meu.status === 200, JSON.stringify(meu.data).slice(0, 120));
-check('e mostra o canal simulado', /simulado/i.test(JSON.stringify(meu.data)), JSON.stringify(meu.data).slice(0, 140));
+check('e os vídeos vêm do canal de teste', /tst\d{5}/.test(JSON.stringify(meu.data)), JSON.stringify(meu.data).slice(0, 140));
 
 /* ===================== 3) Compartilhado x privado ===================== */
 console.log('\n== Entre administradores é o MESMO canal; para usuário comum é só dele ==');
@@ -143,9 +150,13 @@ check('ninguém ficou com canal de verdade vinculado por usar o teste', Number(y
 
 /* ===================== 5) O que não dá para simular, ele diz ===================== */
 console.log('\n== O que o canal de teste não faz, ele admite ==');
-const capa = await req('/api/channel/videos/' + alvo + '/thumbnail', { method: 'POST', token: ana.token, body: { image: 'data:image/png;base64,iVBORw0KGgo=' } });
-check('enviar capa é recusado com explicação, não finge que deu certo',
-  capa.status >= 400 && /teste/i.test(JSON.stringify(capa.data)), `${capa.status} ${JSON.stringify(capa.data).slice(0, 110)}`);
+const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR4nGP8z8DAwMDEwMDAwMAAAB4LAwEqRpXcAAAAAElFTkSuQmCC';
+const capa = await req('/api/channel/videos/' + alvo + '/thumbnail', { method: 'POST', token: ana.token, body: { image: PNG } });
+check('enviar capa FUNCIONA no canal de teste (a capa é guardada e passa a aparecer)',
+  capa.status === 200, `${capa.status} ${JSON.stringify(capa.data).slice(0, 110)}`);
+const live = await req('/api/channel/live', { method: 'POST', token: ana.token, body: { title: 'live' } });
+check('transmissão ao vivo recusa explicando (depende de canal real)',
+  live.status === 422 && /canal de teste/i.test(JSON.stringify(live.data)), `${live.status}`);
 
 /* ===================== 6) Reiniciar ===================== */
 console.log('\n== Reiniciar o canal de teste ==');

@@ -126,9 +126,28 @@ export function toolRoutes(app, db, auth) {
     titles: Array.isArray(req.body?.titles) ? req.body.titles.map((t) => String(t).slice(0, 120)).filter(Boolean).slice(0, 20) : [],
     channel: String(req.body?.channel || '').slice(0, 100)
   });
-  app.post('/api/tools/ideas_ai', auth.required, AI,
-    (req, res, next) => { const i = ideasInput(req); next(i.niche || i.titles.length ? undefined : new HttpError(400, 'Diga o tema do canal (ou vincule seu canal para eu usar os seus vídeos).')); },
-    run('ideas_ai', (req) => ai.channelIdeas(db, ideasInput(req))));
+  // Se o navegador não mandar os títulos, o SERVIDOR busca no canal ligado (de
+  // verdade ou de teste). Antes isso dependia do site mandar a lista, então no
+  // canal de teste a ferramenta recusava dizendo "vincule seu canal" para
+  // quem já tinha um canal ligado.
+  const ideasComCanal = async (req) => {
+    const i = ideasInput(req);
+    if (i.niche || i.titles.length) return i;
+    try {
+      const { myPublicVideos } = await import('./channel.js');
+      const d = await myPublicVideos(db, req.user, 20);
+      i.titles = (d.videos || []).sort((a, b) => b.views - a.views).slice(0, 20).map((v) => v.title).filter(Boolean);
+      i.channel = i.channel || d.canal || '';
+    } catch { /* sem canal ligado: cai no aviso abaixo */ }
+    return i;
+  };
+  app.post('/api/tools/ideas_ai', auth.required, AI, run('ideas_ai', async (req) => {
+    const i = await ideasComCanal(req);
+    if (!i.niche && !i.titles.length) {
+      throw new HttpError(400, 'Diga o tema do canal (ou vincule seu canal, ou ligue o canal de teste, para eu usar os vídeos de lá).');
+    }
+    return ai.channelIdeas(db, i);
+  }));
 
   // Auditoria do canal: os dados saem do YouTube aqui no servidor, não do navegador
   app.post('/api/tools/audit_ai', auth.required, AI, run('audit_ai', async (req) => {

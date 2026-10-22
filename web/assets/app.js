@@ -384,7 +384,7 @@ views.dashboard = async () => {
       <div class="card"><h3>Seu plano</h3><div class="kpi">${esc(u.plan?.name || u.plan_id)}</div>
         <p class="muted small">${u.plan?.price_cents ? money(u.plan.price_cents) + '/mês' : 'Gratuito'} · ${fmt(u.plan?.monthly_credits)} créditos/mês</p>
         ${u.unlimited ? '' : '<a class="btn sm secondary" href="#/planos">Fazer upgrade</a>'}</div>
-      <div class="card"><h3>📺 Meu canal</h3><p class="muted small">${u.youtube?.connected ? `Conectado: <b>${esc(u.youtube.channel_title || 'canal')}</b>. Capas, A/B, edição de títulos.` : 'Conecte seu canal do YouTube para gerenciar capas, títulos e testes A/B.'}</p>
+      <div class="card"><h3>📺 Meu canal</h3><p class="muted small">${u.youtube?.connected ? `${u.youtube.teste ? '🧪 Canal de teste: ' : 'Conectado: '}<b>${esc(u.youtube.channel_title || 'canal')}</b>. Capas, A/B, edição de títulos.` : 'Conecte seu canal do YouTube para gerenciar capas, títulos e testes A/B.'}</p>
         <a class="btn sm secondary" href="#/canal">${u.youtube?.connected ? 'Abrir meu canal' : 'Conectar canal'}</a></div>
       <div class="card"><h3>Extensão Chrome</h3><p class="muted small">Analise vídeos direto no YouTube com a mesma conta.</p>
         <a class="btn sm secondary" href="#/extensao">Baixar e instalar</a></div>
@@ -1192,7 +1192,7 @@ views.canal = async (params, sub) => {
     return;
   }
   const tab = sub || 'videos';
-  appEl().innerHTML = `<h1>📺 Meu canal <span class="muted small">${esc(u.youtube.channel_title || '')}</span></h1>
+  appEl().innerHTML = `<h1>📺 Meu canal <span class="muted small">${esc(u.youtube.channel_title || '')}</span>${u.youtube.teste ? ' <span class="pill warn" title="Canal inventado para você experimentar as ferramentas">🧪 simulado</span>' : ''}</h1>
     <div class="tabs">${CANAL_TABS.map(([k, l]) => `<a href="#/canal/${k}" class="${tab === k ? 'active' : ''}">${l}</a>`).join('')}</div>
     <div id="cmsg"></div><div id="cbody"><span class="spin"></span></div>`;
   const el = $('#cbody');
@@ -1210,14 +1210,16 @@ const canalTabs = {
     el.innerHTML = `
       <div class="card"><div class="thumbrow">${c.thumb ? `<img src="${esc(c.thumb)}" style="border-radius:50%;width:80px">` : ''}
         <div><h3>${esc(c.title)}</h3><p>👥 ${c.subs == null ? 'inscritos ocultos' : fmt(c.subs) + ' inscritos'} · 👁 ${fmt(c.views)} views · 🎬 ${fmt(c.videos)} vídeos</p>
-        <p><a class="btn sm ghost" href="https://studio.youtube.com" target="_blank" rel="noopener">Abrir YouTube Studio</a> <button class="btn sm ghost" id="ytoff">Desvincular canal</button></p></div></div></div>
+        <p>${u.youtube.teste
+            ? '<a class="btn sm ghost" href="#/canal-teste">Desligar o canal de teste</a> <span class="muted small">Este canal não existe no YouTube, então não há Studio para abrir.</span>'
+            : '<a class="btn sm ghost" href="https://studio.youtube.com" target="_blank" rel="noopener">Abrir YouTube Studio</a> <button class="btn sm ghost" id="ytoff">Desvincular canal</button>'}</p></div></div></div>
       <div class="grid cols2">${data.videos.map((v) => `
         <div class="card" id="v-${esc(v.id)}" data-privacy="${esc(v.privacy || '')}">
           <div class="thumbrow">${v.thumb ? `<img src="${esc(v.thumb)}">` : ''}<div><b>${esc(v.title)}</b>
             <p class="muted small">👁 ${fmt(v.views)} · 👍 ${fmt(v.likes)} · 💬 ${fmt(v.comments)} · ⚡ ${fmt(v.vph)}/h · ${dt(v.publishedAt).split(',')[0]} · ${esc(privLabel(v.privacy))}</p>
             <p class="small"><span class="pill ${v.seoScore >= 80 ? 'ok' : v.seoScore >= 50 ? 'warn' : 'err'}" title="${esc((v.seoTodo || []).join(' · ') || 'Tudo certo')}">SEO ${v.seoScore ?? '—'}/100</span>
               ${(v.seoTodo || []).length ? `<span class="muted">falta: ${esc((v.seoTodo || []).slice(0, 2).join(', '))}${v.seoTodo.length > 2 ? '…' : ''}</span>` : '<span class="muted">checklist completo ✅</span>'}</p>
-            <p class="small"><a href="https://studio.youtube.com/video/${esc(v.id)}/edit" target="_blank" rel="noopener">editar no Studio ↗</a> · <a href="#/ferramentas/insights?video=${esc(v.id)}">✨ IA do vídeo</a> · <a href="#/ferramentas/transformar" data-transform="${esc(v.id)}">✂️ 3 cortes para Shorts</a></p></div></div>
+            <p class="small">${u.youtube.teste ? '' : `<a href="https://studio.youtube.com/video/${esc(v.id)}/edit" target="_blank" rel="noopener">editar no Studio ↗</a> · `}<a href="#/ferramentas/insights?video=${esc(v.id)}">✨ IA do vídeo</a> · <a href="#/ferramentas/transformar" data-transform="${esc(v.id)}">✂️ 3 cortes para Shorts</a></p></div></div>
           <details><summary class="small">✏️ Editar título, descrição, tags e visibilidade</summary>
             <p><a class="btn sm ghost" href="#/ferramentas/insights?video=${esc(v.id)}">✨ IA assiste e sugere tudo</a> <span class="muted small">${costOf('video_insights_ai')} · você tira o que não quiser e salva</span></p>
             <label>Título <span class="muted small" data-len="${esc(v.id)}">${(v.title || '').length}/100</span></label><input data-f="title" value="${esc(v.title)}" maxlength="100">
@@ -1237,7 +1239,8 @@ const canalTabs = {
           <div class="small" id="m-${esc(v.id)}"></div>
         </div>`).join('')}</div>
       ${data.videos.length ? '' : '<p class="muted">Nenhum vídeo encontrado neste canal.</p>'}`;
-    $('#ytoff').onclick = async () => {
+    const btOff = $('#ytoff');
+    if (btOff) btOff.onclick = async () => {
       if (!confirm('Desvincular o canal do YouTube desta conta? O acesso é revogado no Google; para voltar a usar as ferramentas, entre com o Google de novo.')) return;
       await api('/auth/youtube/disconnect', { method: 'POST' });
       try { await api('/auth/logout', { method: 'POST' }); } catch {}

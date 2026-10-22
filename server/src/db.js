@@ -379,6 +379,7 @@ CREATE TABLE IF NOT EXISTS demo_edicoes (
   descricao TEXT,
   tags TEXT,
   privacidade TEXT,
+  capa TEXT,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (escopo, video_id)
 );
@@ -406,6 +407,21 @@ CREATE TABLE IF NOT EXISTS demo_respostas (
   texto TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS demo_videos_novos (
+  id TEXT PRIMARY KEY,
+  escopo TEXT NOT NULL,
+  titulo TEXT NOT NULL,
+  descricao TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '[]',
+  privacidade TEXT NOT NULL DEFAULT 'private',
+  categoria TEXT NOT NULL DEFAULT '20',
+  publica_em TEXT,
+  bytes INTEGER NOT NULL DEFAULT 0,
+  enviado INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_demo_novos ON demo_videos_novos(escopo, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_demo_ed ON demo_edicoes(escopo);
 CREATE INDEX IF NOT EXISTS idx_demo_pl ON demo_playlist_itens(escopo, playlist_id);
@@ -695,6 +711,8 @@ async function seed(db) {
   // De onde veio o bloqueio do filtro: o bate-papo ou um comentário de postagem.
   // Sem isso o dono via só metade do que o filtro barrou.
   try { await db.run("ALTER TABLE chat_bloqueios ADD COLUMN onde TEXT NOT NULL DEFAULT 'bate-papo'"); } catch {}
+  // Capa enviada para um vídeo do canal de teste
+  try { await db.run('ALTER TABLE demo_edicoes ADD COLUMN capa TEXT'); } catch {}
   // review_replies virou 'respostas' (que serve também para comentários); só sai se estiver vazia
   try {
     const r = await db.get('SELECT COUNT(*) AS n FROM review_replies');

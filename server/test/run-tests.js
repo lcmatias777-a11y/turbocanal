@@ -320,8 +320,13 @@ const prepAI = await req('/api/tools/prep_ai', { method: 'POST', token: t1, body
 check('Preparar com IA de verdade (15 créditos)', prepAI.status === 200 && prepAI.data.result.metodo === 'ia' && prepAI.data.result.titulos.length === 5 && prepAI.data.credits.charged === 15);
 const repAI = await req('/api/tools/reply_ai', { method: 'POST', token: t1, body: { comment: 'top!' } });
 check('Resposta a comentário com IA (lê JSON mesmo vindo em bloco de código)', repAI.status === 200 && repAI.data.result.respostas.length === 3);
-const idBad = await req('/api/tools/ideas_ai', { method: 'POST', token: t1, body: {} });
-check('Ideias sem tema e sem canal: 400 sem cobrar', idBad.status === 400);
+// Com canal ligado, o SERVIDOR busca os títulos: não depende mais de o
+// navegador mandar a lista (e por isso funciona também no canal de teste).
+const idCanal = await req('/api/tools/ideas_ai', { method: 'POST', token: t1, body: {} });
+check('Ideias sem digitar nada: usa os vídeos do canal ligado', idCanal.status === 200 && idCanal.data.result.ideias.length === 10);
+const semCanal = await req('/api/auth/register', { method: 'POST', body: { email: 'semcanal-ideias@example.com', password: 'senha12345', name: 'Sem Canal' } });
+const idBad = await req('/api/tools/ideas_ai', { method: 'POST', token: semCanal.data.token, body: {} });
+check('Ideias sem tema e SEM canal nenhum: 400 sem cobrar', idBad.status === 400, String(idBad.status));
 const idOk = await req('/api/tools/ideas_ai', { method: 'POST', token: t1, body: { titles: ['Como vencer no bedwars', 'Bedwars sem gastar nada'] } });
 check('Ideias com IA: 10 ideias (10 créditos)', idOk.status === 200 && idOk.data.result.ideias.length === 10 && idOk.data.credits.charged === 10);
 process.env.GEMINI_RETRY_MS = '10';

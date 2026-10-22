@@ -15,7 +15,30 @@ import { HttpError, uid, now, audit } from './util.js';
 
 export const TOTAL_VIDEOS = 1000;
 export const CANAL_ID = 'UC-turbocanal-teste-0001';
-export const CANAL_TITULO = 'Canal de Teste (simulado)';
+// Nome inventado, de canal normal. A avisagem de que é simulado fica na faixa
+// laranja do topo e no selo ao lado do nome, não no nome em si: nome feio
+// atrapalha justamente o que o canal de teste serve para fazer, que é a
+// pessoa ver como as telas ficam de verdade.
+export const CANAL_TITULO = 'Pixel Arena';
+export const CANAL_DESCRICAO = 'Gameplay, desafios e guias rápidos. Vídeo novo toda semana.';
+
+/** Id de vídeo do canal de teste. Serve para o site reconhecer, em qualquer
+ *  lugar, que aquele id NÃO existe no YouTube e não deve ser perguntado lá
+ *  fora: era isso que fazia as ferramentas responderem "sua sessão com o
+ *  Google expirou" em cima de um vídeo que nunca existiu. */
+export const ID_DE_TESTE = /^tst\d{5}/;
+export const ehVideoDeTeste = (id) => ID_DE_TESTE.test(String(id || '').trim());
+
+/** A chamada fala de alguma coisa do canal de teste? */
+export function mencionaCanalDeTeste(params = {}) {
+  for (const v of Object.values(params)) {
+    const t = String(v ?? '');
+    if (!t) continue;
+    if (t.includes(CANAL_ID)) return true;
+    if (t.split(',').some((x) => ehVideoDeTeste(x))) return true;
+  }
+  return false;
+}
 export const SEMENTE = 20261022;
 
 /** Sorteio com semente (mulberry32): mesma semente, mesma sequência, sempre.
@@ -218,14 +241,31 @@ function aplicar(v, e) {
     descricao: e.descricao ?? v.descricao,
     tags: e.tags ? JSON.parse(e.tags) : v.tags,
     privacidade: e.privacidade ?? v.privacidade,
+    capa: e.capa || null,
     editado: true
   };
+}
+
+/** Vídeos postados pela pessoa dentro do canal de teste. Entram na frente da
+ *  lista, como vídeo recém-publicado: zero view, zero like, zero comentário.
+ *  Números de estreia inventados seriam a parte desonesta disto. */
+export async function videosPostados(db, escopo) {
+  const linhas = await db.all('SELECT * FROM demo_videos_novos WHERE escopo=? AND enviado=1 ORDER BY created_at DESC', [escopo]);
+  return linhas.map((n) => ({
+    id: n.id, titulo: n.titulo, descricao: n.descricao,
+    tags: JSON.parse(n.tags || '[]'), assunto: '',
+    publicadoEm: n.publica_em || n.created_at,
+    duracaoSeg: 0, views: 0, likes: 0, comentarios: 0,
+    retencao: 0, inscritosGanhos: 0, inscritosPerdidos: 0,
+    privacidade: n.privacidade, categoriaId: n.categoria, novo: true
+  }));
 }
 
 /** A lista do canal de teste já com as edições do escopo por cima. */
 export async function videosDe(db, escopo) {
   const e = await edicoes(db, escopo);
-  return videosBase().map((v) => aplicar(v, e[v.id]));
+  const postados = (await videosPostados(db, escopo)).map((v) => aplicar(v, e[v.id]));
+  return [...postados, ...videosBase().map((v) => aplicar(v, e[v.id]))];
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +284,7 @@ function comoVideo(v) {
       title: v.titulo, description: v.descricao, tags: v.tags,
       publishedAt: v.publicadoEm, categoryId: v.categoriaId,
       channelId: CANAL_ID, channelTitle: CANAL_TITULO,
-      thumbnails: { medium: { url: `https://i.ytimg.com/vi/${v.id}/mqdefault.jpg` } }
+      thumbnails: (() => { const u = v.capa || capaUrl(v.id); return { default: { url: u }, medium: { url: u }, high: { url: u }, maxres: { url: u } }; })()
     },
     statistics: { viewCount: String(v.views), likeCount: String(v.likes), commentCount: String(v.comentarios) },
     status: { privacyStatus: v.privacidade },
@@ -276,7 +316,7 @@ function viewsNaJanela(v, iniMs, fimMs) {
 
 /** A API do YouTube, fingida. Um ponto só: tudo que o site já fazia continua
  *  igual, e nenhuma chamada sai para a internet. */
-export async function apiDeTeste(db, escopo, caminho, { method = 'GET', params = {}, body } = {}) {
+export async function apiDeTeste(db, escopo, caminho, { method = 'GET', params = {}, body, raw } = {}) {
   const p = String(caminho);
   const vs = await videosDe(db, escopo);
   const porId = Object.fromEntries(vs.map((v) => [v.id, v]));
@@ -287,7 +327,11 @@ export async function apiDeTeste(db, escopo, caminho, { method = 'GET', params =
     const inscritos = c.inscritos;
     return { items: [{
       id: CANAL_ID,
-      snippet: { title: CANAL_TITULO, description: 'Canal simulado para testar as ferramentas do TurboCanal. Não existe no YouTube.', publishedAt: c.publicadoEm },
+      snippet: {
+        title: CANAL_TITULO, description: CANAL_DESCRICAO, publishedAt: c.publicadoEm,
+        thumbnails: { default: { url: '/api/canal-teste/avatar.svg' }, medium: { url: '/api/canal-teste/avatar.svg' }, high: { url: '/api/canal-teste/avatar.svg' } }
+      },
+      brandingSettings: { image: { bannerExternalUrl: '/api/canal-teste/banner.svg' } },
       statistics: { subscriberCount: String(inscritos), viewCount: String(c.totalViews), videoCount: String(c.totalVideos) },
       contentDetails: { relatedPlaylists: { uploads: 'UU-turbocanal-teste' } }
     }] };
@@ -460,14 +504,122 @@ export async function apiDeTeste(db, escopo, caminho, { method = 'GET', params =
     return {};
   }
 
-  // ---- o que não dá para simular de verdade: diz, não finge ----
+  // ---- enviar capa: guarda e passa a mostrar, como no YouTube ----
   if (p.includes('thumbnails/set')) {
-    throw new HttpError(422, 'No canal de teste a capa não é enviada: não existe vídeo de verdade para receber a imagem. Ligue seu canal para usar esta parte.');
+    const vid = params.videoId;
+    const v = porId[vid];
+    if (!v) throw new HttpError(404, 'Esse vídeo não existe no canal de teste.');
+    if (!raw?.buffer) throw new HttpError(400, 'Nenhuma imagem recebida.');
+    const dataUrl = `data:${raw.mime || 'image/jpeg'};base64,${Buffer.from(raw.buffer).toString('base64')}`;
+    await db.run(
+      `INSERT INTO demo_edicoes(escopo,video_id,titulo,descricao,tags,privacidade,capa,updated_at) VALUES(?,?,?,?,?,?,?,?)
+       ON CONFLICT(escopo,video_id) DO UPDATE SET capa=EXCLUDED.capa, updated_at=EXCLUDED.updated_at`,
+      [escopo, vid, v.titulo, v.descricao, JSON.stringify(v.tags), v.privacidade, dataUrl, now()]
+    );
+    return { items: [{ default: { url: dataUrl } }] };
   }
+  // ---- postar vídeo: inicia o envio dentro do próprio site ----
+  if (p.includes('videos') && /uploadType=resumable/.test(p)) {
+    const id = 'tnv' + uid().slice(0, 8);
+    const sn = body?.snippet || {}, st = body?.status || {};
+    await db.run(
+      `INSERT INTO demo_videos_novos(id,escopo,titulo,descricao,tags,privacidade,categoria,publica_em,bytes,enviado,created_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+      [id, escopo, String(sn.title || 'Sem título').slice(0, 100), String(sn.description || '').slice(0, 5000),
+       JSON.stringify(sn.tags || []), st.privacyStatus || 'private', String(sn.categoryId || '20'),
+       st.publishAt || null, 0, 0, now()]
+    );
+    return { __uploadUrl: `/api/canal-teste/enviar/${id}`, id };
+  }
+
   if (p.includes('liveBroadcasts') || p.includes('liveStreams')) {
     throw new HttpError(422, 'Transmissão ao vivo não funciona no canal de teste: ela depende de um canal real no YouTube.');
   }
   throw new HttpError(501, 'Essa parte ainda não existe no canal de teste.');
+}
+
+// ---------------------------------------------------------------------------
+// Capas desenhadas aqui mesmo
+// ---------------------------------------------------------------------------
+// Vídeo que não existe não tem capa no YouTube, e capa quebrada deixa a tela
+// com aquele quadrado cinza. Então o site desenha a capa: uma imagem por
+// vídeo, sempre a mesma, feita a partir do id e do título.
+
+export const capaUrl = (id) => `/api/canal-teste/capa/${id}.svg`;
+
+const PALETAS = [
+  ['#1b2a4a', '#3d6fb5'], ['#3a1b4a', '#a14fb5'], ['#4a2a1b', '#c77b3a'],
+  ['#1b4a35', '#2fae7d'], ['#4a1b2a', '#d1495b'], ['#2a2a4a', '#6b6bd1'],
+  ['#143d3d', '#2a9d8f'], ['#4a3f1b', '#e9c46a']
+];
+
+function escX(t) {
+  return String(t || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
+}
+
+/** Quebra o título em até 3 linhas que caibam na capa. */
+function linhas(txt, porLinha = 20, max = 3) {
+  const palavras = String(txt || '').split(/\s+/).filter(Boolean);
+  const out = [];
+  let atual = '';
+  for (const p of palavras) {
+    if ((atual + ' ' + p).trim().length > porLinha && atual) { out.push(atual); atual = p; }
+    else atual = (atual + ' ' + p).trim();
+    if (out.length === max) break;
+  }
+  if (atual && out.length < max) out.push(atual);
+  if (out.length === max && palavras.join(' ').length > out.join(' ').length) {
+    out[max - 1] = out[max - 1].slice(0, porLinha - 1) + '…';
+  }
+  return out;
+}
+
+const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+export function capaSvg(v) {
+  const r = sorteio(parseInt(String(v.id).replace(/\D/g, ''), 10) + 11);
+  const [a, b] = PALETAS[Math.floor(r() * PALETAS.length)];
+  const ls = linhas(v.titulo);
+  const y0 = 360 - (ls.length - 1) * 42;
+  const bolhas = Array.from({ length: 7 }, () => {
+    const cx = Math.round(r() * 1280), cy = Math.round(r() * 720), rr = Math.round(30 + r() * 150);
+    return `<circle cx="${cx}" cy="${cy}" r="${rr}" fill="#fff" opacity="0.045"/>`;
+  }).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720" role="img" aria-label="${escX(v.titulo)}">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs>
+  <rect width="1280" height="720" fill="url(#g)"/>
+  ${bolhas}
+  <g font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-weight="800" fill="#fff">
+    ${ls.map((l, i) => `<text x="72" y="${y0 + i * 84}" font-size="74">${escX(l)}</text>`).join('\n    ')}
+  </g>
+  <text x="72" y="130" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="30" fill="#ffffff" opacity="0.75">${escX(CANAL_TITULO)}</text>
+  <g transform="translate(1104,628)">
+    <rect width="104" height="46" rx="8" fill="#000" opacity="0.72"/>
+    <text x="52" y="31" text-anchor="middle" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#fff">${mmss(v.duracaoSeg)}</text>
+  </g>
+</svg>`;
+}
+
+export function avatarSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 176 176" width="176" height="176" role="img" aria-label="${escX(CANAL_TITULO)}">
+  <defs><linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3d6fb5"/><stop offset="1" stop-color="#a14fb5"/></linearGradient></defs>
+  <rect width="176" height="176" rx="88" fill="url(#a)"/>
+  <g fill="#fff"><rect x="52" y="58" width="22" height="22"/><rect x="77" y="58" width="22" height="22"/>
+  <rect x="102" y="58" width="22" height="22"/><rect x="52" y="83" width="22" height="22"/>
+  <rect x="102" y="83" width="22" height="22"/><rect x="52" y="108" width="72" height="14"/></g>
+</svg>`;
+}
+
+export function bannerSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 384" width="2048" height="384" role="img" aria-label="${escX(CANAL_TITULO)}">
+  <defs><linearGradient id="b" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1b2a4a"/><stop offset="0.5" stop-color="#3d6fb5"/><stop offset="1" stop-color="#a14fb5"/></linearGradient></defs>
+  <rect width="2048" height="384" fill="url(#b)"/>
+  <circle cx="300" cy="90" r="160" fill="#fff" opacity="0.05"/>
+  <circle cx="1700" cy="320" r="220" fill="#fff" opacity="0.05"/>
+  <text x="1024" y="200" text-anchor="middle" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="92" font-weight="800" fill="#fff">${escX(CANAL_TITULO)}</text>
+  <text x="1024" y="256" text-anchor="middle" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="34" fill="#fff" opacity="0.8">${escX(CANAL_DESCRICAO)}</text>
+</svg>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -476,6 +628,43 @@ export async function apiDeTeste(db, escopo, caminho, { method = 'GET', params =
 
 export function canalTesteRoutes(app, db, auth) {
   const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
+
+  const svg = (res, corpo) => {
+    res.set('Content-Type', 'image/svg+xml; charset=utf-8');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(corpo);
+  };
+  // Desenhos, sem dado de ninguém dentro: não exigem login, senão a imagem
+  // não carrega dentro de <img> em algumas telas.
+  app.get('/api/canal-teste/capa/:id.svg', auth.optional, wrap(async (req, res) => {
+    const id = String(req.params.id).replace(/\.svg$/, '');
+    const v = videosBase().find((x) => x.id === id);
+    if (v) return svg(res, capaSvg(v));
+    // Vídeo postado pela pessoa: o título é dela, então só ela (ou a equipe,
+    // no escopo compartilhado) vê a capa.
+    if (!req.user) return res.status(404).end();
+    const n = await db.get('SELECT * FROM demo_videos_novos WHERE id=? AND escopo=?', [id, escopoDe(req.user)]);
+    if (!n) return res.status(404).end();
+    svg(res, capaSvg({ id: n.id, titulo: n.titulo, duracaoSeg: 0 }));
+  }));
+  // Recebe os bytes do vídeo postado no canal de teste. O arquivo NÃO é
+  // guardado: o site só anota que o envio terminou e o tamanho, porque
+  // guardar vídeo de teste seria encher o disco por nada.
+  app.put('/api/canal-teste/enviar/:id', auth.required, wrap(async (req, res) => {
+    const escopo = escopoDe(req.user);
+    const v = await db.get('SELECT * FROM demo_videos_novos WHERE id=? AND escopo=?', [req.params.id, escopo]);
+    if (!v) throw new HttpError(404, 'Envio não encontrado no canal de teste.');
+    let bytes = 0;
+    await new Promise((ok, erro) => {
+      req.on('data', (c) => { bytes += c.length; });
+      req.on('end', ok); req.on('error', erro);
+    });
+    await db.run('UPDATE demo_videos_novos SET enviado=1, bytes=? WHERE id=?', [bytes, v.id]);
+    res.json({ id: v.id, kind: 'youtube#video', snippet: { title: v.titulo }, status: { privacyStatus: v.privacidade } });
+  }));
+
+  app.get('/api/canal-teste/avatar.svg', (req, res) => svg(res, avatarSvg()));
+  app.get('/api/canal-teste/banner.svg', (req, res) => svg(res, bannerSvg()));
 
   app.get('/api/canal-teste', auth.required, wrap(async (req, res) => {
     const escopo = escopoDe(req.user);
