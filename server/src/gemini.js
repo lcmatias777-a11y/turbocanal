@@ -33,6 +33,7 @@ export function classifyGeminiError(status, msg) {
   if (status === 400 && /Unknown name|Invalid JSON payload|Cannot find field/i.test(m)) return 'payload';
   if (/video|file_uri|fileData|youtube/i.test(m) && status === 400) return 'video';
   if (/location is not supported|User location/i.test(m)) return 'region';
+  if (status === 403 || /caller does not have permission|PERMISSION_DENIED|API has not been used|is disabled/i.test(m)) return 'permissao';
   if (/SAFETY|blocked/i.test(m)) return 'safety';
   return 'other';
 }
@@ -47,6 +48,9 @@ function errorFor(kind, cls, msg) {
       return new HttpError(429, 'A IA gratuita do Gemini chegou ao limite por agora (por minuto ou do dia). Tente de novo mais tarde. Os créditos foram devolvidos.');
     case 'busy':
       return new HttpError(503, 'A IA do Google está sobrecarregada neste momento (isso costuma passar em poucos minutos). Tente de novo daqui a pouco. Os créditos foram devolvidos.');
+    case 'permissao':
+      return new HttpError(409,
+        'O Google recusou a chave da IA por permissão. Normalmente é uma destas três: a API "Generative Language" não está ativada no projeto do Google Cloud dessa chave; a chave tem restrição de site/IP que bloqueia o servidor; ou ela foi criada em outro projeto. Confira em aistudio.google.com/apikey e em console.cloud.google.com (APIs e serviços). Os créditos foram devolvidos.');
     case 'region':
       return new HttpError(409, 'O Gemini não está disponível para a região do servidor. Os créditos foram devolvidos.');
     case 'safety':

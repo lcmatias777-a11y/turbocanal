@@ -433,6 +433,10 @@ views.historico = async () => {
 /* ------------------------------ Ferramentas ------------------------------ */
 function creditsNote(credits) {
   if (!credits) return '';
+  if (credits.demonstracao) {
+    return alertBox('warn', '🧪 <b>Resposta de demonstração.</b> Ela foi montada a partir dos dados deste vídeo de teste e <b>não passou pela IA</b>. Nenhum crédito foi cobrado. Com um canal de verdade ligado, esta mesma tela traz a resposta real da IA.');
+  }
+  if (credits.demo) return alertBox('warn', '🧪 Canal de teste: nenhum crédito foi cobrado.');
   if (credits.unlimited) return alertBox('info', 'Conta do administrador principal: nenhum crédito foi consumido (uso ilimitado).');
   if (credits.reused) return alertBox('info', 'Requisição repetida detectada: nenhum crédito foi cobrado de novo.');
   return alertBox('ok', `${credits.charged === 1 ? 'Foi usado <b>1</b> crédito' : `Foram usados <b>${credits.charged}</b> créditos`}. Saldo atual: <b>${fmt(credits.balance)}</b>.`);

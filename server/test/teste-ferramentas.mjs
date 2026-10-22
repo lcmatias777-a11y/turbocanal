@@ -34,14 +34,23 @@ process.env.YT_UPLOAD_BASE = fora + '/upload/youtube/v3/';
 process.env.YT_ANALYTICS_BASE = fora + '/youtubeanalytics/v2/';
 process.env.YT_IMG_BASE = fora + '/vi/';
 
-const { startFakeGemini } = await import('./fake-gemini.js');
-const gem = await startFakeGemini();
-process.env.GEMINI_API_BASE = gem.base;
+// Gemini: um servidor que CONTA as chamadas. No canal de teste esse contador
+// tem de ficar em zero, porque lá a resposta é de demonstração e não existe
+// vídeo de verdade para a IA assistir. Chamar a IA ali seria dinheiro gasto
+// analisando um vídeo inventado.
+let CHAMOU_IA = 0;
+const iaReal = http.createServer((req, res) => {
+  CHAMOU_IA++;
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{}' }] } }] }));
+});
+await new Promise((r) => iaReal.listen(0, r));
+process.env.GEMINI_API_BASE = `http://127.0.0.1:${iaReal.address().port}`;
 
 const { buildApp } = await import('../src/app.js');
 const { app, db } = await buildApp({ databaseUrl: undefined, dataDir: ':memory:', scheduler: false });
 const { setSetting } = await import('../src/db.js');
-await setSetting(db, 'gemini_api_key', gem.key);
+await setSetting(db, 'gemini_api_key', 'chave-de-teste');
 await setSetting(db, 'yt_api_key', 'chave-do-site');
 const server = app.listen(0); await new Promise((r) => server.on('listening', r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -103,6 +112,9 @@ const CASOS = [
   ['Postar vídeo (enviar)',  'ENVIO', '']
 ];
 
+const saldo = async () => Number((await db.get('SELECT credits FROM users WHERE id=?', [uid2])).credits);
+const SALDO_INICIAL = await saldo();
+
 console.log('\n== Toda ferramenta responde no canal de teste ==');
 let uploadUrl = null;
 const PRECISAM_DE_CANAL_REAL = new Set(['Criar live']);
@@ -125,6 +137,33 @@ for (const [nome, metodo, rota, body] of CASOS) {
   }
   check(`${nome}: não pergunta ao YouTube por vídeo que não existe`, vazou.length === 0, vazou.slice(0, 2).join(', '));
 }
+
+console.log('\n== No canal de teste nada cobra crédito e a IA não é chamada ==');
+check('nenhum crédito foi cobrado por ferramenta nenhuma', (await saldo()) === SALDO_INICIAL, `${SALDO_INICIAL} -> ${await saldo()}`);
+check('a IA de verdade NÃO foi chamada nenhuma vez', CHAMOU_IA === 0, `${CHAMOU_IA} chamada(s)`);
+
+for (const [nome, rota, corpo] of [
+  ['IA do vídeo', '/api/tools/video_insights_ai', { video: VID }],
+  ['IA coach', '/api/tools/coach_ai', { video: VID }],
+  ['Auditoria do canal', '/api/tools/audit_ai', {}],
+  ['Ideias de vídeos', '/api/tools/ideas_ai', {}],
+  ['Laboratório de título', '/api/tools/title_lab', { title: 'Joguei Minecraft por 24 horas' }],
+  ['Transformar vídeo', '/api/tools/transform_ai', { video: VID }]
+]) {
+  const r = await req(rota, { method: 'POST', body: corpo });
+  check(`${nome}: a resposta vem marcada como demonstração`,
+    r.d.demonstracao === true && r.d.result?.metodo === 'demonstracao', JSON.stringify(r.d).slice(0, 110));
+  check(`${nome}: e o aviso diz, sem rodeio, que não passou pela IA`,
+    /NÃO passou pela IA/i.test(r.d.result?.aviso || ''), String(r.d.result?.aviso).slice(0, 80));
+  check(`${nome}: e a cobrança sai zerada`, r.d.credits?.charged === 0, JSON.stringify(r.d.credits));
+}
+check('mesmo depois de tudo isso, a IA de verdade continua sem ser chamada', CHAMOU_IA === 0, `${CHAMOU_IA} chamada(s)`);
+
+console.log('\n== Com a IA DESLIGADA no site, a demonstração continua funcionando ==');
+await setSetting(db, 'gemini_api_key', '');
+const semIa = await req('/api/tools/video_insights_ai', { method: 'POST', body: { video: VID } });
+check('a IA do vídeo responde mesmo sem chave de IA configurada', semIa.s === 200 && semIa.d.demonstracao === true, `${semIa.s} ${JSON.stringify(semIa.d).slice(0, 90)}`);
+await setSetting(db, 'gemini_api_key', 'chave-de-teste');
 
 console.log('\n== O vídeo postado entra no canal de teste ==');
 const lista = await req('/api/channel/videos?max=5');
@@ -152,5 +191,5 @@ const alvo = (depois.d.videos || []).find((v) => v.id === vs[2].id);
 check('depois de enviar, a capa passa a ser a enviada', /^data:image\//.test(alvo?.thumb || ''), String(alvo?.thumb).slice(0, 40));
 
 console.log(`\nRESULTADO: ${pass} passaram, ${fail} falharam.`);
-server.close(); laFora.close();
+server.close(); laFora.close(); iaReal.close();
 process.exit(fail ? 1 : 0);

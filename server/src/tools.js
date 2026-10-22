@@ -8,11 +8,19 @@ import { myChannel } from './channel.js';
 import { HttpError, uid, now } from './util.js';
 
 /** Recusa ANTES de cobrar quando a IA não está ligada (nada de resultado falso). */
+// No canal de teste a resposta é de demonstração e não passa pela IA, então
+// estes porteiros não barram lá: barrar faria a demonstração depender da
+// chave do Gemini estar configurada, que é exatamente o que ela evita.
+const noTeste = async (db, req) => {
+  if (!req.user) return false;
+  const { ligado } = await import('./canalteste.js');
+  return ligado(db, req.user);
+};
 export const needAI = (db) => async (req, res, next) => {
-  try { next((await ai.aiConfigured(db)) ? undefined : new HttpError(409, gemini.AI_MISSING_MSG)); } catch (e) { next(e); }
+  try { next((await noTeste(db, req)) || (await ai.aiConfigured(db)) ? undefined : new HttpError(409, gemini.AI_MISSING_MSG)); } catch (e) { next(e); }
 };
 export const needGemini = (db) => async (req, res, next) => {
-  try { next((await gemini.geminiKey(db)) ? undefined : new HttpError(409, gemini.AI_MISSING_MSG)); } catch (e) { next(e); }
+  try { next((await noTeste(db, req)) || (await gemini.geminiKey(db)) ? undefined : new HttpError(409, gemini.AI_MISSING_MSG)); } catch (e) { next(e); }
 };
 
 export function toolRoutes(app, db, auth) {
@@ -22,6 +30,22 @@ export function toolRoutes(app, db, auth) {
     try {
       const user = req.user;
       const idem = req.get('X-Idempotency-Key') || (typeof req.body?.idem === 'string' ? req.body.idem.slice(0, 80) : null);
+
+      // Canal de teste: as ferramentas de IA respondem com uma demonstração
+      // montada por regras, aqui mesmo. Não chama o Gemini (seria dinheiro de
+      // verdade gasto analisando um vídeo inventado, e deixaria a
+      // demonstração refém da chave do Google estar válida), não cobra
+      // crédito, e a resposta sai marcada como demonstração.
+      const { ligado: emTeste } = await import('./canalteste.js');
+      const demo = await import('./ia-demo.js');
+      if (demo.FERRAMENTAS.has(tool) && (await emTeste(db, user))) {
+        const result = await demo.RESPOSTAS[tool](db, req);
+        return res.json({
+          ok: true, tool, result, demonstracao: true,
+          credits: { cost: 0, charged: 0, reused: false, unlimited: false, balance: null, demonstracao: true }
+        });
+      }
+
       const charge = await spend(db, user, tool, { idem });
       let result;
       try {

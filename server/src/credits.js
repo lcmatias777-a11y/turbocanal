@@ -54,20 +54,12 @@ export async function toolCost(db, tool) {
  * - Idempotência: o mesmo X-Idempotency-Key não cobra duas vezes.
  * - Saldo nunca fica negativo.
  */
-// Ferramentas que chamam a IA de verdade: essas custam dinheiro para o site a
-// cada uso, então continuam cobrando crédito mesmo no canal de teste. As
-// outras só fazem conta aqui dentro, e cobrar por elas num canal inventado
-// seria vender um passeio que não gasta nada.
-export const USA_IA = new Set([
-  'title_ai', 'description_ai', 'video_insights_ai', 'prep_ai', 'transform_ai',
-  'reply_ai', 'ideas_ai', 'coach_ai', 'audit_ai', 'title_lab'
-]);
-
 export async function spend(db, user, tool, { idem = null, note = null } = {}) {
   const costRow = await toolCost(db, tool);
 
-  // Canal de teste: o que é só conta sai de graça, e o registro diz por quê.
-  if (!USA_IA.has(tool)) {
+  // Canal de teste não cobra NADA. Nem as ferramentas de IA: lá a resposta é
+  // de demonstração, montada por regras, e não chega a chamar o Gemini.
+  {
     const { ligado } = await import('./canalteste.js');
     if (await ligado(db, user)) {
       try {

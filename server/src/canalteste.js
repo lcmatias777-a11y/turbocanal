@@ -676,7 +676,7 @@ export function canalTesteRoutes(app, db, auth) {
       canal: { titulo: c.titulo, inscritos: c.inscritos, videos: c.totalVideos, views: c.totalViews },
       editados: mexidos,
       aviso: 'Este canal não existe no YouTube. Os vídeos, as visualizações e a retenção são inventados para você experimentar as ferramentas. Nada daqui vira resultado de criador nem é publicado em lugar nenhum.',
-      cobranca: 'No canal de teste as ferramentas que só fazem conta saem de graça. As que chamam a IA continuam cobrando, porque cada chamada custa dinheiro de verdade para o site.',
+      cobranca: 'No canal de teste nada cobra crédito. As ferramentas de IA também não: ali a resposta é de demonstração, montada a partir dos dados do vídeo de teste, e sai marcada como tal na tela. Ela não passa pela IA, porque não existe vídeo de verdade para a IA assistir.',
       limites: ['enviar capa', 'transmissão ao vivo', 'postar vídeo'],
       compartilhadoTexto: escopo === 'admin'
         ? 'Entre administradores o canal de teste é o MESMO: se você trocar um título, os outros administradores veem a troca.'

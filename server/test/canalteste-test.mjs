@@ -83,8 +83,9 @@ check('o nome do canal é normal, mas a API avisa que ele não existe no YouTube
   desligado.data.canal.titulo);
 check('a resposta avisa, com todas as letras, que o canal não existe',
   /não existe no YouTube/i.test(desligado.data.aviso || ''), desligado.data.aviso);
-check('e avisa o que é de graça e o que continua cobrando',
-  /de graça/i.test(desligado.data.cobranca || '') && /IA/i.test(desligado.data.cobranca || ''));
+check('e avisa que NADA cobra crédito e que a IA ali é demonstração',
+  /nada cobra/i.test(desligado.data.cobranca || '') && /demonstração/i.test(desligado.data.cobranca || ''),
+  desligado.data.cobranca);
 
 const semCanal = await req('/api/channel/videos?max=3', { token: ana.token });
 check('sem canal ligado e sem modo teste, a ferramenta recusa (não inventa canal)', semCanal.status === 409, String(semCanal.status));
