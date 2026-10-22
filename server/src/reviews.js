@@ -5,7 +5,7 @@
 // Nos dois dá para responder, dar gostei/não gostei e denunciar. A resposta de
 // quem toca o site aparece primeiro e em destaque (dono = desenvolvedor, admin = equipe).
 // Nada aqui é inventado: média, total e distribuição saem de uma soma no banco.
-import { HttpError, uid, now } from './util.js';
+import { HttpError, uid, now, audit } from './util.js';
 
 const MAX_TEXTO = 1000;
 const TIPOS = { avaliacao: 'reviews', comentario: 'site_comments', resposta: 'respostas' };
@@ -175,6 +175,7 @@ export function reviewRoutes(app, db, auth) {
     await db.run('DELETE FROM review_votes WHERE target_id=?', [r.id]);
     await db.run('DELETE FROM respostas WHERE alvo_tipo=? AND alvo_id=?', ['avaliacao', r.id]);
     await db.run('DELETE FROM reviews WHERE id=? AND user_id=?', [r.id, req.user.id]);
+    await audit(db, req.user, 'avaliacao.apagada', r.id, `pelo próprio autor · ${Number(r.stars)}★ · ${String(r.comment || '').slice(0, 200)}`);
     res.json({ ok: true, resumo: await resumo(db) });
   }));
 
@@ -195,6 +196,7 @@ export function reviewRoutes(app, db, auth) {
     await db.run('DELETE FROM review_votes WHERE target_id=?', [c.id]);
     await db.run('DELETE FROM respostas WHERE alvo_tipo=? AND alvo_id=?', ['comentario', c.id]);
     await db.run('DELETE FROM site_comments WHERE id=?', [c.id]);
+    await audit(db, req.user, 'comentario.apagado', c.id, `${c.user_id === req.user.id ? 'pelo próprio autor' : `pela moderação (autor ${c.user_id})`} · ${String(c.body || '').slice(0, 200)}`);
     res.json({ ok: true, resumo: await resumo(db) });
   }));
 
@@ -218,6 +220,7 @@ export function reviewRoutes(app, db, auth) {
     if (r.user_id !== req.user.id && !['owner', 'admin'].includes(req.user.role)) throw new HttpError(403, 'Esta resposta não é sua.');
     await db.run('DELETE FROM review_votes WHERE target_id=?', [r.id]);
     await db.run('DELETE FROM respostas WHERE id=?', [r.id]);
+    await audit(db, req.user, 'resposta.apagada', r.id, `${r.user_id === req.user.id ? 'pelo próprio autor' : `pela moderação (autor ${r.user_id})`} · ${String(r.body || '').slice(0, 200)}`);
     res.json({ ok: true });
   }));
 

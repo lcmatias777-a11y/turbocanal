@@ -622,6 +622,32 @@ const custos = (await req('/api/tools/costs')).data.costs;
 check('as duas ferramentas novas aparecem na tabela de preços',
   custos.find((c) => c.tool === 'audit_ai')?.cost === 200 && custos.find((c) => c.tool === 'title_lab')?.cost === 100);
 
+// ---------- Rastro de quem apagou o quê ----------
+console.log('\n— Rastro de exclusões —');
+const cmtA = await req('/api/comments', { method: 'POST', token: t1, body: { texto: 'Comentário que a própria autora vai apagar.' } });
+check('comentário criado', cmtA.status === 200 && cmtA.data.comentario.id);
+await req(`/api/comments/${cmtA.data.comentario.id}`, { method: 'DELETE', token: t1 });
+const cmtB = await req('/api/comments', { method: 'POST', token: t1, body: { texto: 'Comentário que a moderação vai apagar.' } });
+const delMod = await req(`/api/comments/${cmtB.data.comentario.id}`, { method: 'DELETE', token: tOwn });
+check('o dono do site consegue apagar o comentário de outra pessoa', delMod.status === 200);
+const log = (await req('/api/admin/audit', { token: tOwn })).data.items;
+const porAutor = log.find((a) => a.action === 'comentario.apagado' && a.target === cmtA.data.comentario.id);
+const porModeracao = log.find((a) => a.action === 'comentario.apagado' && a.target === cmtB.data.comentario.id);
+check('apagar o próprio comentário deixa rastro, com quem apagou e o texto',
+  !!porAutor && porAutor.actor_email === 'maria@example.com' && /pelo próprio autor/.test(porAutor.detail) && /a própria autora vai apagar/.test(porAutor.detail), JSON.stringify(porAutor));
+check('exclusão pela moderação fica registrada como tal (e diz de quem era)',
+  !!porModeracao && porModeracao.actor_email === 'lcmatias777@gmail.com' && /pela moderação/.test(porModeracao.detail), JSON.stringify(porModeracao));
+const cmtC = await req('/api/comments', { method: 'POST', token: t1, body: { texto: 'Comentário que vai receber resposta.' } });
+const respA = await req('/api/replies', { method: 'POST', token: tOwn, body: { alvo_tipo: 'comentario', alvo_id: cmtC.data.comentario.id, texto: 'Resposta do dono, que depois apaga.' } });
+check('o dono responde a um comentário', respA.status === 200, JSON.stringify(respA.data).slice(0, 140));
+check('apagar resposta também deixa rastro',
+  (await req(`/api/replies/${respA.data.resposta.id}`, { method: 'DELETE', token: tOwn })).status === 200
+  && (await req('/api/admin/audit', { token: tOwn })).data.items.some((a) => a.action === 'resposta.apagada' && a.target === respA.data.resposta.id));
+const minhaAv = await req('/api/reviews', { method: 'POST', token: t1, body: { estrelas: 5, comentario: 'Avaliação que a autora vai apagar.' } });
+await req('/api/reviews/mine', { method: 'DELETE', token: t1 });
+check('apagar a própria avaliação deixa rastro com a nota e o texto',
+  (await req('/api/admin/audit', { token: tOwn })).data.items.some((a) => a.action === 'avaliacao.apagada' && a.target === minhaAv.data.avaliacao.id && /5★/.test(a.detail)));
+
 // ---------- Melhor horário para publicar ----------
 console.log('\n— Melhor horário para publicar —');
 const { analisarHorarios, mediana, partesLocais } = await import('../src/schedule.js');
