@@ -806,6 +806,23 @@ check('Short NAO entra na comparacao de retencao (ele roda em loop)',
 check('mas o Short aparece separado, com a explicacao do loop',
   ax.conclusoes.some((c) => /Shorts/.test(c) && /loop/.test(c)), JSON.stringify(ax.conclusoes).slice(0, 220));
 check('faixa com menos de 3 videos nao vira conclusao', ax.faixas.filter((f) => f.suficiente).every((f) => f.videos >= 3));
+check('faixa tambem precisa de VOLUME de views, nao so de contagem',
+  ax.faixas.filter((f) => f.suficiente).every((f) => f.viewsTotais >= 1000));
+check('o site explica que contagem de video nao e medida de amostra',
+  ax.avisos.some((a) => /três vídeos de 100 views/.test(a)));
+check('e avisa que nada ali prova causa', ax.avisos.some((a) => /prova causa/i.test(a) || /Nada aqui prova/i.test(a)), JSON.stringify(ax.avisos).slice(0, 300));
+// a vantagem de formato que depende de UM video so nao pode ser afirmada
+const umSoPuxa = analisarVideos([
+  { id: 'a1', titulo: 'A1', views: 2000, duracaoSeg: 400, duracaoMediaSeg: 360, percentualMedio: 90, inscritosGanhos: 1 },
+  { id: 'a2', titulo: 'A2', views: 2000, duracaoSeg: 400, duracaoMediaSeg: 80, percentualMedio: 20, inscritosGanhos: 1 },
+  { id: 'a3', titulo: 'A3', views: 2000, duracaoSeg: 400, duracaoMediaSeg: 80, percentualMedio: 20, inscritosGanhos: 1 },
+  { id: 'b1', titulo: 'B1', views: 2000, duracaoSeg: 1500, duracaoMediaSeg: 150, percentualMedio: 10, inscritosGanhos: 1 },
+  { id: 'b2', titulo: 'B2', views: 2000, duracaoSeg: 1500, duracaoMediaSeg: 150, percentualMedio: 10, inscritosGanhos: 1 },
+  { id: 'b3', titulo: 'B3', views: 2000, duracaoSeg: 1500, duracaoMediaSeg: 150, percentualMedio: 10, inscritosGanhos: 1 }
+]);
+check('quando a vantagem depende de um video so, o site diz que e sinal e nao conclusao',
+  umSoPuxa.formatoRobusto === false && umSoPuxa.conclusoes.some((c) => /SOME quando tiro/.test(c)),
+  JSON.stringify(umSoPuxa.conclusoes).slice(0, 200));
 check('escreve conclusoes citando o numero que as sustenta',
   ax.conclusoes.length >= 2 && ax.conclusoes.every((c) => /\d/.test(c)), JSON.stringify(ax.conclusoes).slice(0, 200));
 check('avisa que CTR e impressoes nao existem na API, em vez de inventar',
@@ -859,7 +876,7 @@ console.log('\n— Sua próxima ação —');
     melhorFaixa: { id: 0, nome: 'até 1 min (Shorts)', videos: 4, retencaoMediana: 80 },
     piorFaixa: { id: 4, nome: 'mais de 20 min', videos: 5, retencaoMediana: 20 }
   };
-  const horBom = { combinacao: { dia: 6, faixa: 6, nome: 'sábado, 18h–21h', videos: 5, mediana: 10002, diferenca: 896 } };
+  const horBom = { combinacao: { dia: 6, faixa: 6, nome: 'sábado, 18h–21h', videos: 5, mediana: 10002, diferenca: 896, firme: true, robusta: true } };
   const acoes = escolherAcoes({ canalLigado: true, xray: xrayBom, horarios: horBom, comentariosSemResposta: 3, iaLigada: true, temAvaliacao: true });
   check('a primeira sugestao e a continuacao do video que mais converte',
     acoes[0].chave.startsWith('continuacao_') && /Curto que converte/.test(acoes[0].titulo), JSON.stringify(acoes[0]).slice(0, 150));
@@ -870,6 +887,18 @@ console.log('\n— Sua próxima ação —');
   check('a sugestao de formato avisa que Shorts ficam fora da conta',
     acoes.find((a) => a.chave.startsWith('formato_'))?.porque.includes('Shorts ficam de fora'));
   check('a sugestao de horario cita a mediana e quantos videos', acoes.some((a) => a.chave.startsWith('horario_') && /5 vídeos/.test(a.dado)));
+  const horFraco = { combinacao: { ...horBom.combinacao, videos: 3, firme: false, robusta: true } };
+  check('horario com poucos videos NAO vira recomendacao (comparacoes multiplas)',
+    !escolherAcoes({ canalLigado: true, xray: xrayBom, horarios: horFraco, comentariosSemResposta: 0, iaLigada: true, temAvaliacao: true }).some((a) => a.chave.startsWith('horario_')));
+  const horNaoRobusto = { combinacao: { ...horBom.combinacao, robusta: false } };
+  check('horario cuja vantagem some sem o video que mais puxa tambem nao vira recomendacao',
+    !escolherAcoes({ canalLigado: true, xray: xrayBom, horarios: horNaoRobusto, comentariosSemResposta: 0, iaLigada: true, temAvaliacao: true }).some((a) => a.chave.startsWith('horario_')));
+  const viralFraco = { ...xrayBom, soView: [{ id: 'v', titulo: 'Pouca view', views: 600, inscritosPorMil: 0 }] };
+  check('video com pouca view nao vira alerta de fora do nicho',
+    !escolherAcoes({ canalLigado: true, xray: viralFraco, horarios: horBom, comentariosSemResposta: 0, iaLigada: true, temAvaliacao: true }).some((a) => a.chave.startsWith('fora_nicho_')));
+  const campFraco = { ...xrayBom, campeoes: [{ id: 'x', titulo: 'So 50 views', inscritosPorMil: 40, views: 50 }] };
+  check('campeao com 50 views nao vira "faca uma continuacao"',
+    !escolherAcoes({ canalLigado: true, xray: campFraco, horarios: horBom, comentariosSemResposta: 0, iaLigada: true, temAvaliacao: true }).some((a) => a.chave.startsWith('continuacao_')));
   check('o video que traz view e nao traz inscrito vira alerta', acoes.some((a) => a.tipo === 'atencao' && a.chave.startsWith('fora_nicho_')));
   check('comentarios sem resposta viram tarefa', acoes.some((a) => a.chave === 'responder_comentarios' && /3 comentário/.test(a.titulo)));
 

@@ -30,7 +30,7 @@ export function escolherAcoes({ canalLigado, xray, horarios, comentariosSemRespo
   const soView = xray?.soView?.[0];
   const melhorF = xray?.melhorFaixa, piorF = xray?.piorFaixa;
 
-  if (camp && xray.base.analisados >= 3 && camp.inscritosPorMil > (xray.base.medianaInscritosPorMil || 0) * 1.5) {
+  if (camp && xray.base.analisados >= 3 && camp.views >= 300 && camp.inscritosPorMil > (xray.base.medianaInscritosPorMil || 0) * 1.5) {
     fora.push({
       chave: 'continuacao_' + camp.id, tipo: 'oportunidade',
       titulo: `Faça uma continuação de “${camp.titulo}”`,
@@ -52,7 +52,7 @@ export function escolherAcoes({ canalLigado, xray, horarios, comentariosSemRespo
     });
   }
 
-  if (horarios?.combinacao && horarios.combinacao.diferenca >= 25) {
+  if (horarios?.combinacao && horarios.combinacao.diferenca >= 25 && horarios.combinacao.firme && horarios.combinacao.robusta) {
     fora.push({
       chave: 'horario_' + horarios.combinacao.dia + '_' + horarios.combinacao.faixa, tipo: 'oportunidade',
       titulo: `Publique ${horarios.combinacao.nome}`,
@@ -62,11 +62,11 @@ export function escolherAcoes({ canalLigado, xray, horarios, comentariosSemRespo
     });
   }
 
-  if (soView && soView.views >= 500 && soView.inscritosPorMil <= 0) {
+  if (soView && soView.views >= 1000 && soView.inscritosPorMil <= 0) {
     fora.push({
       chave: 'fora_nicho_' + soView.id, tipo: 'atencao',
       titulo: `“${soView.titulo}” traz gente que não fica`,
-      porque: 'Muita view e inscrito nenhum costuma ser público de fora do seu nicho. Repetir esse assunto infla o número e não cresce o canal.',
+      porque: 'Zero inscrito não prova que o público é de fora do nicho, mas é o primeiro lugar onde eu olharia antes de repetir esse assunto.',
       dado: `${n(soView.views)} views e ${soView.inscritosPorMil} inscrito por mil views.`,
       botao: { texto: 'Comparar com os outros vídeos', href: '#/ferramentas/raiox' }
     });

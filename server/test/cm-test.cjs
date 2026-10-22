@@ -33,7 +33,8 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
   });
   await p.fill('#rvctxt', 'Comentario que some depois de salvar.');
   await p.click('#rvcsave');
-  await p.waitForSelector('#rvcmsg .alert', { timeout: 20000 });
+  // espera a mensagem VERMELHA (a verde anterior ainda esta na tela)
+  await p.waitForSelector('#rvcmsg .alert.err', { timeout: 20000 });
   const ruim = await p.textContent('#rvcmsg');
   check('a simulacao da perda realmente rodou', rotaBateu);
   check('quando o comentario nao volta na lista, o site AVISA em vez de dizer publicado',

@@ -10,7 +10,8 @@ import { HttpError } from './util.js';
 export const DIAS = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
 export const FAIXAS = ['00h–03h', '03h–06h', '06h–09h', '09h–12h', '12h–15h', '15h–18h', '18h–21h', '21h–00h'];
 
-export const MIN_AMOSTRA = 3;      // abaixo disso um grupo não vira recomendação
+export const MIN_AMOSTRA = 3;      // abaixo disso um grupo nem aparece como sinal
+export const MIN_RECOMENDA = 5;    // abaixo disso é sinal, não recomendação
 export const MIN_TOTAL = 8;        // abaixo disso o canal inteiro é pouca amostra
 export const DIAS_MATURACAO = 21;  // vídeo mais novo que isso ainda está somando views
 
@@ -102,11 +103,22 @@ export function analisarHorarios(videos, opts = {}) {
   }
   const combinacao = [...celulas.values()]
     .filter((c) => c.views.length >= MIN_AMOSTRA)
-    .map((c) => ({ dia: c.dia, faixa: c.faixa, nome: `${DIAS[c.dia]}, ${FAIXAS[c.faixa]}`, videos: c.views.length, mediana: mediana(c.views), diferenca: pct(mediana(c.views), geral) }))
+    .map((c) => {
+      const semOMaior = [...c.views].sort((x, y) => y - x).slice(1);
+      return {
+        dia: c.dia, faixa: c.faixa, nome: `${DIAS[c.dia]}, ${FAIXAS[c.faixa]}`,
+        videos: c.views.length, mediana: mediana(c.views), diferenca: pct(mediana(c.views), geral),
+        // a vantagem continua de pé sem o vídeo que mais puxa?
+        robusta: semOMaior.length >= MIN_AMOSTRA - 1 && pct(mediana(semOMaior), geral) >= 25,
+        firme: c.views.length >= MIN_RECOMENDA
+      };
+    })
     .sort((a, b) => b.mediana - a.mediana || b.videos - a.videos)[0] || null;
+  const combinacoesTestadas = celulas.size;
 
   const avisos = [
     'A API do YouTube informa a hora em que o vídeo foi publicado, não a hora em que as pessoas assistiram. O que está medido aqui é a relação entre o horário de publicação e as views que o vídeo acumulou.',
+    'Atenção a uma armadilha: eu comparo muitas combinações de dia e horário e mostro a melhor. Quanto mais combinações, maior a chance de uma parecer ótima por puro acaso. Por isso só chamo de recomendação a partir de ' + MIN_RECOMENDA + ' vídeos na mesma combinação, e mesmo assim testo se a vantagem sobrevive sem o vídeo que mais puxa.',
     'Views dependem muito mais do assunto, do título e da capa do que do horário. Trate isto como um empurrãozinho, não como regra.'
   ];
   if (novos) avisos.push(`${novos} vídeo(s) publicado(s) nos últimos ${maturacao} dias ficaram de fora: ainda estão somando views e não dá para comparar com os antigos.`);
@@ -117,7 +129,12 @@ export function analisarHorarios(videos, opts = {}) {
 
   let recomendacao = null;
   if (combinacao) {
-    recomendacao = `No seu canal, os vídeos publicados ${combinacao.nome.toLowerCase()} têm mediana de ${combinacao.mediana.toLocaleString('pt-BR')} views (${combinacao.diferenca >= 0 ? '+' : ''}${combinacao.diferenca}% em relação à mediana geral), com base em ${combinacao.videos} vídeo(s).`;
+    const base = `os vídeos publicados ${combinacao.nome.toLowerCase()} têm mediana de ${combinacao.mediana.toLocaleString('pt-BR')} views (${combinacao.diferenca >= 0 ? '+' : ''}${combinacao.diferenca}% sobre a mediana geral), em ${combinacao.videos} vídeo(s)`;
+    recomendacao = combinacao.firme && combinacao.robusta
+      ? `No seu canal, ${base}. A vantagem continua de pé mesmo tirando o vídeo que mais puxa.`
+      : !combinacao.firme
+        ? `Sinal, ainda inconclusivo: ${base}. Com menos de ${MIN_RECOMENDA} vídeos nessa combinação eu não chamo isso de recomendação.`
+        : `Sinal, ainda inconclusivo: ${base}, mas a vantagem SOME quando tiro o vídeo que mais puxa a média.`;
   } else if (melhorDia && melhorFaixa) {
     recomendacao = `Separado, o melhor dia é ${melhorDia.nome} (mediana ${melhorDia.mediana.toLocaleString('pt-BR')} views, ${melhorDia.videos} vídeos) e a melhor faixa é ${melhorFaixa.nome} (mediana ${melhorFaixa.mediana.toLocaleString('pt-BR')} views, ${melhorFaixa.videos} vídeos). Nenhuma combinação dia+horário tem ${MIN_AMOSTRA} vídeos ainda, então não dá para cruzar os dois.`;
   } else if (melhorDia || melhorFaixa) {
@@ -134,6 +151,8 @@ export function analisarHorarios(videos, opts = {}) {
       diasMaturacao: maturacao,
       medianaGeral: geral,
       minAmostra: MIN_AMOSTRA,
+      minRecomenda: MIN_RECOMENDA,
+      combinacoesTestadas,
       primeiro: usados[0]?.quando || null,
       ultimo: usados[usados.length - 1]?.quando || null
     },
