@@ -175,6 +175,27 @@ CREATE TABLE IF NOT EXISTS review_reports (
   created_at TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_report_unico ON review_reports(target_type, target_id, user_id);
+-- Avisos e cards que o administrador cria pelo painel (posição e ordem escolhidas por ele)
+CREATE TABLE IF NOT EXISTS blocos (
+  id TEXT PRIMARY KEY,
+  tipo TEXT NOT NULL,
+  pagina TEXT NOT NULL DEFAULT 'home',
+  slot TEXT NOT NULL,
+  ordem INTEGER NOT NULL DEFAULT 0,
+  titulo TEXT NOT NULL DEFAULT '',
+  texto TEXT NOT NULL DEFAULT '',
+  emoji TEXT NOT NULL DEFAULT '',
+  imagem_url TEXT NOT NULL DEFAULT '',
+  link_url TEXT NOT NULL DEFAULT '',
+  link_texto TEXT NOT NULL DEFAULT '',
+  mostrar_url INTEGER NOT NULL DEFAULT 0,
+  estilo TEXT NOT NULL DEFAULT 'info',
+  publicado INTEGER NOT NULL DEFAULT 1,
+  criado_por TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_blocos_pos ON blocos(pagina, slot, ordem);
 `;
 
 const PLAN_SEED = [

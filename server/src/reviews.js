@@ -118,10 +118,10 @@ export function reviewRoutes(app, db, auth) {
       : 'created_at DESC';
     const linhas = await db.all(
       `SELECT * FROM (
-         SELECT r.id, r.user_id, r.stars, r.comment AS texto, r.created_at, r.updated_at, 'avaliacao' AS tipo, u.name AS autor_nome
+         SELECT r.id, r.user_id, r.stars, r.comment AS texto, r.created_at, r.updated_at, 'avaliacao' AS tipo, u.name AS autor_nome, u.role AS autor_papel
            FROM reviews r JOIN users u ON u.id=r.user_id WHERE r.status='active'
          UNION ALL
-         SELECT c.id, c.user_id, NULL AS stars, c.body AS texto, c.created_at, c.updated_at, 'comentario' AS tipo, u.name AS autor_nome
+         SELECT c.id, c.user_id, NULL AS stars, c.body AS texto, c.created_at, c.updated_at, 'comentario' AS tipo, u.name AS autor_nome, u.role AS autor_papel
            FROM site_comments c JOIN users u ON u.id=c.user_id WHERE c.status='active'
        ) t ORDER BY ${ordenacao} LIMIT ? OFFSET ?`,
       [limite, (pagina - 1) * limite]
@@ -137,6 +137,10 @@ export function reviewRoutes(app, db, auth) {
         id: l.id,
         tipo: l.tipo,
         autor: autor(l.autor_nome),
+        // quem escreveu: dono do site, equipe ou pessoa comum (para o selo na tela)
+        papel: l.autor_papel === 'owner' ? 'owner' : l.autor_papel === 'admin' ? 'admin' : 'user',
+        doDesenvolvedor: l.autor_papel === 'owner',
+        daEquipe: l.autor_papel === 'admin',
         estrelas: l.stars == null ? null : Number(l.stars),
         comentario: l.texto,
         criado_em: l.created_at,
@@ -179,7 +183,8 @@ export function reviewRoutes(app, db, auth) {
     const texto = lerTexto(req.body?.texto ?? req.body?.comentario, 'O comentário', true);
     const id = uid();
     await db.run('INSERT INTO site_comments(id,user_id,body,status,created_at,updated_at) VALUES(?,?,?,?,?,?)', [id, req.user.id, texto, 'active', now(), now()]);
-    res.json({ ok: true, comentario: { id, tipo: 'comentario', autor: autor(req.user.name), estrelas: null, comentario: texto, criado_em: now(), minha: true, gostei: 0, naoGostei: 0, meuVoto: 0, respostas: [] } });
+    const papel = papelDe(req.user);
+    res.json({ ok: true, comentario: { id, tipo: 'comentario', autor: autor(req.user.name), papel, doDesenvolvedor: papel === 'owner', daEquipe: papel === 'admin', estrelas: null, comentario: texto, criado_em: now(), minha: true, gostei: 0, naoGostei: 0, meuVoto: 0, respostas: [] } });
   }));
 
   app.delete('/api/comments/:id', auth.required, wrap(async (req, res) => {

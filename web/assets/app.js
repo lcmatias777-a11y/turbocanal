@@ -96,6 +96,7 @@ views.home = async () => {
         <a class="btn ghost" href="#/extensao">⬇️ Baixar extensão</a>
       </p>
     </section>
+    <div data-slot="home-apos-hero" hidden></div>
     <section class="grid cols3">
       ${[
         ['🔎 Palavras-chave e tendências do seu nicho', 'Descobre o nicho pelos seus vídeos e mostra o que está bombando nele agora, com views por hora (VPH) e vídeos que estão estourando (outliers).'],
@@ -108,10 +109,13 @@ views.home = async () => {
         ['🧩 Extensão Chrome', 'Painel na página do vídeo do YouTube: VPH, engajamento, tags e SEO, com a mesma conta.']
       ].map(([t, d]) => `<div class="card"><h3>${t}</h3><p class="muted">${d}</p></div>`).join('')}
     </section>
+    <div data-slot="home-apos-recursos" hidden></div>
     <p class="center" style="margin-top:18px"><a class="btn ghost" href="#/extensao">🧩 Baixar a extensão para Chrome</a></p>
+    <div data-slot="home-antes-avaliacoes" hidden></div>
     <h2 class="center" style="margin-top:34px">Esse site é:</h2>
     <section class="card" id="rvhome"><p class="center"><span class="spin"></span></p></section>
     <p class="center"><a class="btn ghost" href="#/avaliacoes">⭐ Ver e escrever avaliações</a></p>
+    <div data-slot="home-antes-planos" hidden></div>
     <h2 class="center" style="margin-top:34px">Planos</h2>
     <p class="center muted small">Créditos renovam todo mês. As comparações de capacidade são metas internas de referência, não números auditados.</p>
     <section class="grid cols3">${plans.map(planCard).join('')}</section>`;
@@ -1211,7 +1215,7 @@ views.ajuda = async () => {
 /* ------------------------------ Admin ------------------------------ */
 const ADMIN_TABS = [
   ['geral', 'Visão geral'], ['usuarios', 'Usuários'], ['planos', 'Planos'], ['custos', 'Custos'],
-  ['pagamentos', 'Pagamentos'], ['avaliacoes', 'Avaliações'], ['config', 'Configurações'], ['admins', 'Administradores'], ['auditoria', 'Auditoria']
+  ['pagamentos', 'Pagamentos'], ['avaliacoes', 'Avaliações'], ['blocos', 'Avisos e cards'], ['config', 'Configurações'], ['admins', 'Administradores'], ['auditoria', 'Auditoria']
 ];
 
 // Mostra a versão atual no botão de baixar, para dar para comparar com a instalada
@@ -1264,6 +1268,117 @@ views.admin = async (params, sub) => {
 };
 
 const adminTabs = {
+  async blocos(el) {
+    const d = await api('/admin/blocks');
+    const nomeSlot = (id) => d.slots.find((x) => x.id === id)?.nome || id;
+    const nomePag = (id) => d.paginas.find((x) => x.id === id)?.nome || id;
+    const porLugar = {};
+    for (const b of d.itens) (porLugar[b.pagina + '|' + b.slot] ||= []).push(b);
+    const opts = (lista, atual) => lista.map((o) => `<option value="${esc(o.id)}" ${o.id === atual ? 'selected' : ''}>${esc(o.nome)}</option>`).join('');
+    const form = (b) => `
+      <div class="card" id="blform" data-id="${esc(b.id || '')}">
+        <h3>${b.id ? 'Editar' : 'Novo'} ${b.tipo === 'card' ? 'card' : 'aviso'}</h3>
+        <div class="grid cols2">
+          <div><label>Tipo</label>
+            <select id="b_tipo">${opts([{ id: 'aviso', nome: 'Aviso (faixa com título e texto)' }, { id: 'card', nome: 'Card (bloquinho com link)' }], b.tipo)}</select></div>
+          <div><label>Estilo (cor da borda)</label>
+            <select id="b_estilo">${opts([{ id: 'info', nome: 'Informação (amarelo)' }, { id: 'aviso', nome: 'Atenção' }, { id: 'ok', nome: 'Tudo certo (verde)' }, { id: 'destaque', nome: 'Destaque (laranja)' }], b.estilo || 'info')}</select></div>
+          <div><label>Página</label><select id="b_pagina">${opts(d.paginas, b.pagina || 'home')}</select></div>
+          <div><label>Posição na página</label><select id="b_slot">${opts(d.slots, b.slot || 'topo')}</select></div>
+        </div>
+        <label>Título (é o que a pessoa lê)</label><input id="b_titulo" maxlength="120" value="${esc(b.titulo || '')}">
+        <label>Texto</label><textarea id="b_texto" maxlength="600">${esc(b.texto || '')}</textarea>
+        <div class="grid cols2">
+          <div><label>Emoji (opcional)</label><input id="b_emoji" maxlength="8" value="${esc(b.emoji || '')}" placeholder="⚠️"></div>
+          <div><label>Imagem (endereço, opcional)</label><input id="b_img" value="${esc(b.imagem_url || '')}" placeholder="https://..."></div>
+          <div><label>Link (opcional)</label><input id="b_link" value="${esc(b.link_url || '')}" placeholder="https://..."></div>
+          <div><label>Texto do botão</label><input id="b_linktxt" maxlength="40" value="${esc(b.link_texto || '')}" placeholder="Acessar"></div>
+        </div>
+        <p class="small"><label style="display:inline"><input type="checkbox" id="b_mostrarurl" style="width:auto" ${b.mostrar_url ? 'checked' : ''}> Mostrar o endereço do link na tela (por padrão aparece só o nome)</label></p>
+        <p class="small"><label style="display:inline"><input type="checkbox" id="b_pub" style="width:auto" ${b.publicado === false ? '' : 'checked'}> Publicado (desmarque para deixar oculto)</label></p>
+        <p><button class="btn sm" id="b_salvar">${b.id ? 'Salvar alterações' : 'Criar'}</button>
+           <button class="btn sm secondary" id="b_cancelar">Cancelar</button></p>
+        <div id="b_msg"></div>
+        <h4>Prévia</h4><div class="bl-previa" id="b_previa"></div>
+      </div>`;
+
+    el.innerHTML = `
+      <p><button class="btn sm" data-novo="aviso">➕ Novo aviso</button>
+         <button class="btn sm secondary" data-novo="card">➕ Novo card</button>
+         <a class="btn sm secondary" href="#/" target="_blank">Ver a página inicial</a></p>
+      <p class="muted small">Os avisos e cards ficam salvos no banco: continuam depois de recarregar e de reiniciar o site. Use ↑ e ↓ para mudar a ordem dentro da mesma posição.</p>
+      <div id="blform-area"></div>
+      ${Object.keys(porLugar).length === 0 ? '<div class="card"><p class="muted">Nenhum aviso ou card criado ainda.</p></div>' : ''}
+      ${Object.entries(porLugar).map(([chave, lista]) => {
+        const [pag, slot] = chave.split('|');
+        return `<div class="card" style="margin-top:12px"><h3>${esc(nomePag(pag))} · ${esc(nomeSlot(slot))}</h3>
+          ${lista.map((b, i) => `<div class="rv-item">
+            <div class="rv-cab">
+              <span class="rv-autor">${b.emoji ? esc(b.emoji) + ' ' : ''}${esc(b.titulo || '(sem título)')}</span>
+              <span class="pill">${b.tipo === 'card' ? 'card' : 'aviso'}</span>
+              <span class="pill ${b.publicado ? 'ok' : 'warn'}">${b.publicado ? 'publicado' : 'oculto'}</span>
+              ${b.link_url ? '<span class="muted small">com link</span>' : ''}
+            </div>
+            ${b.texto ? `<p class="muted small">${esc(b.texto.slice(0, 160))}</p>` : ''}
+            <div class="rv-acoes">
+              <button data-mover="cima" data-id="${esc(b.id)}" ${i === 0 ? 'disabled' : ''}>↑</button>
+              <button data-mover="baixo" data-id="${esc(b.id)}" ${i === lista.length - 1 ? 'disabled' : ''}>↓</button>
+              <button data-editar="${esc(b.id)}">✏️ Editar</button>
+              <button data-pub="${esc(b.id)}" data-valor="${b.publicado ? '0' : '1'}">${b.publicado ? '🙈 Ocultar' : '👁 Publicar'}</button>
+              <button data-excluir="${esc(b.id)}">🗑 Excluir</button>
+            </div></div>`).join('')}
+        </div>`;
+      }).join('')}`;
+
+    const abrirForm = (b) => {
+      $('#blform-area').innerHTML = form(b);
+      const previa = () => {
+        $('#b_previa').innerHTML = blocoHtml({
+          tipo: $('#b_tipo').value, estilo: $('#b_estilo').value, titulo: $('#b_titulo').value,
+          texto: $('#b_texto').value, emoji: $('#b_emoji').value, imagem_url: $('#b_img').value,
+          link_url: $('#b_link').value, link_texto: $('#b_linktxt').value, mostrar_url: $('#b_mostrarurl').checked
+        });
+      };
+      $('#blform').querySelectorAll('input, textarea, select').forEach((c) => { c.oninput = previa; c.onchange = previa; });
+      previa();
+      $('#b_cancelar').onclick = () => { $('#blform-area').innerHTML = ''; };
+      $('#b_salvar').onclick = async () => {
+        const corpo = {
+          tipo: $('#b_tipo').value, pagina: $('#b_pagina').value, slot: $('#b_slot').value,
+          titulo: $('#b_titulo').value, texto: $('#b_texto').value, emoji: $('#b_emoji').value,
+          imagem_url: $('#b_img').value, link_url: $('#b_link').value, link_texto: $('#b_linktxt').value,
+          mostrar_url: $('#b_mostrarurl').checked, estilo: $('#b_estilo').value, publicado: $('#b_pub').checked
+        };
+        try {
+          const id = $('#blform').dataset.id;
+          if (id) await api('/admin/blocks/' + id, { method: 'PUT', body: corpo });
+          else await api('/admin/blocks', { method: 'POST', body: corpo });
+          blocos.carregado = null;
+          await adminTabs.blocos(el);
+        } catch (e) { showErr($('#b_msg'), e); }
+      };
+    };
+
+    el.onclick = async (ev) => {
+      const b = ev.target.closest('button');
+      if (!b) return;
+      try {
+        if (b.dataset.novo) return abrirForm({ tipo: b.dataset.novo, pagina: 'home', slot: b.dataset.novo === 'card' ? 'lateral-direita' : 'topo', publicado: true });
+        if (b.dataset.editar) return abrirForm(d.itens.find((x) => x.id === b.dataset.editar));
+        if (b.dataset.mover) await api(`/admin/blocks/${b.dataset.id}/move`, { method: 'POST', body: { direcao: b.dataset.mover } });
+        else if (b.dataset.pub) {
+          const alvo = d.itens.find((x) => x.id === b.dataset.pub);
+          await api('/admin/blocks/' + alvo.id, { method: 'PUT', body: { ...alvo, publicado: b.dataset.valor === '1' } });
+        } else if (b.dataset.excluir) {
+          if (!confirm('Excluir este item? Isso não apaga mais nada do site.')) return;
+          await api('/admin/blocks/' + b.dataset.excluir, { method: 'DELETE' });
+        } else return;
+        blocos.carregado = null;
+        await adminTabs.blocos(el);
+      } catch (e) { alert(e.message); }
+    };
+  },
+
   async avaliacoes(el) {
     const [den, lista] = await Promise.all([api('/admin/reviews/reports'), api('/reviews?sort=recentes&limit=50')]);
     const acoes = (tipo, id, ativo) => `<button class="btn sm ${ativo ? 'secondary' : ''}" data-mod="${tipo}" data-id="${id}" data-remover="${ativo ? '1' : '0'}">${ativo ? 'Remover' : 'Restaurar'}</button>`;
@@ -1280,7 +1395,7 @@ const adminTabs = {
       <div class="card" style="margin-top:14px"><h3>Tudo o que está publicado (${lista.total})</h3>
         <p class="muted small">Média ${String(lista.resumo.media.toFixed(1)).replace('.', ',')} · ${fmt(lista.total)} avaliações. Remover tira da média na hora.</p>
         ${lista.itens.map((i) => `<div class="rv-item">
-            <div class="rv-cab"><span class="rv-autor">${esc(i.autor)}</span>${i.tipo === 'avaliacao' ? `<span class="rv-estrelas">${estrelasTxt(i.estrelas)}</span>` : '<span class="pill">comentário</span>'}
+            <div class="rv-cab"><span class="rv-autor">${esc(i.autor)}</span>${i.doDesenvolvedor ? '<span class="rv-selo">Desenvolvedor</span>' : i.daEquipe ? '<span class="rv-selo equipe">Equipe</span>' : ''}${i.tipo === 'avaliacao' ? `<span class="rv-estrelas">${estrelasTxt(i.estrelas)}</span>` : '<span class="pill">comentário</span>'}
               <span class="muted small">${dt(i.criado_em)} · 👍 ${fmt(i.gostei)} 👎 ${fmt(i.naoGostei)}</span></div>
             <p>${esc(i.comentario || '(sem comentário)')}</p>
             <div class="rv-acoes">${acoes(i.tipo, i.id, true)}</div>
@@ -1557,7 +1672,7 @@ function rvItemHtml(it) {
   const ehAvaliacao = it.tipo === 'avaliacao';
   return `<article class="rv-item" data-item="${it.id}" data-tipo="${it.tipo}">
       <div class="rv-cab">
-        <span class="rv-autor">${esc(it.autor)}</span>
+        <span class="rv-autor">${esc(it.autor)}</span>${it.doDesenvolvedor ? '<span class="rv-selo">Desenvolvedor</span>' : it.daEquipe ? '<span class="rv-selo equipe">Equipe</span>' : ''}
         ${ehAvaliacao ? `<span class="rv-estrelas">${estrelasTxt(it.estrelas)}</span>` : '<span class="pill">comentário</span>'}
         <span class="muted small">${dt(it.criado_em)}${it.editado_em ? ' · editado' : ''}${it.minha ? ' · seu' : ''}</span>
       </div>
@@ -1714,6 +1829,58 @@ views.avaliacoes = async () => {
   };
 };
 
+/* ---------------- Avisos e cards criados pelo administrador ---------------- */
+const blocos = { pagina: null, itens: [] };
+const linkSeguro = (u) => (/^https?:\/\//i.test(String(u || '')) ? String(u) : '');
+
+function blocoHtml(b) {
+  const emoji = b.emoji ? `<span class="bl-emoji">${esc(b.emoji)}</span>` : '';
+  const href = linkSeguro(b.link_url);
+  if (b.tipo === 'card') {
+    const img = b.imagem_url ? `<img src="${esc(linkSeguro(b.imagem_url))}" alt="" loading="lazy">` : emoji;
+    const cta = href ? `<span class="bl-cta">${esc(b.link_texto || 'Acessar')} →</span>` : '';
+    const sub = b.texto ? `<small>${esc(b.texto)}</small>` : '';
+    const endereco = b.mostrar_url && href ? `<small class="muted">${esc(href)}</small>` : '';
+    const miolo = `${img}<div><b>${esc(b.titulo)}</b>${sub}${endereco}</div>${cta}`;
+    return href
+      ? `<a class="bl-card" href="${esc(href)}" target="_blank" rel="noopener nofollow">${miolo}</a>`
+      : `<div class="bl-card">${miolo}</div>`;
+  }
+  const botao = href ? `<p><a class="btn sm" href="${esc(href)}" target="_blank" rel="noopener nofollow">${esc(b.link_texto || 'Saiba mais')}</a></p>` : '';
+  const img = b.imagem_url ? `<img src="${esc(linkSeguro(b.imagem_url))}" alt="" loading="lazy">` : '';
+  return `<div class="bl-aviso e-${esc(b.estilo)}">
+      ${b.titulo ? `<h4>${b.emoji ? esc(b.emoji) + ' ' : ''}${esc(b.titulo)}</h4>` : ''}
+      ${b.texto ? `<p>${esc(b.texto)}</p>` : ''}${img}${botao}
+    </div>`;
+}
+
+async function carregarBlocos(pagina) {
+  if (blocos.pagina === pagina && blocos.itens.length !== undefined && blocos.carregado === pagina) return;
+  try { blocos.itens = (await api('/blocks?pagina=' + encodeURIComponent(pagina))).itens; }
+  catch { blocos.itens = []; }
+  blocos.pagina = pagina; blocos.carregado = pagina;
+}
+
+/** Preenche todo elemento com data-slot que exista na tela agora.
+ *  "Começo" e "fim" do conteúdo valem para qualquer página, então são criados aqui. */
+function aplicarBlocos() {
+  const app = appEl();
+  if (app) {
+    for (const [slot, onde] of [['pagina-topo', 'prepend'], ['pagina-fim', 'append']]) {
+      if (!blocos.itens.some((b) => b.slot === slot)) continue;
+      if (app.querySelector(`[data-slot="${slot}"]`)) continue;
+      const d = document.createElement('div');
+      d.dataset.slot = slot;
+      app[onde](d);
+    }
+  }
+  for (const el of document.querySelectorAll('[data-slot]')) {
+    const itens = blocos.itens.filter((b) => b.slot === el.dataset.slot);
+    el.innerHTML = itens.map(blocoHtml).join('');
+    el.hidden = itens.length === 0;
+  }
+}
+
 /* ------------------------------ Router ------------------------------ */
 async function route() {
   const hash = location.hash.replace(/^#\/?/, '') || '';
@@ -1722,15 +1889,19 @@ async function route() {
   const segs = pathPart.split('/').filter(Boolean);
   renderNav();
   appEl().innerHTML = '<p class="center"><span class="spin"></span></p>';
+  const paginaBloco = { extensao: 'ajuda', checkout: 'planos', historico: 'dashboard', conta: 'dashboard' }[segs[0]] || segs[0] || 'home';
+  await carregarBlocos(paginaBloco);
   try {
-    if (!segs.length) return await views.home(params);
-    if (segs[0] === 'admin') return await views.admin(params, segs[1]);
-    if (segs[0] === 'canal') return await views.canal(params, segs[1]);
-    if (segs[0] === 'ferramentas' && views['ferramentas/' + segs[1]]) return await views['ferramentas/' + segs[1]](params);
-    if (views[segs[0]]) return await views[segs[0]](params);
+    if (!segs.length) { await views.home(params); return aplicarBlocos(); }
+    if (segs[0] === 'admin') { await views.admin(params, segs[1]); return aplicarBlocos(); }
+    if (segs[0] === 'canal') { await views.canal(params, segs[1]); return aplicarBlocos(); }
+    if (segs[0] === 'ferramentas' && views['ferramentas/' + segs[1]]) { await views['ferramentas/' + segs[1]](params); return aplicarBlocos(); }
+    if (views[segs[0]]) { await views[segs[0]](params); return aplicarBlocos(); }
     appEl().innerHTML = alertBox('err', 'Página não encontrada.') + '<p><a class="btn" href="#/">Voltar ao início</a></p>';
+    aplicarBlocos();
   } catch (e) {
     appEl().innerHTML = alertBox('err', esc(e.message || 'Erro inesperado.'));
+    aplicarBlocos();
   }
 }
 

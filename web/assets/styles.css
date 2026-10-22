@@ -171,3 +171,35 @@ label.opt input { width: auto; margin-top: 3px; }
 }
 .rv-resp.equipe { background: var(--card2); border: 1px solid var(--accent2); border-radius: 10px; padding: 10px 12px; margin-left: -12px; }
 .rv-selo.equipe { background: var(--accent2); color: #1a1205; }
+
+/* ---------- Avisos e cards criados pelo administrador ---------- */
+[data-slot] { display: grid; gap: 10px; }
+[data-slot]:not([hidden]) { margin: 12px auto; }
+.bl-aviso { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent2);
+  border-radius: var(--radius); padding: 12px 14px; }
+.bl-aviso.e-aviso { border-left-color: var(--warn); }
+.bl-aviso.e-ok { border-left-color: var(--ok); }
+.bl-aviso.e-destaque { border-left-color: var(--accent); background: var(--card2); }
+.bl-aviso h4 { margin: 0 0 4px; font-size: 1rem; }
+.bl-aviso p { margin: 0; color: var(--muted); }
+.bl-aviso img { max-width: 100%; border-radius: 10px; margin-top: 8px; }
+.bl-card { display: flex; gap: 10px; align-items: center; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 10px 12px; color: var(--text); text-decoration: none; }
+a.bl-card:hover { border-color: var(--accent2); text-decoration: none; }
+.bl-card img { width: 46px; height: 46px; object-fit: cover; border-radius: 10px; flex: none; }
+.bl-card .bl-emoji { font-size: 1.6rem; line-height: 1; flex: none; }
+.bl-card b { display: block; }
+.bl-card small { color: var(--muted); display: block; }
+.bl-card .bl-cta { color: var(--accent2); font-weight: 700; font-size: .85rem; white-space: nowrap; margin-left: auto; }
+.lateral { position: fixed; top: 96px; width: 200px; z-index: 4; }
+.lateral.esq { left: max(10px, calc(50vw - 760px)); }
+.lateral.dir { right: max(10px, calc(50vw - 760px)); }
+.lateral .bl-card { flex-direction: column; align-items: flex-start; text-align: left; }
+.lateral .bl-card .bl-cta { margin-left: 0; }
+@media (max-width: 1520px) {
+  .lateral { position: static; width: min(1100px, 94vw); margin: 0 auto 14px; }
+  .lateral .bl-card { flex-direction: row; align-items: center; }
+  .lateral .bl-card .bl-cta { margin-left: auto; }
+}
+.bl-previa { background: var(--bg2); border: 1px dashed var(--line); border-radius: 12px; padding: 12px; }
+.bl-previa [data-slot] { margin: 0; }

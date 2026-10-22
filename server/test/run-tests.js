@@ -458,6 +458,23 @@ const av1b = await req('/api/reviews', { method: 'POST', token: t1, body: { estr
 const depoisEdit = await req('/api/reviews');
 check('a mesma conta edita a sua avaliação em vez de criar outra',
   av1b.data.novo === false && depoisEdit.data.total === 1 && depoisEdit.data.resumo.media === 4, JSON.stringify(depoisEdit.data.resumo));
+const avDono = await req('/api/reviews', { method: 'POST', token: tOwn, body: { estrelas: 5, comentario: 'Aviso do dono do site.' } });
+const comDono = await req('/api/reviews');
+const doDono = comDono.data.itens.find((i) => i.doDesenvolvedor);
+check('a avaliação do DONO do site vem marcada como desenvolvedor', avDono.status === 200 && !!doDono && doDono.papel === 'owner', JSON.stringify(comDono.data.itens.map((i) => [i.autor, i.papel])));
+const cDono = await req('/api/comments', { method: 'POST', token: tOwn, body: { texto: 'Bem-vindo ao TurboCanal!' } });
+const cEquipe = await req('/api/comments', { method: 'POST', token: tEq, body: { texto: 'Qualquer dúvida é só chamar.' } });
+const listaSelos = (await req('/api/reviews')).data.itens;
+check('o COMENTÁRIO do dono também vem marcado como desenvolvedor',
+  cDono.status === 200 && listaSelos.some((i) => i.tipo === 'comentario' && i.doDesenvolvedor), JSON.stringify(listaSelos.filter((i) => i.tipo === 'comentario').map((i) => [i.autor, i.papel])));
+check('o comentário de um administrador vem marcado como equipe',
+  cEquipe.status === 200 && listaSelos.some((i) => i.tipo === 'comentario' && i.daEquipe));
+check('comentário de pessoa comum não ganha selo nenhum', listaSelos.every((i) => i.autor !== 'Maria' || i.papel === 'user'));
+await req('/api/reviews/mine', { method: 'DELETE', token: tOwn });
+for (const c of listaSelos.filter((i) => i.tipo === 'comentario' && (i.doDesenvolvedor || i.daEquipe))) {
+  await req('/api/comments/' + c.id, { method: 'DELETE', token: tOwn });
+}
+
 check('o nome da conta aparece na avaliação (e nunca o e-mail)',
   depoisEdit.data.itens[0].autor === 'Maria' && !JSON.stringify(depoisEdit.data).includes('@example.com'), depoisEdit.data.itens[0].autor);
 
@@ -560,6 +577,85 @@ const apagar = await req('/api/reviews/mine', { method: 'DELETE', token: t1 });
 const depoisApagar = await req('/api/reviews');
 check('apagar a própria avaliação recalcula a média na hora',
   apagar.status === 200 && depoisApagar.data.resumo.total === 1 && depoisApagar.data.resumo.media === 2, JSON.stringify(depoisApagar.data.resumo));
+
+
+// ---------- Avisos e cards do painel ----------
+console.log('\n— Avisos e cards —');
+const vazioBl = await req('/api/blocks?pagina=home');
+check('sem nada criado, a página não mostra aviso nenhum', vazioBl.status === 200 && vazioBl.data.itens.length === 0);
+
+const criarComum = await req('/api/admin/blocks', { method: 'POST', token: t1, body: { tipo: 'aviso', pagina: 'home', slot: 'topo', titulo: 'teste' } });
+check('usuário comum não cria aviso (bloqueado no servidor)', criarComum.status === 403, String(criarComum.status));
+check('usuário comum não vê a lista do painel', (await req('/api/admin/blocks', { token: t1 })).status === 403);
+
+const av = await req('/api/admin/blocks', { method: 'POST', token: tOwn, body: {
+  tipo: 'aviso', pagina: 'home', slot: 'topo', emoji: '⚠️',
+  titulo: 'Plataforma em fase de testes', texto: 'Se encontrar algum erro, fale com a gente.', estilo: 'aviso' } });
+check('o administrador principal cria um aviso', av.status === 200 && av.data.bloco.titulo === 'Plataforma em fase de testes', JSON.stringify(av.data).slice(0, 140));
+
+const card = await req('/api/admin/blocks', { method: 'POST', token: tEq, body: {
+  tipo: 'card', pagina: 'home', slot: 'lateral-direita', emoji: '🎬',
+  titulo: 'Canal oficial do TurboCanal', texto: 'Dicas toda semana',
+  link_url: 'https://www.youtube.com/@turbocanal', link_texto: 'Acessar' } });
+check('administrador adicionado por mim também cria (card com link)', card.status === 200 && card.data.bloco.link_url.includes('youtube.com'), JSON.stringify(card.data).slice(0, 140));
+check('o card guarda o nome escolhido e NÃO marca para mostrar o endereço', card.data.bloco.titulo === 'Canal oficial do TurboCanal' && card.data.bloco.mostrar_url === false);
+
+const naPagina = await req('/api/blocks?pagina=home');
+check('o visitante recebe os dois, na posição escolhida', naPagina.data.itens.length === 2
+  && naPagina.data.itens.find((b) => b.slot === 'topo') && naPagina.data.itens.find((b) => b.slot === 'lateral-direita'), JSON.stringify(naPagina.data.itens.map((b) => b.slot)));
+check('outra página não recebe o que é só da inicial', (await req('/api/blocks?pagina=planos')).data.itens.length === 0);
+
+// validações
+const ruins = [
+  [{ tipo: 'aviso', pagina: 'home', slot: 'inventada', titulo: 'x' }, 'posição que não existe'],
+  [{ tipo: 'aviso', pagina: 'nao-existe', slot: 'topo', titulo: 'x' }, 'página que não existe'],
+  [{ tipo: 'outro', pagina: 'home', slot: 'topo', titulo: 'x' }, 'tipo inválido'],
+  [{ tipo: 'card', pagina: 'home', slot: 'topo', titulo: 'x', link_url: 'javascript:alert(1)' }, 'link com javascript:'],
+  [{ tipo: 'card', pagina: 'home', slot: 'topo', titulo: 'x', link_url: 'ftp://arquivo' }, 'link que não é http'],
+  [{ tipo: 'aviso', pagina: 'home', slot: 'topo', titulo: 'y'.repeat(121) }, 'título longo demais'],
+  [{ tipo: 'aviso', pagina: 'home', slot: 'topo' }, 'aviso sem título e sem texto'],
+  [{ tipo: 'card', pagina: 'home', slot: 'topo', titulo: 'só nome' }, 'card sem link e sem texto']
+];
+for (const [corpo, nome] of ruins) {
+  const r = await req('/api/admin/blocks', { method: 'POST', token: tOwn, body: corpo });
+  check(`recusa ${nome}`, r.status === 400, String(r.status));
+}
+
+// editar persiste
+const ed = await req('/api/admin/blocks/' + av.data.bloco.id, { method: 'PUT', token: tOwn, body: { ...av.data.bloco, titulo: 'Aviso editado' } });
+check('editar um aviso salva no banco', ed.status === 200 && (await req('/api/blocks?pagina=home')).data.itens.find((b) => b.id === av.data.bloco.id).titulo === 'Aviso editado');
+
+// ocultar e publicar de novo
+await req('/api/admin/blocks/' + av.data.bloco.id, { method: 'PUT', token: tOwn, body: { ...av.data.bloco, publicado: false } });
+check('ocultar tira da página (mas continua no painel)',
+  !(await req('/api/blocks?pagina=home')).data.itens.some((b) => b.id === av.data.bloco.id)
+  && (await req('/api/admin/blocks', { token: tOwn })).data.itens.some((b) => b.id === av.data.bloco.id));
+await req('/api/admin/blocks/' + av.data.bloco.id, { method: 'PUT', token: tOwn, body: { ...av.data.bloco, publicado: true } });
+check('publicar de novo traz de volta', (await req('/api/blocks?pagina=home')).data.itens.some((b) => b.id === av.data.bloco.id));
+
+// ordem dentro da mesma posição
+const bl2 = await req('/api/admin/blocks', { method: 'POST', token: tOwn, body: { tipo: 'aviso', pagina: 'home', slot: 'topo', titulo: 'Segundo aviso' } });
+const ordem1 = (await req('/api/blocks?pagina=home')).data.itens.filter((b) => b.slot === 'topo').map((b) => b.titulo);
+await req(`/api/admin/blocks/${bl2.data.bloco.id}/move`, { method: 'POST', token: tOwn, body: { direcao: 'cima' } });
+const ordem2 = (await req('/api/blocks?pagina=home')).data.itens.filter((b) => b.slot === 'topo').map((b) => b.titulo);
+check('mover para cima muda a ordem de verdade', ordem2[0] === 'Segundo aviso' && ordem2.join() !== ordem1.join(), `${ordem1} -> ${ordem2}`);
+check('subir o que já é o primeiro não quebra', (await req(`/api/admin/blocks/${bl2.data.bloco.id}/move`, { method: 'POST', token: tOwn, body: { direcao: 'cima' } })).data.semMudanca === true);
+
+// mudar de lugar
+await req('/api/admin/blocks/' + bl2.data.bloco.id, { method: 'PUT', token: tOwn, body: { ...bl2.data.bloco, slot: 'rodape', pagina: 'todas' } });
+const mudou = await req('/api/blocks?pagina=planos');
+check('mudar a posição e a página leva o aviso para o novo lugar',
+  mudou.data.itens.some((b) => b.id === bl2.data.bloco.id && b.slot === 'rodape'), JSON.stringify(mudou.data.itens.map((b) => [b.slot, b.pagina])));
+
+// usuário comum não edita nem exclui
+check('usuário comum não edita', (await req('/api/admin/blocks/' + av.data.bloco.id, { method: 'PUT', token: t1, body: { ...av.data.bloco, titulo: 'invadido' } })).status === 403);
+check('usuário comum não exclui', (await req('/api/admin/blocks/' + av.data.bloco.id, { method: 'DELETE', token: t1 })).status === 403);
+
+// excluir não leva junto o resto
+const antesAval = (await req('/api/reviews')).data.total;
+check('o administrador exclui um item', (await req('/api/admin/blocks/' + bl2.data.bloco.id, { method: 'DELETE', token: tOwn })).status === 200);
+check('excluir um aviso não apaga nada do resto do site',
+  (await req('/api/reviews')).data.total === antesAval && (await req('/api/blocks?pagina=home')).data.itens.length === 2);
 
 fake.close(); gem.close();
 

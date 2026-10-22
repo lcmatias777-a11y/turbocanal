@@ -11,6 +11,7 @@ import { paymentRoutes, providerReady } from './payments.js';
 import { adminRoutes } from './admin.js';
 import { channelRoutes, runAbScheduler } from './channel.js';
 import { reviewRoutes } from './reviews.js';
+import { blockRoutes } from './blocks.js';
 import { geminiKey } from './gemini.js';
 
 export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir = process.env.DATA_DIR || './data/pglite', scheduler = true } = {}) {
@@ -42,6 +43,7 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
   adminRoutes(app, db, auth);
   channelRoutes(app, db, auth);
   reviewRoutes(app, db, auth);
+  blockRoutes(app, db, auth);
 
   app.get('/api/plans', async (req, res, next) => {
     try {
