@@ -893,10 +893,11 @@ views['ferramentas/raiox'] = async (params) => {
     return;
   }
 
+  const num = (n) => Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
   const tabela = (lista, campo, rotulo, unidade) => lista.length
     ? `<table><tr><th>Vídeo</th><th>${rotulo}</th><th>Views</th></tr>${lista.map((v) => `<tr>
         <td><a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc(v.titulo)}</a></td>
-        <td><b>${campo(v)}${unidade}</b></td><td>${fmt(v.views)}</td></tr>`).join('')}</table>`
+        <td><b>${num(campo(v))}${unidade}</b></td><td>${fmt(v.views)}</td></tr>`).join('')}</table>`
     : '<p class="muted">Sem vídeos suficientes no período.</p>';
 
   const maxRet = Math.max(1, ...r.faixas.map((f) => f.retencaoMediana));
@@ -907,13 +908,13 @@ views['ferramentas/raiox'] = async (params) => {
 
     <div class="grid cols2" style="margin-top:12px">
       <div class="card"><h3>🧲 Os que mais trazem inscrito</h3>
-        <p class="muted small">Inscritos ganhos menos perdidos, por mil views. A mediana do seu canal é ${r.base.medianaInscritosPorMil}.</p>
+        <p class="muted small">Inscritos ganhos menos perdidos, por mil views. A mediana do seu canal é ${num(r.base.medianaInscritosPorMil)}.</p>
         ${tabela(r.campeoes, (v) => v.inscritosPorMil, 'por mil views', '')}</div>
       <div class="card"><h3>👀 Muita view, pouco inscrito</h3>
-        <p class="muted small">Esses trazem gente que assiste e vai embora. Pode ser público fora do seu nicho.</p>
+        <p class="muted small">Muita view e inscrito nenhum. Não prova que o público é de fora do nicho, mas é por aqui que eu começaria a olhar.</p>
         ${tabela(r.soView, (v) => v.inscritosPorMil, 'por mil views', '')}</div>
       <div class="card"><h3>⏳ Os que mais prendem</h3>
-        <p class="muted small">Percentual médio assistido. A mediana do canal é ${r.base.retencaoMediana}%.${r.temAcimaDeCem ? ' Acima de 100% quer dizer que a mesma pessoa assistiu mais de uma vez (Shorts repetem sozinhos).' : ''}</p>
+        <p class="muted small">Percentual médio assistido. A mediana do canal é ${num(r.base.retencaoMediana)}%.${r.temAcimaDeCem ? ' Acima de 100% quer dizer que a mesma pessoa assistiu mais de uma vez (Shorts repetem sozinhos).' : ''}</p>
         ${tabela(r.prendemMais, (v) => Math.round(v.percentualMedio), 'assistido', '%')}</div>
       <div class="card"><h3>💤 Os que menos prendem</h3>
         ${tabela(r.prendemMenos, (v) => Math.round(v.percentualMedio), 'assistido', '%')}</div>
@@ -926,7 +927,7 @@ views['ferramentas/raiox'] = async (params) => {
         const cor = !f.videos ? 'var(--line)' : f.suficiente ? (f.id === r.melhorFaixa?.id ? 'var(--ok)' : f.id === 0 ? 'var(--warn)' : 'var(--accent)') : 'var(--line)';
         return `<div class="bt-linha"><span class="bt-nome">${esc(f.nome)}</span>
           <span class="bt-trilho"><span class="bt-barra" style="width:${w}%;background:${cor}"></span></span>
-          <span class="bt-val muted small">${f.videos ? `${f.retencaoMediana}% · ${f.videos} vídeo${f.videos > 1 ? 's' : ''}${f.suficiente ? '' : ' (pouco para comparar)'}` : 'nenhum vídeo'}</span></div>`;
+          <span class="bt-val muted small">${f.videos ? `${num(f.retencaoMediana)}% · ${f.videos} vídeo${f.videos > 1 ? 's' : ''}${f.suficiente ? '' : ' (pouco para comparar)'}` : 'nenhum vídeo'}</span></div>`;
       }).join('')}
       <p class="small muted">Faixa com menos de ${r.base.minGrupo} vídeos aparece em cinza e não vira conclusão.</p></div>
 
