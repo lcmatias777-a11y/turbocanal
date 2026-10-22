@@ -847,6 +847,30 @@ check('periodo fora do limite e recusado', (await req('/api/channel/raiox?dias=5
 check('raio-X exige login', (await req('/api/channel/raiox')).status === 401);
 }
 
+// ---------- Quem voltou e usou de novo (a metrica que importa) ----------
+console.log('\n— Retorno de usuários —');
+{
+  const ov = (await req('/api/admin/overview', { token: tOwn })).data;
+  check('o painel traz a conta de quem voltou e usou de novo',
+    ov.retorno && typeof ov.retorno.usaramSemanaPassada === 'number' && typeof ov.retorno.ativosEstaSemana === 'number', JSON.stringify(ov.retorno));
+  check('sem ninguem na semana passada, o percentual e nulo em vez de 0% enganoso',
+    ov.retorno.usaramSemanaPassada === 0 ? ov.retorno.percentual === null : true, JSON.stringify(ov.retorno));
+  // simula: a Maria usou ferramenta ha 10 dias e usou de novo agora
+  const dezDias = new Date(Date.now() - 10 * 86400e3).toISOString();
+  await db.run("INSERT INTO transactions(id,user_id,delta,balance_after,tool,note,idem_key,created_at) VALUES(?,?,?,?,?,?,?,?)",
+    ['tx-retorno-1', u1.data.user.id, -1, 100, 'trends', 'teste retorno', null, dezDias]);
+  await req('/api/tools/trends', { method: 'POST', token: t1, body: {} });
+  const ov2 = (await req('/api/admin/overview', { token: tOwn })).data;
+  check('quem usou na semana passada E voltou esta semana e contado',
+    ov2.retorno.usaramSemanaPassada >= 1 && ov2.retorno.voltaramEstaSemana >= 1 && ov2.retorno.percentual >= 1, JSON.stringify(ov2.retorno));
+  // quem usou ha 10 dias e NAO voltou nao conta como retorno
+  await db.run("INSERT INTO transactions(id,user_id,delta,balance_after,tool,note,idem_key,created_at) VALUES(?,?,?,?,?,?,?,?)",
+    ['tx-retorno-2', u2.data.user.id, -1, 100, 'trends', 'teste sumiu', null, dezDias]);
+  const ov3 = (await req('/api/admin/overview', { token: tOwn })).data;
+  check('quem nao voltou derruba o percentual, em vez de ser ignorado',
+    ov3.retorno.usaramSemanaPassada > ov2.retorno.usaramSemanaPassada && ov3.retorno.percentual < 100, JSON.stringify(ov3.retorno));
+}
+
 // ---------- KPI de creditos: ajuste manual nao e consumo de API ----------
 console.log('\n— KPI de créditos gastos —');
 {

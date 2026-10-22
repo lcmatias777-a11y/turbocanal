@@ -113,9 +113,24 @@ export function adminRoutes(app, db, auth) {
     const ajustes30d = (await db.get('SELECT COALESCE(SUM(-delta),0)::int AS s FROM transactions WHERE delta<0 AND tool IS NULL AND created_at >= ?', [daysAgo(30)])).s;
     const usage30d = await db.all('SELECT tool, COUNT(*)::int AS n FROM transactions WHERE tool IS NOT NULL AND created_at >= ? GROUP BY tool ORDER BY n DESC', [daysAgo(30)]);
     const paid = await db.get("SELECT COALESCE(SUM(amount_cents),0)::int AS s, COUNT(*)::int AS n FROM payments WHERE status='approved'");
+    // A pergunta que decide se o site vale alguma coisa: quem usou uma ferramenta
+    // na semana passada VOLTOU e usou de novo esta semana? Nada de vaidade: conta
+    // uso real de ferramenta, não login.
+    const semanaPassada = await db.all(
+      'SELECT DISTINCT user_id FROM transactions WHERE tool IS NOT NULL AND created_at >= ? AND created_at < ?',
+      [daysAgo(14), daysAgo(7)]);
+    const estaSemana = new Set((await db.all(
+      'SELECT DISTINCT user_id FROM transactions WHERE tool IS NOT NULL AND created_at >= ?', [daysAgo(7)])).map((r) => r.user_id));
+    const voltaram = semanaPassada.filter((r) => estaSemana.has(r.user_id)).length;
+    const retorno = {
+      usaramSemanaPassada: semanaPassada.length,
+      voltaramEstaSemana: voltaram,
+      percentual: semanaPassada.length ? Math.round((voltaram / semanaPassada.length) * 100) : null,
+      ativosEstaSemana: estaSemana.size
+    };
     const ytUnitsToday = parseInt((await getSetting(db, 'yt_units_' + new Date().toISOString().slice(0, 10))) || '0', 10);
     res.json({
-      users, byPlan, byRole, creditsSpent30d: spent30d, creditsAdjusted30d: ajustes30d, usage30d,
+      users, byPlan, byRole, creditsSpent30d: spent30d, creditsAdjusted30d: ajustes30d, usage30d, retorno,
       youtubeQuota: { usedToday: ytUnitsToday, dailyLimit: 10000 },
       payments: { approvedCount: paid.n, approvedTotalCents: paid.s },
       config: {

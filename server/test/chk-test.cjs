@@ -14,7 +14,10 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
   await p.goto(LOCAL + '/#/admin/geral');
   await p.waitForSelector('#achk .rv-item', { timeout: 20000 });
   const t = await p.textContent('#achk');
-  check('mostra os 8 pontos de configuração', (await p.$$('#achk .rv-item')).length === 8, String((await p.$$('#achk .rv-item')).length));
+  check('mostra os 9 pontos de configuração (8 medidos + as duas etapas do Google)',
+    (await p.$$('#achk .rv-item')).length === 9, String((await p.$$('#achk .rv-item')).length));
+  check('o item das duas etapas aparece, com o endereço para ligar',
+    /verificação em duas etapas/i.test(await p.textContent('#achk')) && /myaccount\.google\.com/.test(await p.textContent('#achk')));
   check('diz quantos estão prontos', /de 8 prontos/.test(t), t.slice(0, 120));
   check('aponta o que bloqueia o site', /Bloqueia o site/.test(t));
   check('cada pendência vem com o passo para resolver', (await p.$$('#achk .rv-item p')).length >= 1);

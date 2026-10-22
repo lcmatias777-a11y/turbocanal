@@ -2183,6 +2183,12 @@ const adminTabs = {
           <p class="muted small">Só uso de ferramenta: é o indicador de custo operacional das APIs.${o.creditsAdjusted30d ? ` Fora isso, ${fmt(o.creditsAdjusted30d)} crédito(s) foram retirados por ajuste manual, que não gasta API nenhuma.` : ''}</p></div>
         <div class="card"><h3>Pagamentos aprovados</h3><div class="kpi">${money(o.payments.approvedTotalCents)}</div>
           <p class="muted small">${o.payments.approvedCount} pagamentos confirmados.</p></div>
+        <div class="card"><h3>Voltaram e usaram de novo</h3>
+          <div class="kpi">${o.retorno.percentual == null ? '—' : o.retorno.percentual + '%'}</div>
+          <p class="muted small">${o.retorno.usaramSemanaPassada
+            ? `${o.retorno.voltaramEstaSemana} de ${o.retorno.usaramSemanaPassada} pessoa(s) que usaram alguma ferramenta na semana passada voltaram e usaram de novo esta semana. ${o.retorno.ativosEstaSemana} usaram o site nos últimos 7 dias.`
+            : 'Ninguém usou ferramenta na semana passada, então ainda não há o que comparar.'}
+            <br><b>É este número que diz se o site resolve um problema de verdade</b>, não a quantidade de ferramentas.</p></div>
         <div class="card"><h3>Cota do YouTube hoje</h3><div class="kpi">${fmt(o.youtubeQuota?.usedToday || 0)} <small class="muted">/ ${fmt(o.youtubeQuota?.dailyLimit || 10000)}</small></div>
           <p class="muted small">Compartilhada por todo o site. Busca = 100 unidades, postar vídeo = 1.600, capa ou edição = 50, leitura = 1. Renova por volta das 4h ou 5h. Quando o site crescer, peça aumento gratuito ao Google no <a href="https://support.google.com/youtube/contact/yt_api_form" target="_blank" rel="noopener">formulário de cota da API do YouTube</a>.</p></div>
       </section>
