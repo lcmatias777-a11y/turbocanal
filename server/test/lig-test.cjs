@@ -82,6 +82,32 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
   await bia.p.waitForFunction(() => /encerrada|desligou/i.test(document.getElementById('ligCaixa')?.textContent || ''), { timeout: 20000 }).catch(() => {});
   check('quando um desliga, o outro é avisado', /desligou|encerrada/i.test(await bia.p.textContent('#ligCaixa').catch(() => '')), await bia.p.textContent('#ligCaixa').catch(() => 'sem painel'));
 
+  // DUAS ABAS abertas da mesma pessoa: a ligação tem de funcionar mesmo assim
+  const bia2 = await bia.ctx.newPage();
+  bia2.on('pageerror', (e) => erros.push(`bia2: ${e}`));
+  await bia2.goto(LOCAL + '/#/dashboard');
+  await bia2.waitForSelector('#sino', { timeout: 20000 });
+  await dono.p.goto(LOCAL + '/#/admin/chats');
+  await dono.p.waitForSelector(`[data-conv="${dm.conversa}"]`, { timeout: 20000 });
+  await dono.p.click(`[data-conv="${dm.conversa}"]`);
+  await dono.p.waitForSelector('#chLigar', { timeout: 20000 });
+  await dono.p.click('#chLigar');
+  // uma das duas abas toca; atende naquela
+  const tocou = await Promise.race([
+    bia.p.waitForSelector('#ligAceita', { timeout: 30000 }).then(() => bia.p).catch(() => null),
+    bia2.waitForSelector('#ligAceita', { timeout: 30000 }).then(() => bia2).catch(() => null)
+  ]);
+  check('com duas abas abertas, a chamada toca em uma delas', tocou !== null);
+  if (tocou) {
+    await tocou.click('#ligAceita');
+    const ok2 = await conectou(dono.p);
+    check('e a ligação conecta mesmo com a outra aba aberta consumindo recados', ok2, String(ok2));
+    await dono.p.evaluate(() => { ligSinal(lig.conversa, lig.com, 'desligou', {}); ligFechar(); }).catch(() => {});
+    await tocou.evaluate(() => { try { ligFechar(); } catch {} }).catch(() => {});
+    await dono.p.waitForTimeout(1200);
+  }
+  await bia2.close();
+
   // recusar
   await dono.p.goto(LOCAL + '/#/admin/chats');
   await dono.p.waitForSelector(`[data-conv="${dm.conversa}"]`, { timeout: 20000 });

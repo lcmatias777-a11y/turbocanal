@@ -195,7 +195,10 @@ export function chatRoutes(app, db, auth) {
     if (!TIPOS_SINAL.includes(tipo)) throw new HttpError(400, 'Tipo de sinal inválido.');
     const para = String(req.body?.para || '');
     if (!(await souMembro(req.params.id, para))) throw new HttpError(400, 'Essa pessoa não participa desta conversa.');
-    const dados = JSON.stringify(req.body?.dados ?? {}).slice(0, 20000);
+    // Guarda também QUAL aba mandou e, quando houver, para qual aba vai. Sem isso,
+    // com duas abas abertas uma consome os recados da outra e a ligação quebra.
+    const corpo = { ...(req.body?.dados ?? {}), _de: String(req.body?.cliente || '').slice(0, 40), _para: String(req.body?.paraCliente || '').slice(0, 40) };
+    const dados = JSON.stringify(corpo).slice(0, 20000);
     await db.run('INSERT INTO sinais(id,conversa_id,de_user,para_user,tipo,dados,created_at) VALUES(?,?,?,?,?,?,?)',
       [uid(), req.params.id, req.user.id, para, tipo, dados, now()]);
     // limpeza: sinal velho não serve para nada
@@ -205,15 +208,24 @@ export function chatRoutes(app, db, auth) {
 
   // Recados endereçados a mim (em qualquer conversa). Lidos uma vez e apagados.
   app.get('/api/admin/chats/sinais', ...auth.admin, wrap(async (req, res) => {
-    const rows = await db.all(
+    const cliente = String(req.query.cliente || '').slice(0, 40);
+    const todos = await db.all(
       `SELECT s.*, u.name, u.email FROM sinais s JOIN users u ON u.id=s.de_user
         WHERE s.para_user=? AND s.created_at >= ? ORDER BY s.created_at`,
       [req.user.id, new Date(Date.now() - VALIDADE_SINAL * 1000).toISOString()]);
+    // recado sem destinatário de aba (o "está te ligando") vai para qualquer aba;
+    // o resto só para a aba que está na ligação.
+    const rows = todos.filter((r) => {
+      let p = '';
+      try { p = JSON.parse(r.dados)?._para || ''; } catch {}
+      return !p || p === cliente;
+    });
     if (rows.length) await db.run(`DELETE FROM sinais WHERE id IN (${rows.map(() => '?').join(',')})`, rows.map((r) => r.id));
     res.json({
       itens: rows.map((r) => ({
         id: r.id, conversa: r.conversa_id, de: r.de_user, deNome: r.name || r.email,
-        tipo: r.tipo, dados: (() => { try { return JSON.parse(r.dados); } catch { return {}; } })(), quando: r.created_at
+        tipo: r.tipo, dados: (() => { try { return JSON.parse(r.dados); } catch { return {}; } })(),
+        deCliente: (() => { try { return JSON.parse(r.dados)?._de || ''; } catch { return ''; } })(), quando: r.created_at
       }))
     });
   }));

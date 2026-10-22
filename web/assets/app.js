@@ -163,10 +163,7 @@ function montarSino() {
     document.addEventListener('click', () => { if (nt.aberto) fecharSino(); });
     nt.timer = setInterval(carregarNotificacoes, 45000);
     // administrador fica ouvindo chamada em qualquer página do site
-    if (['owner', 'admin'].includes(state.user?.role)) {
-      nt.ligTimer = setInterval(() => { ligOuvir(); }, lig.estado === 'parado' ? 5000 : 1500);
-      ligOuvir();
-    }
+    if (['owner', 'admin'].includes(state.user?.role)) { ligRitmo(); ligOuvir(); }
   }
   carregarNotificacoes();
 }
@@ -1641,9 +1638,21 @@ views.ajuda = async () => {
    os recados de conexão. Por isso não custa nada e nada fica gravado.
    Limite honesto: sem servidor TURN (que é pago), algumas redes não deixam a
    conexão direta acontecer. Quando isso ocorre a tela diz exatamente isso. */
-const lig = { pc: null, local: null, conversa: null, com: null, comNome: '', estado: 'parado', timer: null, prazo: null, entrando: null };
+// cliente = esta aba. Com duas abas abertas, os recados da ligação têm de chegar
+// na aba que está na chamada, e não em qualquer uma.
+const lig = { pc: null, local: null, conversa: null, com: null, comNome: '', estado: 'parado', timer: null, prazo: null, entrando: null, cliente: Math.random().toString(36).slice(2, 12), outroCliente: '' };
 window.lig = lig; // deixa o estado visível para diagnóstico e para os testes de navegador
 const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+
+/** Olha os recados devagar quando não tem ligação e rápido quando tem: sem isso,
+ *  os candidatos de rede chegam com 5s de atraso e a conexão demora ou falha. */
+function ligRitmo() {
+  const ms = lig.estado === 'parado' ? 6000 : 1500;
+  if (nt.ligMs === ms && nt.ligTimer) return;
+  if (nt.ligTimer) clearInterval(nt.ligTimer);
+  nt.ligMs = ms;
+  nt.ligTimer = setInterval(() => { ligOuvir(); }, ms);
+}
 
 function ligPainel() {
   let el = $('#ligCaixa');
@@ -1661,7 +1670,8 @@ function ligFechar(msg) {
   if (lig.prazo) { clearTimeout(lig.prazo); lig.prazo = null; }
   try { lig.pc?.close(); } catch {}
   try { lig.local?.getTracks().forEach((t) => t.stop()); } catch {}
-  lig.pc = null; lig.local = null; lig.estado = 'parado'; lig.conversa = null; lig.com = null; lig.entrando = null;
+  lig.pc = null; lig.local = null; lig.estado = 'parado'; lig.conversa = null; lig.com = null; lig.entrando = null; lig.outroCliente = '';
+  ligRitmo();
   const el = $('#ligCaixa');
   if (!el) return;
   if (msg) {
@@ -1673,7 +1683,13 @@ function ligFechar(msg) {
 
 window.ligSinal = ligSinal; window.ligFechar = ligFechar;
 async function ligSinal(conversa, para, tipo, dados = {}) {
-  try { await api(`/admin/chats/${conversa}/sinal`, { method: 'POST', body: { para, tipo, dados } }); } catch {}
+  try {
+    await api(`/admin/chats/${conversa}/sinal`, {
+      method: 'POST',
+      // "chamando" e "oferta" não têm aba de destino: ainda não se sabe qual vai atender
+      body: { para, tipo, dados, cliente: lig.cliente, paraCliente: ['chamando', 'oferta'].includes(tipo) ? '' : lig.outroCliente }
+    });
+  } catch {}
 }
 
 function ligDesenhar(texto, botoes = []) {
@@ -1706,7 +1722,8 @@ async function ligCriarPc(conversa, com) {
 
 async function ligar(conversa, com, nome) {
   if (lig.estado !== 'parado') return alert('Já existe uma ligação em andamento.');
-  lig.conversa = conversa; lig.com = com; lig.comNome = nome; lig.estado = 'chamando';
+  lig.conversa = conversa; lig.com = com; lig.comNome = nome; lig.estado = 'chamando'; lig.outroCliente = '';
+  ligRitmo();
   ligDesenhar('Chamando…', [{ id: 'ligCancel', texto: 'Cancelar', cor: 'secondary', acao: () => { ligSinal(conversa, com, 'desligou', {}); ligFechar(); } }]);
   try {
     const pc = await ligCriarPc(conversa, com);
@@ -1723,7 +1740,8 @@ async function ligar(conversa, com, nome) {
 }
 
 async function ligAtender(s) {
-  lig.conversa = s.conversa; lig.com = s.de; lig.comNome = s.deNome; lig.estado = 'conectando';
+  lig.conversa = s.conversa; lig.com = s.de; lig.comNome = s.deNome; lig.estado = 'conectando'; lig.outroCliente = s.deCliente || lig.outroCliente;
+  ligRitmo();
   ligDesenhar('Conectando…', [{ id: 'ligFim', texto: 'Desligar', cor: 'secondary', acao: () => { ligSinal(s.conversa, s.de, 'desligou', {}); ligFechar(); } }]);
   try {
     const pc = await ligCriarPc(s.conversa, s.de);
@@ -1741,16 +1759,18 @@ async function ligAtender(s) {
 async function ligOuvir() {
   if (!state.user || !['owner', 'admin'].includes(state.user.role)) return;
   let d;
-  try { d = await api('/admin/chats/sinais'); } catch { return; }
+  try { d = await api('/admin/chats/sinais?cliente=' + encodeURIComponent(lig.cliente)); } catch { return; }
   for (const s of d.itens) {
     if (s.tipo === 'oferta') {
-      if (lig.estado !== 'parado') { await ligSinal(s.conversa, s.de, 'recusou', { motivo: 'ocupado' }); continue; }
-      lig.estado = 'tocando'; lig.comNome = s.deNome; lig.entrando = s;
+      if (lig.estado !== 'parado') { lig.outroCliente = s.deCliente || ''; await ligSinal(s.conversa, s.de, 'recusou', { motivo: 'ocupado' }); lig.outroCliente = ''; continue; }
+      lig.estado = 'tocando'; lig.comNome = s.deNome; lig.entrando = s; lig.outroCliente = s.deCliente || '';
+      ligRitmo();
       ligDesenhar('está te ligando', [
         { id: 'ligAceita', texto: '✅ Atender', cor: '', acao: () => ligAtender(s) },
         { id: 'ligRecusa', texto: '❌ Recusar', cor: 'secondary', acao: () => { ligSinal(s.conversa, s.de, 'recusou', {}); ligFechar(); } }
       ]);
     } else if (s.tipo === 'resposta' && lig.pc && !lig.pc.currentRemoteDescription) {
+      lig.outroCliente = s.deCliente || lig.outroCliente;
       try { await lig.pc.setRemoteDescription(new RTCSessionDescription(s.dados.sdp)); ligEstado('Conectando…'); } catch {}
     } else if (s.tipo === 'ice' && lig.pc) {
       try { await lig.pc.addIceCandidate(s.dados.c); } catch {}
