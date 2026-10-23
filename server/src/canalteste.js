@@ -424,11 +424,22 @@ export async function apiDeTeste(db, escopo, caminho, { method = 'GET', params =
   // ---- comentários ----
   if (p.endsWith('commentThreads')) {
     const r = sorteio(SEMENTE + 7);
-    const FRASES = [
-      'primeiro!!', 'esse vídeo me ajudou demais, obrigado', 'faz a parte 2 por favor',
-      'não entendi a parte do meio, dá pra explicar?', 'melhor canal sobre isso',
-      'tenta fazer sem usar atalho da próxima vez', 'qual a config que tu usa?',
-      'vim pelo short, já me inscrevi', 'esse foi o melhor até agora', 'a edição ficou muito boa'
+    // Comentário de canal de verdade fala DO vídeo. Genérico demais ("muito
+    // bom!") deixa a tela com cara de preenchimento, e é justamente nos
+    // comentários que a pessoa vai testar "sugerir resposta".
+    const MOLDES = [
+      (a) => 'primeiro!!',
+      (a) => `esse vídeo de ${a} me ajudou demais, obrigado`,
+      (a) => `faz a parte 2 de ${a} por favor`,
+      (a) => 'não entendi a parte do meio, dá pra explicar?',
+      (a) => `melhor canal de ${a} que eu achei`,
+      (a) => 'tenta fazer sem usar atalho da próxima vez',
+      (a) => `qual a config que tu usa pra ${a}?`,
+      (a) => 'vim pelo short, já me inscrevi',
+      (a) => `eu travei exatamente nessa parte de ${a}`,
+      (a) => 'a edição ficou muito boa, parabéns',
+      (a) => `quanto tempo tu joga ${a} por dia?`,
+      (a) => 'esperei esse vídeo a semana inteira kkk'
     ];
     const respostas = await db.all('SELECT comentario_id, COUNT(*) AS n FROM demo_respostas WHERE escopo=? GROUP BY comentario_id', [escopo]);
     const respostasPorComentario = Object.fromEntries(respostas.map((x) => [x.comentario_id, Number(x.n)]));
@@ -436,6 +447,7 @@ export async function apiDeTeste(db, escopo, caminho, { method = 'GET', params =
     for (let i = 0; i < 30; i++) {
       const v = vs[Math.floor(r() * 60)];
       const id = 'cmt' + String(i).padStart(3, '0');
+      const assunto = (v.assunto || String(v.titulo).split(' ').slice(-2).join(' ')).toLowerCase();
       itens.push({
         id,
         snippet: {
@@ -443,7 +455,7 @@ export async function apiDeTeste(db, escopo, caminho, { method = 'GET', params =
           totalReplyCount: respostasPorComentario[id] || 0,
           topLevelComment: { id, snippet: {
             authorDisplayName: ['Ana', 'Bruno', 'Carla', 'Diego', 'Elisa', 'Fábio'][i % 6] + ' ' + (100 + i),
-            textDisplay: FRASES[i % FRASES.length],
+            textDisplay: MOLDES[i % MOLDES.length](assunto),
             publishedAt: new Date(Date.now() - i * 3600e3 * 5).toISOString(),
             likeCount: Math.floor(r() * 40)
           } }
