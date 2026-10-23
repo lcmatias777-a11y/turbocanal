@@ -752,7 +752,10 @@ export async function openDb({ url = process.env.DATABASE_URL, dataDir } = {}) {
     db = await makePglite(mem ? undefined : dataDir);
   }
   await db.exec(SCHEMA);
-  await seed(db);
+  // A carga inicial escreve em plans/tool_costs/settings, que a guarda protege.
+  // Ela é trabalho do próprio site, não ação de administrador: diz isso por escrito.
+  const { tarefaDoSite } = await import('./guarda.js');
+  await tarefaDoSite('carga inicial do banco', ['plans', 'tool_costs', 'blocos', 'settings'], () => seed(db));
   return db;
 }
 

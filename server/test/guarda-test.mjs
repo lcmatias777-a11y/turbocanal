@@ -135,16 +135,30 @@ check('e aí sim o saldo muda', (await saldo()) === antes + 120, String(await sa
 console.log('\n== O desligamento explícito vale só para o trecho dele ==');
 let dentro = null, depois = null;
 await G.contexto.run({ rota: 'TESTE', rotaAdmin: true, autorizado: null }, async () => {
-  await G.semGuarda(() => { dentro = G.conferir('UPDATE tool_costs SET cost=0') ?? 'passou'; });
+  await G.semGuarda('teste', ['tool_costs'], () => { dentro = G.conferir('UPDATE tool_costs SET cost=0') ?? 'passou'; });
   try { G.conferir('UPDATE tool_costs SET cost=0'); depois = 'passou'; } catch { depois = 'barrou'; }
 });
 check('dentro de semGuarda a escrita passa', dentro === 'passou', String(dentro));
 check('e logo depois dele a guarda volta a barrar', depois === 'barrou', String(depois));
 
-console.log('\n== Fora de requisição (agendador, migração) nada é barrado ==');
+console.log('\n== Fora de requisição a guarda barra por padrão ==');
+// Mudou de proposito. Antes "sem contexto" liberava tudo, e bastava mover uma
+// escrita administrativa para dentro de um setTimeout, de uma fila em memoria
+// ou de um script para a guarda ficar calada. Quem precisa escrever fora de
+// requisicao agora diz o nome, por escrito, em tarefaDoSite().
 let fora = 'barrou';
 try { G.conferir('UPDATE tool_costs SET cost=0'); fora = 'passou'; } catch {}
-check('migração e agendador escrevem normalmente', fora === 'passou');
+check('escrita protegida solta, sem contexto, é barrada', fora === 'barrou', fora);
+
+let tarefa = 'barrou';
+G.tarefaDoSite('agendador de teste', ['tool_costs'], () => {
+  try { G.conferir('UPDATE tool_costs SET cost=0'); tarefa = 'passou'; } catch {}
+});
+check('a mesma escrita dentro de tarefaDoSite() passa', tarefa === 'passou', tarefa);
+
+let semNome = 'barrou';
+try { G.conferir('UPDATE users SET name=? WHERE id=?'); semNome = 'passou'; } catch {}
+check('escrita comum fora de requisição continua passando', semNome === 'passou', semNome);
 
 console.log(`\nRESULTADO: ${pass} passaram, ${fail} falharam.`);
 server.close();

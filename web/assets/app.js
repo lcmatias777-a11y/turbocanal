@@ -231,7 +231,7 @@ views.home = async () => {
       <h1>Faça seu canal crescer com dados de verdade</h1>
       <p>Pesquisa de palavras-chave, análise de SEO de vídeos e canais, tendências e ferramentas de IA para criadores do YouTube. Plano gratuito generoso com recarga mensal de créditos, site e extensão para Chrome na mesma conta.</p>
       <p>
-        <a class="btn" href="#/login">Entrar com Google e ganhar 5.000 créditos</a>
+        <a class="btn" href="#/login">Entrar com Google e ganhar ${fmt(topupFree())} créditos</a>
         <a class="btn ghost" href="#/planos">Ver planos</a>
         <a class="btn ghost" href="#/extensao">⬇️ Baixar extensão</a>
       </p>
@@ -257,7 +257,7 @@ views.home = async () => {
     <p class="center"><a class="btn ghost" href="#/avaliacoes">⭐ Ver e escrever avaliações</a></p>
     <div data-slot="home-antes-planos" hidden></div>
     <h2 class="center" style="margin-top:34px">Planos</h2>
-    <p class="center muted small">Créditos renovam todo mês. As comparações de capacidade são metas internas de referência, não números auditados.</p>
+    <p class="center muted small">Toda conta tem o saldo restaurado sozinho uma vez por mês, no plano Free ou pago. Pagar um plano dá um lote de créditos por cima, a cada pagamento confirmado: não existe cobrança automática. As comparações de capacidade são metas internas de referência, não números auditados.</p>
     <section class="grid cols3">${plans.map(planCard).join('')}</section>`;
   // o resumo das avaliações vem do banco; se ainda não houver nenhuma, a própria função avisa
   try {
@@ -270,11 +270,11 @@ views.home = async () => {
 function planCard(p) {
   return `<div class="card planCard">
     <h3>${esc(p.name)}</h3>
-    <div class="price">${p.price_cents ? money(p.price_cents) : 'Grátis'}<small>/mês</small></div>
-    <div><b>${fmt(p.monthly_credits)}</b> créditos por mês</div>
+    <div class="price">${p.price_cents ? money(p.price_cents) : 'Grátis'}<small>${p.price_cents ? ' por pagamento' : '/mês'}</small></div>
+    <div><b>${fmt(p.monthly_credits)}</b> créditos ${p.price_cents ? 'a cada pagamento confirmado' : 'por mês'}</div>
     <p class="muted small">${esc(p.description || '')}</p>
     ${p.price_cents
-      ? `<a class="btn" href="#/checkout?plan=${esc(p.id)}">Assinar via Pix</a>`
+      ? `<a class="btn" href="#/checkout?plan=${esc(p.id)}">Pagar via Pix</a>`
       : `<a class="btn secondary" href="#/login">Entrar com Google</a>`}
   </div>`;
 }
@@ -293,7 +293,7 @@ views.login = async (params) => {
     <div class="card" style="max-width:440px;margin:30px auto;text-align:center">
       <h2>Entrar no TurboCanal</h2>
       ${params.get('erro') ? alertBox('err', esc(params.get('erro'))) : ''}
-      <p class="muted">Entre com sua conta do Google (a mesma do seu canal do YouTube). Sua conta é criada automaticamente na primeira vez, com 5.000 créditos.</p>
+      <p class="muted">Entre com sua conta do Google (a mesma do seu canal do YouTube). Sua conta é criada automaticamente na primeira vez, com ${fmt(topupFree())} créditos.</p>
       ${googleButton('Entrar com Google')}
       <p class="muted small">Ao entrar, você autoriza a leitura de dados públicos do YouTube para as ferramentas de pesquisa. Gerenciar o seu canal (capas, vídeos, lives) é uma autorização separada, feita em "Meu canal".</p>
       <p class="small"><a href="/privacidade">Privacidade</a> · <a href="/termos">Termos de uso</a></p>
@@ -788,8 +788,19 @@ views['ferramentas/tendencias'] = async () => {
 const studioCtx = () => ({ esc, alertBox, fmt, state, api, refreshMe, go: (h) => (location.hash = h) });
 const loadStudio = () => import('./studio.js');
 
-function copyBtn(text, label = 'copiar') {
-  return `<button class="btn sm ghost" type="button" onclick="navigator.clipboard.writeText(${esc(JSON.stringify(String(text || '')))});this.textContent='copiado ✓'">${label}</button>`;
+/** Administrador (principal ou nao). A tela usa isto para nao desenhar botao
+ *  que o servidor vai recusar: botao que so devolve erro e botao de mentira. */
+const ehAdmin = () => ['owner', 'admin'].includes(state.user?.role);
+
+/** Recarga mensal de creditos (piso de toda conta). Vem do servidor porque e
+ *  editavel no painel;
+ *  numero escrito na mao vira mentira no dia em que o administrador muda. */
+const topupFree = () => state.pub?.free_monthly_topup || 5000;
+
+function copyBtn(text, label = 'copiar', cls = 'ghost') {
+  // esc() em volta do JSON e obrigatorio: sem ele as aspas do JSON fecham o
+  // atributo onclick e o navegador compila um handler quebrado, que nao faz nada.
+  return `<button class="btn sm ${cls}" type="button" onclick="navigator.clipboard.writeText(${esc(JSON.stringify(String(text || '')))});this.textContent='copiado ✓'">${esc(label)}</button>`;
 }
 
 // Ideias de próximos vídeos: com o canal vinculado, usa os títulos mais vistos (leitura sem custo)
@@ -1161,7 +1172,10 @@ views['ferramentas/concorrentes'] = async () => {
           <p class="muted small">${c.subs != null ? fmt(c.subs) + ' inscritos · ' : ''}média recente: ${fmt(c.last_data?.media)} views · atualizado ${dt(c.last_checked)}</p>
           <p><button class="btn sm secondary" data-up="${esc(c.channel_id)}">Atualizar</button> <button class="btn sm ghost" data-del="${esc(c.id)}">Remover</button></p></div></div>
         ${c.last_data?.recent?.length ? videoTable(c.last_data.recent) : ''}</div>`).join('') : '<p class="muted">Nenhum concorrente ainda. Adicione o primeiro acima.</p>';
-    for (const b of document.querySelectorAll('[data-del]')) b.onclick = async () => { await api('/competitors/' + b.dataset.del, { method: 'DELETE' }); load(); };
+    for (const b of document.querySelectorAll('[data-del]')) b.onclick = async () => {
+      try { await api('/competitors/' + b.dataset.del, { method: 'DELETE' }); load(); }
+      catch (e) { $('#cmsg').innerHTML = alertBox('err', esc(e.message || String(e))); }
+    };
     for (const b of document.querySelectorAll('[data-up]')) b.onclick = () => add(b.dataset.up);
   };
   const add = async (q) => {
@@ -1273,7 +1287,7 @@ const canalTabs = {
         const tags = card.querySelector('[data-f=tags]').value.split(',').map((t) => t.trim()).filter(Boolean);
         const r = await api('/channel/videos/' + id, { method: 'PUT', body: { title: card.querySelector('[data-f=title]').value, description: card.querySelector('[data-f=description]').value, tags, privacy: priv } });
         card.dataset.privacy = r.result?.privacy || priv;
-        await refreshMe(); msg(id, 'ok', 'Salvo no YouTube. ' + creditsNote(r.credits));
+        await refreshMe(); msg(id, 'ok', 'Salvo ' + destino() + '. ' + creditsNote(r.credits));
       } catch (e) { msg(id, 'err', esc(e.message)); }
     };
     for (const inp of el.querySelectorAll('[data-f=title]')) inp.oninput = () => { const c = inp.closest('.card'); const l = c.querySelector('[data-len]'); if (l) l.textContent = inp.value.length + '/100'; };
@@ -1284,7 +1298,7 @@ const canalTabs = {
         const image = useLast ? state.lastThumb : await fileToDataUrl(card.querySelector('[data-file]').files[0]);
         if (!image) throw new Error('Escolha uma imagem.');
         const r = await api('/channel/videos/' + id + '/thumbnail', { method: 'POST', body: { image } });
-        await refreshMe(); msg(id, 'ok', 'Capa enviada ao YouTube (pode levar alguns minutos para aparecer). ' + creditsNote(r.credits));
+        await refreshMe(); msg(id, 'ok', (noTeste() ? 'Capa trocada no canal de teste. ' : 'Capa enviada ao YouTube (pode levar alguns minutos para aparecer). ') + creditsNote(r.credits));
       } catch (e) { msg(id, 'err', esc(e.message)); }
     };
     for (const b of el.querySelectorAll('[data-ab]')) b.onclick = async () => {
@@ -1387,7 +1401,9 @@ const canalTabs = {
         await refreshMe();
         state.pendingUpload = null;
         state.prepDraft = null;
-        $('#pmsg').innerHTML = alertBox('ok', `✅ Vídeo enviado${r.result.scheduled ? ' e agendado' : ''}! <a href="${esc(done.url)}" target="_blank" rel="noopener">Ver no YouTube</a> · <a href="${esc(done.studio)}" target="_blank" rel="noopener">Abrir no Studio</a>. O processamento do YouTube pode levar alguns minutos. ` + creditsNote(r.credits));
+        $('#pmsg').innerHTML = alertBox('ok', done.teste
+          ? `✅ Vídeo publicado no canal de teste${r.result.scheduled ? ' e agendado' : ''}! <a href="#/canal/videos">Ver na lista de vídeos</a>. Nada foi enviado ao YouTube. ` + creditsNote(r.credits)
+          : `✅ Vídeo enviado${r.result.scheduled ? ' e agendado' : ''}! <a href="${esc(done.url)}" target="_blank" rel="noopener">Ver no YouTube</a> · <a href="${esc(done.studio)}" target="_blank" rel="noopener">Abrir no Studio</a>. O processamento do YouTube pode levar alguns minutos. ` + creditsNote(r.credits));
         $('#pprog').textContent = '';
       } catch (e) { $('#pmsg').innerHTML = alertBox('err', esc(e.message)); }
       btn.disabled = false;
@@ -1402,7 +1418,7 @@ const canalTabs = {
     if (noTeste()) {
       el.innerHTML = `<div class="card" style="max-width:720px"><h3>Criar transmissão ao vivo</h3>
         ${alertBox('warn', '🧪 <b>Esta é a única parte que o canal de teste não faz.</b> Uma transmissão ao vivo precisa de um canal de verdade no YouTube recebendo o sinal, e de uma chave de transmissão que só o YouTube emite. Eu poderia desenhar a tela e inventar uma chave, mas ela não transmitiria nada, e isso seria um botão de mentira.')}
-        <p class="muted small">Com seu canal vinculado, aqui você cria a live e recebe a URL RTMP e a chave para colar no OBS ou Streamlabs. Lá ela custa ${(state.costs.find((c) => c.tool === 'live_create') || {}).cost || 20} créditos.</p>
+        <p class="muted small">Com seu canal vinculado, aqui você cria a live e recebe a URL RTMP e a chave para colar no OBS ou Streamlabs. ${costLabel('live_create') ? `Lá ela custa ${costLabel('live_create')}.` : ''}</p>
         <p><a class="btn sm ghost" href="#/canal-teste">Desligar o canal de teste</a></p></div>`;
       return;
     }
@@ -1426,7 +1442,7 @@ const canalTabs = {
         const x = r.result;
         $('#lout').innerHTML = `<div class="alert ok">Live criada! <a href="${esc(x.watchUrl)}" target="_blank" rel="noopener">Página da live</a> · <a href="${esc(x.studioUrl)}" target="_blank" rel="noopener">Abrir no Studio</a></div>
           <p><b>URL do servidor (RTMP):</b> <span class="copybox">${esc(x.rtmpUrl)}</span></p>
-          <p><b>Chave de transmissão:</b> <span class="copybox" id="skey">••••••••</span> <button class="btn sm secondary" id="showkey">mostrar</button> <button class="btn sm secondary" onclick="navigator.clipboard.writeText(${JSON.stringify(x.streamKey || '')})">copiar</button></p>
+          <p><b>Chave de transmissão:</b> <span class="copybox" id="skey">••••••••</span> <button class="btn sm secondary" id="showkey">mostrar</button> ${copyBtn(x.streamKey || '', 'copiar', 'secondary')}</p>
           <p class="muted small">${esc(x.aviso)} ${creditsNote(r.credits)}</p>`;
         $('#showkey').onclick = () => ($('#skey').textContent = x.streamKey || '(indisponível)');
       } catch (e) { $('#lmsg').innerHTML = alertBox('err', esc(e.message)); }
@@ -1552,7 +1568,7 @@ views.planos = async () => {
   const plans = (await api('/plans')).items;
   appEl().innerHTML = `
     <h1>Planos e preços</h1>
-    <p class="muted">Pagamento mensal via Pix. Os créditos do plano são liberados após a confirmação do pagamento pelo provedor, nunca antes. Metas de capacidade comparativa são referências internas, não números auditados.</p>
+    <p class="muted">Pagamento avulso via Pix, sem cobrança automática: os créditos do plano são liberados após a confirmação do pagamento pelo provedor, nunca antes, e para receber de novo é preciso pagar de novo. Metas de capacidade comparativa são referências internas, não números auditados.</p>
     ${state.pub.payments_enabled ? '' : alertBox('warn', 'Os pagamentos ainda não foram ativados pelo administrador (falta configurar o provedor Pix). As assinaturas ficarão disponíveis assim que isso for concluído; nenhuma cobrança é simulada.')}
     <section class="grid cols3">${plans.map(planCard).join('')}</section>
     <h2>Como funcionam os créditos</h2>
@@ -1590,9 +1606,9 @@ views.checkout = async (params) => {
     const pix = p.pix || {};
     $('#pix').innerHTML = `
       <h3>Pague com Pix <span class="pill warn" id="st">${esc(p.status)}</span></h3>
-      ${pix.qr_code_base64 ? `<div class="qr"><img alt="QR Code Pix" src="data:image/png;base64,${pix.qr_code_base64}"></div>` : ''}
+      ${pix.qr_code_base64 ? `<div class="qr"><img alt="QR Code Pix" src="data:image/png;base64,${esc(pix.qr_code_base64)}"></div>` : ''}
       ${pix.qr_code ? `<p class="small muted">Ou use o Pix copia e cola:</p><div class="copybox">${esc(pix.qr_code)}</div>
-        <p><button class="btn sm secondary" onclick="navigator.clipboard.writeText(${JSON.stringify(pix.qr_code)})">Copiar código Pix</button></p>` : ''}
+        <p>${copyBtn(pix.qr_code, 'Copiar código Pix', 'secondary')}</p>` : ''}
       <p class="muted small">Assim que o provedor confirmar o pagamento, seu plano é ativado automaticamente e os créditos aparecem na sua conta. Esta página atualiza sozinha.</p>`;
   }
   async function pollPayment(id) {
@@ -1647,7 +1663,7 @@ views.conta = async () => {
       ${pays.map((p) => `<tr><td>${dt(p.created_at)}</td><td>${esc(p.plan_id)}</td><td>${money(p.amount_cents)}</td><td><span class="pill ${p.status === 'approved' ? 'ok' : p.status === 'pending' ? 'warn' : 'err'}">${esc(p.status)}</span></td></tr>`).join('')}</table>` : '<p class="muted">Nenhum pagamento ainda.</p>'}</div>`;
   $('#tok').onclick = async () => {
     const r = await api('/auth/token');
-    $('#tokout').innerHTML = `<div class="copybox">${esc(r.token)}</div><p><button class="btn sm secondary" onclick="navigator.clipboard.writeText(${JSON.stringify(r.token)})">Copiar token</button></p>`;
+    $('#tokout').innerHTML = `<div class="copybox">${esc(r.token)}</div><p>${copyBtn(r.token, 'Copiar token', 'secondary')}</p>`;
   };
   const of = $('#of');
   if (of) of.onsubmit = async (ev) => {
@@ -1678,7 +1694,7 @@ views.ajuda = async () => {
     <h1>Central de ajuda</h1>
     <div class="grid cols2">
       <div class="card"><h3>Como funcionam os créditos?</h3>
-        <p class="muted">Cada ferramenta tem um custo em créditos, mostrado antes de usar. No plano Free, seu saldo é completado até 5.000 créditos no início de cada mês. Planos pagos liberam mais créditos a cada pagamento confirmado. Se uma ferramenta falhar, os créditos daquela chamada são estornados automaticamente.</p></div>
+        <p class="muted">Cada ferramenta tem um custo em créditos, mostrado antes de usar. Seu saldo é completado até ${fmt(topupFree())} créditos no início de cada mês, em qualquer plano — é o piso de toda conta, e não soma: se você já tiver mais do que isso, nada entra. Pagar um plano libera os créditos daquele plano por cima, a cada pagamento confirmado; não há cobrança automática, então para receber de novo é preciso pagar de novo. Se uma ferramenta falhar, os créditos daquela chamada são estornados automaticamente.</p></div>
       <div class="card"><h3>Como instalo a extensão do Chrome?</h3>
         <p><a class="btn sm" href="/turbocanal-extensao.zip" download id="extDl">⬇️ Baixar extensão (.zip)</a> <span class="muted small" id="extVer"></span></p>
         <ol class="muted">
@@ -2155,6 +2171,14 @@ function ligFechar(msg) {
 }
 
 window.ligSinal = ligSinal; window.ligFechar = ligFechar;
+/** Manda um sinal da ligacao para o outro lado.
+ *  Os sinais "chamando" e "oferta" PRECISAM chegar: sem eles a chamada nao
+ *  existe do outro lado. Engolir a falha deles fazia a tela ficar em
+ *  "Chamando..." e, 45 segundos depois, culpar a rede dos dois computadores
+ *  por um POST que nem saiu. Agora o erro sobe e quem chamou ve o motivo certo.
+ *  Os outros sinais sao de encerramento e continuam best-effort: a chamada ja
+ *  esta acabando e um erro ali nao muda o que a pessoa faz. */
+const SINAL_OBRIGATORIO = new Set(['chamando', 'oferta', 'resposta']);
 async function ligSinal(conversa, para, tipo, dados = {}) {
   try {
     await api(`/admin/chats/${conversa}/sinal`, {
@@ -2166,7 +2190,11 @@ async function ligSinal(conversa, para, tipo, dados = {}) {
         paraCliente: (tipo === 'chamando' || (tipo === 'oferta' && !dados.renegociar)) ? '' : lig.outroCliente
       }
     });
-  } catch {}
+    return true;
+  } catch (e) {
+    if (SINAL_OBRIGATORIO.has(tipo)) throw new Error('Não consegui avisar o outro lado da chamada: ' + e.message);
+    return false;
+  }
 }
 
 async function ligCriarPc(conversa, com) {
@@ -2335,7 +2363,11 @@ async function chPintarLista() {
       await chPintarLista();
       await chAbrir(r.conversa);
     };
-  } catch {}
+  } catch (e) {
+    // Engolir isto deixava "Começar conversa" girando para sempre, sem dizer nada.
+    const cx = $('#chPessoas');
+    if (cx) cx.innerHTML = `<p class="muted small">Não consegui carregar a lista de administradores: ${esc(e.message || String(e))}</p>`;
+  }
 }
 
 async function chAbrir(id) {
@@ -2438,7 +2470,7 @@ views.privacidade = async () => {
 
 views.termos = async () => {
   appEl().innerHTML = `<h1>Termos de Uso</h1><div class="card" style="max-width:820px">
-    <p>1. O TurboCanal oferece ferramentas de pesquisa, análise e gestão para criadores do YouTube, por meio de um sistema de créditos. O plano Free é gratuito; os planos pagos são cobrados mensalmente e liberam créditos após a confirmação do pagamento.</p>
+    <p>1. O TurboCanal oferece ferramentas de pesquisa, análise e gestão para criadores do YouTube, por meio de um sistema de créditos. O plano Free é gratuito; os planos pagos são pagamentos avulsos, sem cobrança automática ou recorrente: cada pagamento confirmado libera os créditos daquele plano.</p>
     <p>2. Você é responsável pelo conteúdo que publica no YouTube por meio da plataforma e por cumprir as regras do YouTube e do Google. As ações no seu canal (envio de vídeos, capas, lives, comentários) são executadas somente a seu pedido.</p>
     <p>3. Pontuações, estimativas e sugestões de IA são auxiliares e podem conter erros; confira antes de publicar.</p>
     <p>4. Não garantimos disponibilidade ininterrupta. Limites de uso podem ser aplicados para respeitar as cotas das APIs do Google.</p>
@@ -2660,7 +2692,6 @@ views['bate-papo'] = async () => {
   if (!state.user) return needLogin();
   appEl().innerHTML = `<h1>💬 Bate-papo</h1>
     <p class="muted">Um canal só, para todo mundo que usa o TurboCanal. Não existe conversa privada aqui.</p>
-    <div id="bpAviso"></div>
     <div class="card bp-caixa">
       <div class="bp-msgs" id="bpMsgs"><span class="spin"></span></div>
       <form class="bp-escrever" id="bpForm">
@@ -2810,7 +2841,7 @@ async function poComentarios(postId, area) {
           <span class="muted small">${poData(c.criado_em)}</span></div>
           <p>${esc(c.texto)}</p>
           ${c.imagem ? `<img class="po-com-img" src="${esc(c.imagem)}" alt="">` : ''}</div>
-        <button class="btn sm ghost" data-apagarcom="${esc(c.id)}" title="Apagar">🗑</button>
+        ${c.meu || ehAdmin() ? `<button class="btn sm ghost" data-apagarcom="${esc(c.id)}" title="Apagar">🗑</button>` : ''}
       </div>`).join('') || '<p class="muted small">Nenhum comentário ainda.</p>'}
     <form class="po-escrever" data-post="${esc(postId)}">
       ${ava(state.user, 28)}
@@ -2902,7 +2933,7 @@ function poFormulario(area, recarregar) {
     if (!f) return;
     try {
       po.imagem = await imgPreparar(f);
-      $('#poPrevia').innerHTML = `<img class="po-img" src="${po.imagem}" alt="">`;
+      $('#poPrevia').innerHTML = `<img class="po-img" src="${esc(po.imagem)}" alt="">`;
     } catch (e) { $('#poMsg').innerHTML = alertBox('err', esc(e.message)); }
   };
   $('#poCancelar').onclick = () => { po.editando = null; cx.hidden = true; cx.innerHTML = ''; };
@@ -3465,7 +3496,7 @@ const adminTabs = {
           </div>`).join('') : '<p class="muted">Nenhuma denúncia aberta.</p>'}
       </div>
       <div class="card" style="margin-top:14px"><h3>Tudo o que está publicado (${lista.total})</h3>
-        <p class="muted small">Média ${String(lista.resumo.media.toFixed(1)).replace('.', ',')} · ${fmt(lista.total)} avaliações. Remover tira da média na hora.</p>
+        <p class="muted small">Média ${String(lista.resumo.media.toFixed(1)).replace('.', ',')} · ${fmt(lista.resumo.total)} avaliação(ões) com estrelas${lista.resumo.comentarios ? ` e ${fmt(lista.resumo.comentarios)} comentário(s) sem nota` : ''}. A média conta só as que têm estrelas; remover tira da média na hora.</p>
         ${lista.itens.map((i) => `<div class="rv-item">
             <div class="rv-cab"><span class="rv-autor">${esc(i.autor)}</span>${i.doDesenvolvedor ? '<span class="rv-selo">Desenvolvedor</span>' : i.daEquipe ? '<span class="rv-selo equipe">Equipe</span>' : ''}${i.tipo === 'avaliacao' ? `<span class="rv-estrelas">${estrelasTxt(i.estrelas)}</span>` : '<span class="pill">comentário</span>'}
               <span class="muted small">${dt(i.criado_em)} · 👍 ${fmt(i.gostei)} 👎 ${fmt(i.naoGostei)}</span></div>
@@ -3481,7 +3512,8 @@ const adminTabs = {
       if (motivo === null) return;
       b.disabled = true;
       try {
-        await api('/admin/moderate', { method: 'POST', body: { alvo_tipo: b.dataset.mod, alvo_id: b.dataset.id, remover: b.dataset.remover === '1', motivo } });
+        const r = await api('/admin/moderate', { method: 'POST', body: { alvo_tipo: b.dataset.mod, alvo_id: b.dataset.id, remover: b.dataset.remover === '1', motivo } });
+        feitoOuPedido(r);
         await adminTabs.avaliacoes(el);
       } catch (e) { showErr($('#amodmsg'), e); b.disabled = false; }
     };
@@ -3504,7 +3536,7 @@ const adminTabs = {
             : 'Ninguém usou ferramenta na semana passada, então ainda não há o que comparar.'}
             <br><b>É este número que diz se o site resolve um problema de verdade</b>, não a quantidade de ferramentas.</p></div>
         <div class="card"><h3>Cota do YouTube hoje</h3><div class="kpi">${fmt(o.youtubeQuota?.usedToday || 0)} <small class="muted">/ ${fmt(o.youtubeQuota?.dailyLimit || 10000)}</small></div>
-          <p class="muted small">Compartilhada por todo o site. Busca = 100 unidades, postar vídeo = 1.600, capa ou edição = 50, leitura = 1. Renova por volta das 4h ou 5h. Quando o site crescer, peça aumento gratuito ao Google no <a href="https://support.google.com/youtube/contact/yt_api_form" target="_blank" rel="noopener">formulário de cota da API do YouTube</a>.</p></div>
+          <p class="muted small">O número usado hoje é medido de verdade; o limite mostrado é a cota padrão do Google (10.000) e o site não tem como saber se a sua foi aumentada. Busca = 100 unidades, postar vídeo = 1.600, capa ou edição = 50, leitura = 1. Renova por volta das 4h ou 5h. Quando o site crescer, peça aumento gratuito ao Google no <a href="https://support.google.com/youtube/contact/yt_api_form" target="_blank" rel="noopener">formulário de cota da API do YouTube</a>.</p></div>
       </section>
       <div class="card"><h3>O que já está pronto e o que falta</h3><div id="achk"><span class="spin"></span></div></div>
       <div class="card scroll"><h3>Uso por ferramenta (30 dias)</h3>
@@ -3636,7 +3668,7 @@ const adminTabs = {
       <div class="grid cols2">
       <div class="card"><h3>Geral</h3><div id="cmsg"></div>
         <label>Nome do site</label><input id="c_site" value="${esc(s.site_name)}">
-        <label>Recarga mensal do plano Free (créditos)</label><input id="c_topup" type="number" value="${esc(s.free_monthly_topup)}">
+        <label>Recarga mensal de créditos — piso de toda conta, paga ou não (créditos)</label><input id="c_topup" type="number" value="${esc(s.free_monthly_topup)}">
         <label>Chave da YouTube Data API ${s.yt_api_key.set ? `<span class="pill ok">configurada (${esc(s.yt_api_key.masked)})</span>` : '<span class="pill warn">pendente</span>'}</label>
         <input id="c_yt" placeholder="cole a chave para atualizar (vazio mantém a atual)">
         <label>Chave da API do Gemini (IA que assiste vídeos, sugere textos e acha cortes) ${s.gemini_api_key.set ? `<span class="pill ok">configurada (${esc(s.gemini_api_key.masked)})</span>` : '<span class="pill warn">pendente</span>'}</label>
@@ -3736,12 +3768,12 @@ const adminTabs = {
       </div>`;
     if (isOwner) {
       $('#aadd').onclick = async () => {
-        try { await api('/admin/admins', { method: 'POST', body: { email: $('#aemail').value } }); adminTabs.admins(el); }
+        try { feitoOuPedido(await api('/admin/admins', { method: 'POST', body: { email: $('#aemail').value } })); adminTabs.admins(el); }
         catch (e) { showErr($('#amsg'), e); }
       };
       for (const b of el.querySelectorAll('[data-d]')) b.onclick = async () => {
         if (!confirm('Remover este administrador?')) return;
-        try { await api('/admin/admins/' + b.dataset.d, { method: 'DELETE' }); adminTabs.admins(el); }
+        try { feitoOuPedido(await api('/admin/admins/' + b.dataset.d, { method: 'DELETE' })); adminTabs.admins(el); }
         catch (e) { alert(e.message); }
       };
     }

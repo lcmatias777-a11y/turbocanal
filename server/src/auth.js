@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { autorizar as autorizarEscrita } from './guarda.js';
+import { autorizarRota as autorizarEscrita } from './guarda.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 import { getSetting, setSetting } from './db.js';

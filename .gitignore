@@ -6,3 +6,5 @@ server/data/
 *.log
 *.zip
 !web/turbocanal-extensao.zip
+server/test/telas/
+server/test/undefined/

@@ -82,6 +82,10 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
     try {
       res.json({
         site_name: (await getSetting(db, 'site_name')) || 'TurboCanal',
+        // A tela anunciava "5.000 créditos" em texto fixo em tres lugares, mas o
+        // valor e editavel em Admin > Configuracoes: bastava o administrador
+        // mudar para as tres frases passarem a mentir. Agora vem daqui.
+        free_monthly_topup: parseInt((await getSetting(db, 'free_monthly_topup')) || '5000', 10),
         payments_enabled: (await getSetting(db, 'payments_enabled')) === '1' && (await providerReady(db)),
         youtube_configured: !!((await getSetting(db, 'yt_api_key')) || process.env.YT_API_KEY),
         gemini_configured: !!(await geminiKey(db)),
@@ -111,23 +115,41 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
   app.get('*', (req, res) => res.sendFile(path.join(webDir, 'index.html')));
 
   // eslint-disable-next-line no-unused-vars
+  // Código curto para a pessoa citar quando avisar do erro; o mesmo código sai
+  // no log do servidor, então dá para achar o erro dela entre todos.
+  const erroId = () => Math.random().toString(36).slice(2, 8).toUpperCase();
   app.use((err, req, res, next) => {
     const status = err instanceof HttpError ? err.status : err?.type === 'entity.too.large' ? 413 : 500;
-    if (status >= 500) console.error('[erro]', err);
-    res.status(status).json({ error: status === 413 ? 'Arquivo grande demais.' : err.message || 'Erro interno.', ...(err.extra || {}) });
+    const id = status >= 500 ? erroId() : null;
+    if (id) console.error(`[erro ${id}] ${req.method} ${req.path}`, err);
+    // Erro 500 é erro MEU, não do usuário, e a mensagem dele costuma ser
+    // interna: caminho de arquivo, texto do Postgres, nome de tabela e rota
+    // (a guarda de escrita, por exemplo). Isso ia inteiro para o navegador.
+    // Agora o texto cru fica no log do servidor e a pessoa recebe uma frase
+    // que ela entende, com um código para ela me passar. Em desenvolvimento
+    // e nos testes a mensagem continua aparecendo, que é onde ela serve.
+    const cru = status === 413 ? 'Arquivo grande demais.' : err.message || 'Erro interno.';
+    // "No ar" = tem banco Postgres de verdade. Em desenvolvimento e nos testes o
+    // banco é em memória, e ali a mensagem crua é justamente o que eu preciso ver.
+    const noAr = !!process.env.DATABASE_URL && process.env.MOSTRAR_ERRO_CRU !== '1';
+    const paraOUsuario = status >= 500 && noAr
+      ? `Deu um erro aqui do nosso lado, não foi culpa sua. Já ficou registrado. Código: ${id}`
+      : cru;
+    res.status(status).json({ error: paraOUsuario, ...(err.extra || {}) });
   });
 
   await printSetupHints(db);
   if (scheduler) {
-    setInterval(() => runAbScheduler(db).catch((e) => console.error('[ab]', e.message)), 5 * 60 * 1000).unref();
-    setInterval(async () => {
-      try { const { avisarExperimentos } = await import('./experimentos.js'); await avisarExperimentos(db); }
-      catch (e) { console.error('[experimentos]', e.message); }
-    }, 60 * 60 * 1000).unref();
-    setInterval(async () => {
-      try { const { recalcularTodos } = await import('./estatisticas.js'); await recalcularTodos(db); }
-      catch (e) { console.error('[estatisticas]', e.message); }
-    }, 6 * 60 * 60 * 1000).unref();
+    // Cada tarefa roda dentro de tarefaDoSite: fora de requisição a guarda de
+    // escrita barra por padrão, e quem roda aqui diz o nome por escrito.
+    const { tarefaDoSite } = await import('./guarda.js');
+    setInterval(() => tarefaDoSite('teste A/B', [], () => runAbScheduler(db)).catch((e) => console.error('[ab]', e.message)), 5 * 60 * 1000).unref();
+    setInterval(() => tarefaDoSite('avisos de experimento', [], async () => {
+      const { avisarExperimentos } = await import('./experimentos.js'); await avisarExperimentos(db);
+    }).catch((e) => console.error('[experimentos]', e.message)), 60 * 60 * 1000).unref();
+    setInterval(() => tarefaDoSite('estatísticas', [], async () => {
+      const { recalcularTodos } = await import('./estatisticas.js'); await recalcularTodos(db);
+    }).catch((e) => console.error('[estatisticas]', e.message)), 6 * 60 * 60 * 1000).unref();
   }
   return { app, db };
 }

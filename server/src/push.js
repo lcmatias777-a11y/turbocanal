@@ -68,13 +68,17 @@ export async function avisar(db, userId, payload) {
 }
 
 /** Aviso de chamada. Separado porque é o único com urgência de verdade. */
-export async function avisarChamada(db, paraUserId, deNome, conversaId) {
+export async function avisarChamada(db, paraUserId, deNome, conversaId, deUserId = null) {
   return avisar(db, paraUserId, {
     tipo: 'chamada',
     titulo: `📞 ${deNome || 'Alguém'} está te ligando`,
     corpo: 'Toque para abrir o TurboCanal e atender.',
     link: '/#/admin/chats',
-    conversa: conversaId
+    conversa: conversaId,
+    // Quem ligou. Sem isto o botao "Recusar" do aviso nao tinha para quem
+    // mandar o desligamento, e so fechava o aviso: quem ligou ficava ouvindo
+    // "Chamando..." ate o tempo acabar.
+    de: deUserId
   });
 }
 

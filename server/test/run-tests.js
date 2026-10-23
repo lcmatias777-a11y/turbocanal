@@ -593,14 +593,24 @@ const bkComum = await req('/api/admin/backup', { token: t1 });
 check('usuário comum não baixa backup', bkComum.status === 403);
 const bkAdmin = await req('/api/admin/backup', { token: tEq });
 check('administrador comum também não baixa (só o principal)', bkAdmin.status === 403, String(bkAdmin.status));
+// Gera as chaves das notificacoes ANTES do backup: sem isso vapid_private nem
+// existe em settings e o teste passaria sem provar nada.
+const { chaves: chavesPush } = await import('../src/push.js');
+await chavesPush(db);
 const bk = await req('/api/admin/backup', { token: tOwn });
 check('o administrador principal baixa o backup', bk.status === 200 && bk.data.tabelas && bk.data.resumo);
 check('o backup traz os dados de verdade (usuários, planos, créditos)',
   bk.data.tabelas.users.length >= 2 && bk.data.tabelas.plans.length === 6 && bk.data.tabelas.transactions.length > 0, JSON.stringify(bk.data.resumo));
-check('o backup NÃO leva senha nem chaves de API',
-  bk.data.tabelas.users.every((u) => !u.pass_hash || u.pass_hash === '(removido do backup)')
-  && !bk.data.tabelas.settings.some((r) => /api_key|jwt_secret|mp_access_token|setup_token/.test(r.key)),
-  JSON.stringify(bk.data.tabelas.settings.map((r) => r.key)));
+// A lista de segredos vem do proprio codigo: antes eram duas listas na mao, elas
+// saíram do lugar e a chave privada das notificacoes ia em texto puro no backup.
+const { SEGREDOS_SETTINGS } = await import('../src/admin.js');
+const chavesNoBackup = bk.data.tabelas.settings.map((r) => r.key);
+const vazou = chavesNoBackup.filter((k) => SEGREDOS_SETTINGS.has(k));
+check('o backup NÃO leva senha nem NENHUM segredo da tabela settings',
+  bk.data.tabelas.users.every((u) => !u.pass_hash || u.pass_hash === '(removido do backup)') && vazou.length === 0,
+  'vazaram: ' + JSON.stringify(vazou));
+check('o teste do backup confere mesmo a chave privada das notificações',
+  SEGREDOS_SETTINGS.has('vapid_private') && !!(await db.get("SELECT value FROM settings WHERE key='vapid_private'"))?.value);
 const resumoBk = await req('/api/admin/backup/resumo', { token: tOwn });
 check('o painel mostra quantas linhas existem e quando foi o último backup',
   resumoBk.status === 200 && resumoBk.data.total > 0 && !!resumoBk.data.ultimo_backup, JSON.stringify(resumoBk.data).slice(0, 120));
@@ -644,7 +654,29 @@ await db.run("UPDATE users SET last_refill='2020-01', credits=10 WHERE email='ma
 await req('/api/me', { token: t1 });
 const nRecarga = (await req('/api/notifications', { token: t1 })).data.itens.find((x) => x.tipo === 'creditos_recarregados');
 check('ao virar o mês, a pessoa é avisada de que os créditos foram restaurados', !!nRecarga, 'não veio');
-check('o aviso de recarga diz quanto entrou e até quanto completa', /\d/.test(nRecarga?.corpo || '') && /limite mensal/.test(nRecarga?.corpo || ''), nRecarga?.corpo);
+check('o aviso de recarga diz quanto entrou, até quanto completa, e que não soma',
+  /\d/.test(nRecarga?.corpo || '') && /piso mensal/.test(nRecarga?.corpo || '') && /não soma/.test(nRecarga?.corpo || ''), nRecarga?.corpo);
+
+// Quem PAGOU também recebe a recarga mensal. Antes não recebia: pagar desligava
+// a recarga para sempre, e no mês seguinte a pessoa ficava com o que sobrou e
+// sem reposição nenhuma, ou seja, pior do que se nunca tivesse pagado.
+{
+  const antesDoTeste = await db.get("SELECT plan_id, credits, last_refill FROM users WHERE email='maria@example.com'");
+  const pago = await db.get("SELECT id FROM plans WHERE price_cents > 0 ORDER BY price_cents LIMIT 1");
+  await db.run("UPDATE users SET plan_id=?, last_refill='2020-01', credits=7 WHERE email='maria@example.com'", [pago.id]);
+  await req('/api/me', { token: t1 });
+  const saldoPago = Number((await db.get("SELECT credits FROM users WHERE email='maria@example.com'")).credits);
+  check('quem está num plano PAGO também recebe a recarga mensal', saldoPago >= 5000, `saldo ficou ${saldoPago}`);
+
+  // "completa até", não soma: quem já tem mais que o piso não recebe nada
+  await db.run("UPDATE users SET last_refill='2020-01', credits=99999 WHERE email='maria@example.com'");
+  await req('/api/me', { token: t1 });
+  const saldoCheio = Number((await db.get("SELECT credits FROM users WHERE email='maria@example.com'")).credits);
+  check('quem já tem mais que o piso não ganha crédito de graça', saldoCheio === 99999, `saldo ficou ${saldoCheio}`);
+  // devolve a conta exatamente como estava: os testes seguintes contam com isso
+  await db.run('UPDATE users SET plan_id=?, credits=?, last_refill=? WHERE email=?',
+    [antesDoTeste.plan_id, antesDoTeste.credits, antesDoTeste.last_refill, 'maria@example.com']);
+}
 
 // ajuste de créditos pelo dono: avisa com o motivo
 await req('/api/admin/users/' + u2.data.user.id + '/credits', { method: 'POST', token: tOwn, body: { delta: 500, note: 'bônus de teste' } });

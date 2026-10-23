@@ -58,12 +58,12 @@ export const avisos = {
     link: '#/dashboard'
   }),
   recarga: (db, userId, quanto, teto) => notificar(db, userId, 'creditos_recarregados', `Seus créditos do mês foram restaurados`, {
-    corpo: `Entraram ${n(quanto)} créditos para completar o saldo até ${n(teto)}, que é o limite mensal do plano Free. Isso acontece sozinho no primeiro uso de cada mês.`,
+    corpo: `Entraram ${n(quanto)} créditos para completar o saldo até ${n(teto)}, que é o piso mensal de toda conta. Isso acontece sozinho no primeiro uso de cada mês, e não soma: se você já tiver mais do que isso, nada entra.`,
     link: '#/historico',
     dados: { quanto, teto }
   }),
   pagamento: (db, userId, { plano, creditos, valorCentavos }) => notificar(db, userId, 'creditos_pagamento', `Pagamento confirmado: +${n(creditos)} créditos`, {
-    corpo: `Seu plano agora é o ${plano}. Os ${n(creditos)} créditos já estão no seu saldo e passam a entrar todo mês enquanto o plano estiver ativo.`,
+    corpo: `Seu plano agora é o ${plano}. Os ${n(creditos)} créditos já estão no seu saldo. Não há cobrança automática: para receber esta quantidade de novo, é preciso fazer outro pagamento.`,
     link: '#/historico',
     dados: { plano, creditos, valorCentavos }
   }),

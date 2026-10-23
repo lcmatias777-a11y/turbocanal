@@ -13,12 +13,19 @@ export function getUser(db, id) {
 }
 
 /**
- * Recarga mensal do plano Free: no primeiro uso de cada mês, o saldo é
- * completado até free_monthly_topup (padrão 5000). "Completa até", não soma.
+ * Recarga mensal de TODA conta: no primeiro uso de cada mês, o saldo é
+ * completado até free_monthly_topup (padrão 5000). "Completa até", não soma:
+ * quem já tem mais do que isso não recebe nada.
+ *
+ * Antes isto valia só para o plano Free, e o efeito era uma armadilha: quem
+ * pagava um plano recebia os créditos daquele pagamento UMA vez e, a partir
+ * dali, parava de receber a recarga mensal. No mês seguinte ficava com o que
+ * sobrou e sem recarga nenhuma — ou seja, pior do que se nunca tivesse pagado.
+ * Não existe cobrança recorrente no site; pagar dá um lote de créditos por
+ * cima, e esta recarga é o piso de toda conta, tenha ela pagado ou não.
  */
 export async function ensureRefill(db, user) {
   if (!user || user.role === 'owner') return user;
-  if (user.plan_id !== 'free') return user;
   const m = ym();
   if (user.last_refill === m) return user;
   const topup = parseInt((await getSetting(db, 'free_monthly_topup')) || '5000', 10);
@@ -27,12 +34,15 @@ export async function ensureRefill(db, user) {
   // página, inclusive dentro do painel administrativo. Ela não é ação de
   // administrador nenhum, então sai da guarda de escrita explicitamente.
   const { semGuarda } = await import('./guarda.js');
-  await semGuarda(() => db.tx(async (q) => {
+  // Declara, por escrito, o que esta escrita automática pode tocar. Fora desta
+  // lista a guarda barra, inclusive se uma função auxiliar daqui de dentro
+  // tentar mexer em plano, preço ou configuração.
+  await semGuarda('recarga mensal de créditos', ['users:credits', 'transactions'], () => db.tx(async (q) => {
     const u = await q.get('SELECT credits,last_refill FROM users WHERE id=?', [user.id]);
     if (!u || u.last_refill === m) return;
     const delta = Math.max(0, topup - u.credits);
     await q.run('UPDATE users SET last_refill=?, credits=credits+? WHERE id=?', [m, delta, user.id]);
-    if (delta > 0) await insertTx(q, user.id, delta, u.credits + delta, null, 'Recarga mensal do plano Free');
+    if (delta > 0) await insertTx(q, user.id, delta, u.credits + delta, null, 'Recarga mensal de créditos');
     recarregou = delta;
   }));
   if (recarregou > 0) {

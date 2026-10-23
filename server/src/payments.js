@@ -106,7 +106,10 @@ export function paymentRoutes(app, db, auth) {
       const id = uid();
       const body = {
         transaction_amount: Math.round(plan.price_cents) / 100,
-        description: `TurboCanal - Plano ${plan.name} (mensal)`,
+        // "(mensal)" saia aqui e ia parar no extrato do cliente, mas nao existe
+        // cobranca recorrente: cada Pix e um pagamento avulso que libera os
+        // creditos daquele plano uma vez.
+        description: `TurboCanal - Plano ${plan.name}`,
         payment_method_id: 'pix',
         external_reference: id,
         payer: { email: req.user.email }

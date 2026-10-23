@@ -7,7 +7,15 @@ import { googleConfigured } from './auth.js';
 import { testGemini } from './gemini.js';
 
 const SETTING_KEYS = ['site_name', 'free_monthly_topup', 'yt_api_key', 'gemini_api_key', 'mp_access_token', 'payments_enabled', 'pix_key_value', 'pix_key_type', 'pix_key_confirmed'];
-const SECRET_KEYS = new Set(['yt_api_key', 'gemini_api_key', 'mp_access_token', 'vapid_private']);
+/** TUDO o que é segredo dentro da tabela settings, numa lista só.
+ *  Antes havia duas listas: uma para mascarar na tela e outra para tirar do
+ *  backup. Elas saíram do lugar e a chave privada das notificações (vapid_private)
+ *  ficava mascarada na tela mas ia em texto puro dentro do arquivo de backup.
+ *  Uma lista só não tem como sair do lugar. */
+export const SEGREDOS_SETTINGS = new Set([
+  'yt_api_key', 'gemini_api_key', 'mp_access_token', 'vapid_private', 'jwt_secret', 'admin_setup_token'
+]);
+const SECRET_KEYS = SEGREDOS_SETTINGS;
 const PIX_TYPES = new Set(['phone', 'cpf', 'cnpj', 'email', 'random']);
 
 function maskSecret(v) {
@@ -24,7 +32,7 @@ export function adminRoutes(app, db, auth) {
   const TABELAS_BACKUP = ['users', 'plans', 'tool_costs', 'transactions', 'payments', 'settings', 'audit',
     'ab_tests', 'competitors', 'reviews', 'site_comments', 'respostas', 'review_votes', 'review_reports', 'blocos'];
   // Segredos e tokens do YouTube ficam de fora: backup é para os DADOS, não para as chaves.
-  const SEGREDO = /^(gemini_api_key|yt_api_key|mp_access_token|jwt_secret|admin_setup_token)$/;
+  const SEGREDO = (k) => SEGREDOS_SETTINGS.has(k);
 
   app.get('/api/admin/backup', ...auth.owner, wrap(async (req, res) => {
     const dump = { gerado_em: now(), banco: db.kind, versao: 1, tabelas: {} };
@@ -32,7 +40,7 @@ export function adminRoutes(app, db, auth) {
       try {
         let linhas = await db.all(`SELECT * FROM ${t}`);
         if (t === 'users') linhas = linhas.map((u) => ({ ...u, pass_hash: u.pass_hash ? '(removido do backup)' : null }));
-        if (t === 'settings') linhas = linhas.filter((r) => !SEGREDO.test(r.key));
+        if (t === 'settings') linhas = linhas.filter((r) => !SEGREDO(r.key));
         dump.tabelas[t] = linhas;
       } catch { dump.tabelas[t] = []; }
     }

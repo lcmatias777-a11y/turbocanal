@@ -488,6 +488,13 @@ export function studioRoutes(app, db, auth, charged) {
   app.post('/api/channel/upload/done', auth.required, async (req, res, next) => {
     try {
       const videoId = must(req.body?.videoId, 'vídeo', { max: 20 });
+      // Canal de teste: o vídeo não existe no YouTube, então mandar o link de lá
+      // dava uma página de "vídeo indisponível". O link certo é o do próprio site.
+      const { ehVideoDeTeste } = await import('./canalteste.js');
+      if (ehVideoDeTeste(videoId)) {
+        await audit(db, req.user, 'youtube.upload_done', videoId, 'canal de teste');
+        return res.json({ ok: true, teste: true, url: `/#/canal/videos`, studio: `/#/canal/videos` });
+      }
       await audit(db, req.user, 'youtube.upload_done', videoId);
       res.json({ ok: true, url: `https://www.youtube.com/watch?v=${videoId}`, studio: `https://studio.youtube.com/video/${videoId}/edit` });
     } catch (e) {

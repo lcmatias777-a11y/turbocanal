@@ -261,7 +261,7 @@ export async function mountEditor(el, ctx) {
       prog.textContent = '';
       $('#edOut').innerHTML = alertBox('ok', `Pronto! ${done.length} Shorts feitos.`) + done.map((d, i) => `
         <div class="card"><b>${i + 1}) ${esc(d.title || 'Short ' + (i + 1))}</b> <span class="muted small">${esc(fmtTime(d.start))} a ${esc(fmtTime(d.end))} · ${(d.blob.size / 1048576).toFixed(1)} MB</span>
-          <video src="${d.url}" controls style="width:100%;max-height:420px;background:#000;border-radius:10px;margin-top:6px"></video>
+          <video src="${esc(d.url)}" controls style="width:100%;max-height:420px;background:#000;border-radius:10px;margin-top:6px"></video>
           <p><a class="btn sm" href="${d.url}" download="${esc(d.fname)}">⬇️ Baixar</a> <button class="btn sm secondary" type="button" data-postcut="${i}">⬆️ Postar este no meu canal</button></p></div>`).join('');
       $('#edOut').dataset.count = String(done.length);
       for (const b of el.querySelectorAll('[data-postcut]')) b.onclick = () => {
@@ -303,7 +303,7 @@ export async function mountEditor(el, ctx) {
       const isVideo = mime.startsWith('video/');
       $('#edOut').innerHTML = `
         ${alertBox('ok', `Pronto! ${(blob.size / 1048576).toFixed(1)} MB.`)}
-        ${isVideo ? `<video src="${url}" controls style="width:100%;max-height:420px;background:#000;border-radius:10px"></video>` : `<audio src="${url}" controls></audio>`}
+        ${isVideo ? `<video src="${esc(url)}" controls style="width:100%;max-height:420px;background:#000;border-radius:10px"></video>` : `<audio src="${esc(url)}" controls></audio>`}
         <p class="muted small" id="edOutInfo"></p>
         <p><a class="btn sm" href="${url}" download="${esc(fname)}">⬇️ Baixar</a>
         ${isVideo ? `<button class="btn sm secondary" id="edPost" type="button">⬆️ Postar no meu canal</button>` : ''}</p>`;
@@ -414,7 +414,7 @@ export async function mountThumbMaker(el, ctx) {
   state.thumbText = null;
   el.innerHTML = `
     <h1>🎨 Criar capa</h1>
-    <p class="muted">Monte a capa do vídeo com texto grande e contorno (1280x720, pronta para o YouTube). Use um quadro do vídeo (no Editor), uma imagem sua ou a capa gerada pela IA. Grátis, sem gastar créditos.</p>
+    <p class="muted">Monte a capa do vídeo com texto grande e contorno (1280x720, pronta para o YouTube). Use um quadro do vídeo (tirado no Editor) ou uma imagem sua. O site não gera imagem com IA: a arte vem de você, o TurboCanal monta o texto, o contorno e o tamanho certo. Grátis, sem gastar créditos.</p>
     <div class="grid cols2">
       <div class="card">
         <label>Imagem de fundo</label><input type="file" id="tmFile" accept="image/*">
@@ -486,7 +486,7 @@ export function feedPreviewHtml({ esc, thumb, title, channel }) {
   const card = (theme, width) => {
     const dark = theme === 'dark';
     return `<div style="width:${width}px;max-width:100%;background:${dark ? '#0f0f0f' : '#fff'};padding:10px;border-radius:12px;font-family:Roboto,Arial,sans-serif">
-      <div style="position:relative"><img src="${thumb}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:10px;display:block">
+      <div style="position:relative"><img src="${esc(thumb)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:10px;display:block">
         <span style="position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.8);color:#fff;font-size:11px;padding:1px 4px;border-radius:4px">12:34</span></div>
       <div style="display:flex;gap:8px;margin-top:8px">
         <div style="width:32px;height:32px;border-radius:50%;background:#ff5d3b;flex:0 0 32px"></div>

@@ -214,7 +214,7 @@ export function chatRoutes(app, db, auth) {
     if (tipo === 'chamando') {
       try {
         const { avisarChamada } = await import('./push.js');
-        await avisarChamada(db, para, req.user.name || req.user.email, req.params.id);
+        await avisarChamada(db, para, req.user.name || req.user.email, req.params.id, req.user.id);
       } catch (e) { console.error('[push] aviso de chamada:', e.message); }
     }
     // limpeza: sinal velho não serve para nada

@@ -5,14 +5,23 @@ const LOCAL = process.argv[2];
 let pass = 0, fail = 0;
 const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); } else { fail++; console.log('  FALHOU ', n, x); } };
 
-const PUBLICAS = ['/', '/#/planos', '/#/ajuda', '/#/extensao', '/#/avaliacoes', '/#/privacidade', '/#/termos', '/#/login'];
+const PUBLICAS = ['/', '/#/planos', '/#/ajuda', '/#/extensao', '/#/avaliacoes', '/#/privacidade', '/#/termos', '/#/login', '/#/cadastro', '/#/resultados'];
 const PRIVADAS = [
   '/#/dashboard', '/#/historico', '/#/conta', '/#/notificacoes', '/#/canal',
   '/#/ferramentas/palavras', '/#/ferramentas/busca', '/#/ferramentas/video', '/#/ferramentas/canal',
   '/#/ferramentas/tendencias', '/#/ferramentas/ideias', '/#/ferramentas/preparar', '/#/ferramentas/titulo',
   '/#/ferramentas/auditoria', '/#/ferramentas/horarios', '/#/ferramentas/raiox', '/#/ferramentas/experimentos',
-  '/#/ferramentas/concorrentes', '/#/ferramentas/criar-capa', '/#/ferramentas/editor', '/#/ferramentas/insights'
+  '/#/ferramentas/concorrentes', '/#/ferramentas/criar-capa', '/#/ferramentas/editor', '/#/ferramentas/insights',
+  // Paginas que a varredura nunca tinha aberto. Cada uma destas era uma tela
+  // que podia estar quebrada sem nenhum teste reclamar.
+  '/#/bate-papo', '/#/postagens', '/#/canal-teste', '/#/ferramentas/capa',
+  '/#/ferramentas/descricao', '/#/ferramentas/titulos', '/#/ferramentas/transformar',
+  '/#/checkout?plan=free'
 ];
+
+/** Nenhuma pagina do site pode ficar de fora desta varredura. Sem isto, bastava
+ *  eu criar uma tela nova e ela nunca era aberta por teste nenhum. */
+const VISTAS_SEM_VARREDURA = new Set(['home', 'sair', 'admin']); // / , logout e o redirecionador
 const ADMIN = ['geral', 'usuarios', 'planos', 'custos', 'pagamentos', 'pedidos', 'chats', 'avaliacoes', 'blocos', 'config', 'admins', 'auditoria'].map((t) => `/#/admin/${t}`);
 
 (async () => {
@@ -54,6 +63,18 @@ const ADMIN = ['geral', 'usuarios', 'planos', 'custos', 'pagamentos', 'pedidos',
     check(`dono em ${url}`, r.erros.length === 0 && r.texto.length > 20 && !/Página não encontrada/.test(r.texto) && r.caixasDeErro.length === 0,
       `${r.erros.join(' | ')}${r.texto.length <= 20 ? ' (tela vazia)' : ''}${/Página não encontrada/.test(r.texto) ? ' (404)' : ''}${r.caixasDeErro.length ? ' ERRO NA TELA: ' + r.caixasDeErro.join(' / ') : ''}`);
     if (r.spinPreso) check(`dono em ${url}: nada fica rodando para sempre`, false, `${r.spinPreso} carregando preso`);
+  }
+
+  // Nenhuma pagina pode ficar de fora: compara a lista varrida com as views do app.js
+  {
+    const fs = require('fs');
+    const src = fs.readFileSync(__dirname + '/../../web/assets/app.js', 'utf8');
+    const vistas = new Set();
+    for (const m of src.matchAll(/views\[['`]([^'`]+)['`]\]\s*=/g)) vistas.add(m[1]);
+    for (const m of src.matchAll(/^views\.([a-zA-Z0-9_]+)\s*=/gm)) vistas.add(m[1]);
+    const varridas = new Set([...PUBLICAS, ...PRIVADAS, ...ADMIN].map((u) => u.replace(/^\/#\//, '').replace(/^\/$/, 'home').split('?')[0]));
+    const esquecidas = [...vistas].filter((v) => !varridas.has(v) && !VISTAS_SEM_VARREDURA.has(v));
+    check('toda página do site está nesta varredura', esquecidas.length === 0, 'fora da varredura: ' + esquecidas.join(', '));
   }
 
   // endereços inventados devem dar a página de "não encontrada", não tela branca
