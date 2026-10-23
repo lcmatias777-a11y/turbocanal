@@ -413,6 +413,7 @@ function toolCostLabel(hash) {
   const key = map[last];
   const c = state.costs.find((x) => x.tool === key);
   if (!c) return '';
+  if (noTeste()) return `Grátis no canal de teste (${c.cost} créditos num canal de verdade)`;
   return state.user?.unlimited ? 'Incluído (ilimitado)' : `${c.cost} créditos por uso`;
 }
 
@@ -459,7 +460,8 @@ function toolPage({ title, desc, toolKey, formHtml, getBody, render, after, onMo
     const cost = state.costs.find((c) => c.tool === toolKey)?.cost;
     appEl().innerHTML = `
       <h1>${title}</h1>
-      <p class="muted">${desc} ${cost != null ? `· <span class="pill">${state.user.unlimited ? 'Incluído (ilimitado)' : cost + ' créditos por uso'}</span>` : ''}</p>
+      <p class="muted">${desc} ${cost != null ? `· <span class="pill">${noTeste() ? 'Grátis no canal de teste' : state.user.unlimited ? 'Incluído (ilimitado)' : cost + ' créditos por uso'}</span>` : ''}</p>
+      ${avisoTeste(toolKey)}
       <div class="card"><form id="f">${formHtml}
         <p><button class="btn">Executar <span id="sp"></span></button></p></form></div>
       <div id="msg"></div><div id="out"></div>`;
@@ -557,7 +559,12 @@ views['ferramentas/canal'] = toolPage({
 
 /* ------------------------------ Escolher vídeo (sem digitar) ------------------------------ */
 const ytIdOf = (s) => { const m = String(s || '').trim().match(/[?&]v=([A-Za-z0-9_-]{11})|youtu\.be\/([A-Za-z0-9_-]{11})|shorts\/([A-Za-z0-9_-]{11})|^([A-Za-z0-9_-]{11})$/); return m ? m[1] || m[2] || m[3] || m[4] : null; };
-const costLabel = (tool) => { const c = state.costs.find((x) => x.tool === tool); if (!c) return ''; return state.user?.unlimited ? 'incluído (ilimitado)' : `${fmt(c.cost)} créditos`; };
+const costLabel = (tool) => {
+  const c = state.costs.find((x) => x.tool === tool);
+  if (!c) return '';
+  if (noTeste()) return `grátis no teste (${fmt(c.cost)} créditos num canal de verdade)`;
+  return state.user?.unlimited ? 'incluído (ilimitado)' : `${fmt(c.cost)} créditos`;
+};
 
 function aiMissingBanner() {
   if (state.pub.gemini_configured) return '';
@@ -603,7 +610,7 @@ async function videoAIView(params) {
   appEl().innerHTML = `
     <h1>✨ IA do vídeo</h1>
     <p class="muted">Escolha o vídeo e pronto: a IA <b>assiste</b> (vídeos públicos), olha quadros reais dele e sugere título, descrição, tags, hashtags, capítulos e textos de capa. Você tira o que não quiser, revisa e salva direto no YouTube. Não precisa escrever nada. <span class="pill">${costLabel('video_insights_ai')}</span></p>
-    ${aiMissingBanner()}
+    ${noTeste() ? avisoTeste() : aiMissingBanner()}
     <div class="card"><div id="vpBox"></div><div id="vaSel"></div></div>
     <div id="msg"></div><div id="out"></div>`;
   let picked = null;
@@ -744,6 +751,7 @@ views['ferramentas/tendencias'] = async () => {
   appEl().innerHTML = `
     <h1>🔥 Tendências do seu nicho</h1>
     <p class="muted">Vídeos bombando agora no SEU assunto: os mais vistos dos últimos 7 dias para os termos do seu canal (ordenados por views por hora) e o que está em alta na categoria do canal. <span class="pill">${costLabel('trends')}</span></p>
+    ${avisoTeste('trends')}
     <div class="card"><div id="trInfo" class="small muted"><span class="spin"></span> lendo os seus vídeos para descobrir o nicho…</div>
       <label>Seu nicho (até 2 termos, separados por vírgula)</label><input id="trKw" maxlength="120" placeholder="ex.: bedwars, geometry dash">
       <label>Categoria do canal</label><select id="trCat"><option value="">nenhuma</option>${Object.entries(CATS).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
@@ -925,6 +933,7 @@ views['ferramentas/raiox'] = async (params) => {
   const dias = Math.min(365, Math.max(28, parseInt(params?.get?.('dias'), 10) || 90));
   appEl().innerHTML = `<h1>🔬 Raio-X dos meus vídeos</h1>
     <p class="muted">Duas perguntas que só os seus próprios números respondem: <b>quais vídeos trazem inscrito</b> (e não só view) e <b>que formato prende</b> o público. Os dados vêm do YouTube Analytics do seu canal. Não custa crédito.</p>
+    ${avisoTeste()}
     <div class="card"><label for="rxDias">Período</label>
       <select id="rxDias" style="max-width:260px">
         ${[28, 90, 180, 365].map((d) => `<option value="${d}"${d === dias ? ' selected' : ''}>últimos ${d} dias</option>`).join('')}
@@ -994,6 +1003,7 @@ views['ferramentas/experimentos'] = async () => {
   const venceu = (e) => e.status === 'rodando' && new Date(e.revisar_em) <= new Date();
   appEl().innerHTML = `<h1>🧪 Diário de experimentos</h1>
     <p class="muted">Escreva uma coisa que você quer testar, o que vai mudar e qual número vai olhar. Na data que você marcar, eu comparo os vídeos publicados depois com os de antes, no mesmo número. <b>Antes e depois não é prova</b>, mas é como você aprende com o seu próprio canal em vez de copiar regra de internet. Não custa crédito.</p>
+    ${avisoTeste()}
     <div class="card"><h3>Começar um experimento</h3>
       <form id="expForm">
         <label>O que você acha que vai acontecer? (hipótese)</label>
@@ -1510,6 +1520,23 @@ const noTeste = () => !!state.user?.youtube?.teste;
  *  o destino é o canal simulado. */
 const destino = () => (noTeste() ? 'no canal de teste' : 'no YouTube');
 const destinoPara = () => (noTeste() ? 'para o canal de teste' : 'para o YouTube');
+/** Um aviso só, usado em toda página de ferramenta, que corrige de uma vez as
+ *  frases escritas para o canal de verdade ("a IA assiste o vídeo", "salva
+ *  direto no YouTube", "vêm do YouTube Analytics"). No canal de teste nenhuma
+ *  delas é verdade, e reescrever cada descrição deixaria o texto do canal real
+ *  pior. */
+/** Ferramentas que falam do YouTube DE VERDADE, sobre canais e vídeos de
+ *  outras pessoas. Nessas o dado é real mesmo no modo teste, e dizer que é
+ *  simulado seria mentir na outra direção. */
+const FERRAMENTAS_PUBLICAS = new Set(['video_search', 'keyword_research', 'trends', 'channel_analysis', 'competitor_check']);
+
+const avisoTeste = (toolKey) => {
+  if (!noTeste()) return '';
+  if (FERRAMENTAS_PUBLICAS.has(toolKey)) {
+    return alertBox('warn', '🧪 <b>Canal de teste ligado.</b> Esta ferramenta é sobre o YouTube de verdade, então os resultados abaixo são reais. O que muda é só a cobrança: <b>no modo teste ela não gasta crédito</b>.');
+  }
+  return alertBox('warn', '🧪 <b>Você está no canal de teste.</b> O texto acima descreve o que esta ferramenta faz num canal de verdade. Aqui: os números vêm do canal simulado, a resposta da IA é de <b>demonstração</b> e não passa pela IA, nada é salvo no YouTube e <b>nada cobra crédito</b>.');
+};
 
 function costOf(tool) {
   const c = state.costs.find((x) => x.tool === tool);

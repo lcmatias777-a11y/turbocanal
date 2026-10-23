@@ -68,6 +68,21 @@ const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); 
   check('o painel para de mandar vincular canal e já dá uma recomendação',
     !/Vincule seu canal do YouTube/i.test(painel), painel.replace(/\s+/g, ' ').slice(0, 140));
 
+  // 3b) nenhuma página de ferramenta pode prometer cobrança nem dado real
+  const PAGINAS = ['auditoria','horarios','ideias','insights','raiox','titulo','transformar','preparar','busca','tendencias','palavras','experimentos'];
+  let semAviso = [], prometemCobranca = [];
+  for (const f of PAGINAS) {
+    await pessoa.p.goto(LOCAL + '/#/ferramentas/' + f);
+    await pessoa.p.waitForTimeout(2500);
+    const t = (await pessoa.p.textContent('#app').catch(() => '')) || '';
+    if (!/canal de teste/i.test(t)) semAviso.push(f);
+    // "N créditos por uso" sem dizer que no teste é grátis seria a tela
+    // avisando de uma cobrança que não acontece
+    if (/\d+ créditos por uso/.test(t) && !/grátis|Grátis/i.test(t)) prometemCobranca.push(f);
+  }
+  check('toda página de ferramenta avisa que o canal de teste está ligado', semAviso.length === 0, 'sem aviso: ' + semAviso.join(', '));
+  check('e nenhuma anuncia cobrança de crédito que não vai acontecer', prometemCobranca.length === 0, 'prometem cobrar: ' + prometemCobranca.join(', '));
+
   // 4) administrador: o canal de teste é compartilhado
   await dono.p.goto(LOCAL + '/#/canal-teste');
   await dono.p.waitForSelector('#ctLigar', { timeout: 20000 });
