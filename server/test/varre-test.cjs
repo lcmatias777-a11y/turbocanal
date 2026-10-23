@@ -16,7 +16,9 @@ const PRIVADAS = [
   // que podia estar quebrada sem nenhum teste reclamar.
   '/#/bate-papo', '/#/postagens', '/#/canal-teste', '/#/ferramentas/capa',
   '/#/ferramentas/descricao', '/#/ferramentas/titulos', '/#/ferramentas/transformar',
-  '/#/checkout?plan=free'
+  // Checkout nos dois periodos: e a tela que fala de dinheiro, e cada periodo
+  // monta um texto e um valor diferentes.
+  '/#/checkout?plan=free', '/#/checkout?plan=p10&periodo=2m', '/#/checkout?plan=p10&periodo=12m'
 ];
 
 /** Nenhuma pagina do site pode ficar de fora desta varredura. Sem isto, bastava
@@ -63,6 +65,21 @@ const ADMIN = ['geral', 'usuarios', 'planos', 'custos', 'pagamentos', 'pedidos',
     check(`dono em ${url}`, r.erros.length === 0 && r.texto.length > 20 && !/Página não encontrada/.test(r.texto) && r.caixasDeErro.length === 0,
       `${r.erros.join(' | ')}${r.texto.length <= 20 ? ' (tela vazia)' : ''}${/Página não encontrada/.test(r.texto) ? ' (404)' : ''}${r.caixasDeErro.length ? ' ERRO NA TELA: ' + r.caixasDeErro.join(' / ') : ''}`);
     if (r.spinPreso) check(`dono em ${url}: nada fica rodando para sempre`, false, `${r.spinPreso} carregando preso`);
+  }
+
+  // A conta do periodo tem de CHEGAR na tela, nao so nao dar erro: o anual do
+  // Starter e 6 x R$ 10 menos 10% = R$ 54,00, e e esse numero que a pessoa ve
+  // antes de pagar.
+  {
+    const dois = await visitar(p, '/#/checkout?plan=p10&periodo=2m');
+    check('checkout de 2 meses mostra R$ 10,00 e fala em 2 meses',
+      /R\$\s*10,00/.test(dois.texto) && /2 meses/.test(dois.texto), dois.texto.replace(/\s+/g, ' ').slice(0, 160));
+    const ano = await visitar(p, '/#/checkout?plan=p10&periodo=12m');
+    check('checkout de 1 ano mostra R$ 54,00 (e nao R$ 60,00)',
+      /R\$\s*54,00/.test(ano.texto) && !/R\$\s*60,00(?![^]*10% a menos)/.test(ano.texto.replace(/10% a menos que R\$\s*60,00/, '')),
+      ano.texto.replace(/\s+/g, ' ').slice(0, 200));
+    check('e o checkout diz que os creditos entram mes a mes',
+      /por\s*<?b?>?m[eê]s|por m[eê]s/i.test(ano.texto), ano.texto.replace(/\s+/g, ' ').slice(0, 200));
   }
 
   // Nenhuma pagina pode ficar de fora: compara a lista varrida com as views do app.js
