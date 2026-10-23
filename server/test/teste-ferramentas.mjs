@@ -172,6 +172,43 @@ check('o vídeo postado aparece no topo da lista', /Vídeo novo de teste/.test(J
 check('e entra com zero view, zero like e zero comentário (nada de estreia inventada)',
   itens.some((v) => /Vídeo novo de teste/.test(v.title || '') && !v.views && !v.likes));
 
+console.log('\n== Os fluxos se comportam como num canal de verdade ==');
+// Não basta a rota responder 200: o que a pessoa fez tem de APARECER depois.
+// Playlist que continua dizendo "0 vídeos" e comentário que continua com "0
+// respostas" são o tipo de detalhe que denuncia a demonstração.
+const pl = await req('/api/channel/playlists', { method: 'POST', body: { title: 'Melhores de 2026' } });
+const plId = pl.d.result?.id || pl.d.id;
+check('cria playlist no canal de teste', !!plId, JSON.stringify(pl.d).slice(0, 90));
+await req(`/api/channel/playlists/${plId}/items`, { method: 'POST', body: { video_id: VID } });
+await req(`/api/channel/playlists/${plId}/items`, { method: 'POST', body: { video_id: vs[1].id } });
+const plDepois = await req('/api/channel/playlists');
+const essa = (plDepois.d.items || []).find((x) => x.id === plId);
+check('e a playlist passa a contar os 2 vídeos que entraram', Number(essa?.count) === 2, JSON.stringify(essa));
+const plItens = await req(`/api/channel/playlists/${plId}/items`);
+check('e os 2 aparecem dentro dela', (plItens.d.items || []).length === 2, String((plItens.d.items || []).length));
+
+const cAntes = await req('/api/channel/comments');
+const r0 = (cAntes.d.items || []).find((c) => c.id === 'cmt012');
+check('comentário começa sem resposta', Number(r0?.replies) === 0, 'replies=' + r0?.replies);
+await req('/api/channel/comments/cmt012/reply', { method: 'POST', body: { text: 'valeu pelo comentário!' } });
+const cDepois = await req('/api/channel/comments');
+const r1 = (cDepois.d.items || []).find((c) => c.id === 'cmt012');
+check('e depois de responder a contagem vira 1', Number(r1?.replies) === 1, JSON.stringify(r1).slice(0, 80));
+
+const PNG2 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR4nGP8z8DAwMDEwMDAwMAAAB4LAwEqRpXcAAAAAElFTkSuQmCC';
+const ab = await req('/api/channel/ab', { method: 'POST', body: { video_id: vs[3].id, thumb_a: PNG2, thumb_b: PNG2, hours: 24 } });
+check('inicia teste A/B de capas', ab.s === 200, `${ab.s} ${JSON.stringify(ab.d).slice(0, 80)}`);
+const abLista = await req('/api/channel/ab');
+const abId = (abLista.d.items || abLista.d.tests || []).find((t) => t.videoId === vs[3].id || t.video_id === vs[3].id)?.id;
+check('o teste aparece na lista', !!abId);
+if (abId) check('e dá para parar', (await req(`/api/channel/ab/${abId}/stop`, { method: 'POST' })).s === 200);
+
+const exp = await req('/api/experimentos', { method: 'POST', body: { hipotese: 'capa com rosto rende mais', mudanca: 'rosto na capa', metrica: 'views', revisao: '2026-12-01' } });
+check('o diário de experimentos aceita um experimento sobre o canal de teste', exp.s === 200, String(exp.s));
+
+console.log('\n== Depois de TODOS esses fluxos, o saldo continua intacto ==');
+check('nenhum crédito foi cobrado em nenhum fluxo', (await saldo()) === SALDO_INICIAL, `${SALDO_INICIAL} -> ${await saldo()}`);
+
 console.log('\n== Capas: desenho do próprio site, nunca quadrado quebrado ==');
 const capa = await fetch(base + `/api/canal-teste/capa/${VID}.svg`);
 const svgTxt = await capa.text();

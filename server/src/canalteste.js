@@ -430,8 +430,8 @@ export async function apiDeTeste(db, escopo, caminho, { method = 'GET', params =
       'tenta fazer sem usar atalho da próxima vez', 'qual a config que tu usa?',
       'vim pelo short, já me inscrevi', 'esse foi o melhor até agora', 'a edição ficou muito boa'
     ];
-    const respostas = await db.all('SELECT comentario_id FROM demo_respostas WHERE escopo=?', [escopo]);
-    const jaRespondi = new Set(respostas.map((x) => x.comentario_id));
+    const respostas = await db.all('SELECT comentario_id, COUNT(*) AS n FROM demo_respostas WHERE escopo=? GROUP BY comentario_id', [escopo]);
+    const respostasPorComentario = Object.fromEntries(respostas.map((x) => [x.comentario_id, Number(x.n)]));
     const itens = [];
     for (let i = 0; i < 30; i++) {
       const v = vs[Math.floor(r() * 60)];
@@ -440,7 +440,7 @@ export async function apiDeTeste(db, escopo, caminho, { method = 'GET', params =
         id,
         snippet: {
           videoId: v.id,
-          totalReplyCount: jaRespondi.has(id) ? 1 : 0,
+          totalReplyCount: respostasPorComentario[id] || 0,
           topLevelComment: { id, snippet: {
             authorDisplayName: ['Ana', 'Bruno', 'Carla', 'Diego', 'Elisa', 'Fábio'][i % 6] + ' ' + (100 + i),
             textDisplay: FRASES[i % FRASES.length],
@@ -467,10 +467,14 @@ export async function apiDeTeste(db, escopo, caminho, { method = 'GET', params =
       return { items: pl ? [{ id: pl.id, snippet: { title: pl.titulo, description: pl.descricao, channelId: CANAL_ID } }] : [] };
     }
     const todas = await db.all('SELECT * FROM demo_playlists WHERE escopo=? ORDER BY created_at DESC', [escopo]);
+    // Conta os vídeos de verdade: deixar itemCount fixo em 0 fazia a playlist
+    // continuar dizendo "0 vídeos" depois de a pessoa adicionar três.
+    const itens = await db.all('SELECT playlist_id, COUNT(*) AS n FROM demo_playlist_itens WHERE escopo=? GROUP BY playlist_id', [escopo]);
+    const quantos = Object.fromEntries(itens.map((x) => [x.playlist_id, Number(x.n)]));
     return { items: todas.map((pl) => ({
       id: pl.id, snippet: { title: pl.titulo, description: pl.descricao, channelId: CANAL_ID },
       status: { privacyStatus: 'public' },
-      contentDetails: { itemCount: 0 }
+      contentDetails: { itemCount: quantos[pl.id] || 0 }
     })) };
   }
 

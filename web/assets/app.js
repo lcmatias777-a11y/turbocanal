@@ -705,7 +705,9 @@ function renderSuggestions(out, r) {
         if (f.tags.join(',').length > 500) throw new Error('As tags passam de 500 caracteres (limite do YouTube). Tire algumas.');
         const x = await api('/channel/videos/' + v.id, { method: 'PUT', body: f });
         await refreshMe();
-        $('#vaSaveMsg').innerHTML = alertBox('ok', `✅ Salvo no YouTube! <a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">ver o vídeo</a> · <a href="https://studio.youtube.com/video/${esc(v.id)}/edit" target="_blank" rel="noopener">abrir no Studio</a>. ` + creditsNote(x.credits));
+        $('#vaSaveMsg').innerHTML = alertBox('ok', (noTeste()
+          ? '✅ Salvo no canal de teste. A mudança vale só aqui dentro: nenhum vídeo de verdade foi alterado.'
+          : `✅ Salvo no YouTube! <a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">ver o vídeo</a> · <a href="https://studio.youtube.com/video/${esc(v.id)}/edit" target="_blank" rel="noopener">abrir no Studio</a>.`) + ' ' + creditsNote(x.credits));
       } catch (e) { $('#vaSaveMsg').innerHTML = alertBox('err', esc(e.message)); save.disabled = false; }
     };
   };
@@ -1230,11 +1232,11 @@ const canalTabs = {
             <label>Descrição</label><textarea data-f="description">${esc(v.description)}</textarea>
             <label>Tags (separadas por vírgula)</label><input data-f="tags" value="${esc((v.tags || []).join(', '))}">
             <label>Visibilidade</label><select data-f="privacy">${[['public', 'Público'], ['unlisted', 'Não listado'], ['private', 'Privado']].map(([k, l]) => `<option value="${k}" ${v.privacy === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-            <p><button class="btn sm" data-save="${esc(v.id)}">Salvar no YouTube</button> <span class="muted small">${costOf('video_update')}</span></p></details>
+            <p><button class="btn sm" data-save="${esc(v.id)}">Salvar ${destino()}</button> <span class="muted small">${costOf('video_update')}</span></p></details>
           <details><summary class="small">🖼️ Enviar capa</summary>
             <label>Imagem (JPG/PNG, até 2 MB, 1280x720)</label><input type="file" accept="image/*" data-file="${esc(v.id)}">
             ${state.lastThumb ? `<p class="small"><label style="display:inline"><input type="checkbox" data-uselast="${esc(v.id)}" style="width:auto"> usar a última capa gerada</label></p>` : '<p class="small muted">Dica: monte uma capa em <a href="#/canal/capa">Criar capa</a> (pode usar um quadro do próprio vídeo no Editor).</p>'}
-            <p><button class="btn sm" data-thumb="${esc(v.id)}">Enviar para o YouTube</button> <span class="muted small">${costOf('thumbnail_upload')}</span></p></details>
+            <p><button class="btn sm" data-thumb="${esc(v.id)}">Enviar ${destinoPara()}</button> <span class="muted small">${costOf('thumbnail_upload')}</span></p></details>
           <details><summary class="small">🧪 Teste A/B de capas</summary>
             <label>Capa A</label><input type="file" accept="image/*" data-a="${esc(v.id)}">
             <label>Capa B</label><input type="file" accept="image/*" data-b="${esc(v.id)}">
@@ -1338,8 +1340,10 @@ const canalTabs = {
   },
 
   async postar(el) {
-    el.innerHTML = `<div class="card" style="max-width:720px"><h3>Postar vídeo no YouTube</h3>
-      <p class="muted small">O arquivo vai direto do seu computador para o YouTube (não passa pelo nosso servidor). Para publicar em data marcada, escolha "Agendar". ${costOf('video_upload')}</p>
+    el.innerHTML = `<div class="card" style="max-width:720px"><h3>Postar vídeo ${destino()}</h3>
+      <p class="muted small">${noTeste()
+        ? 'No canal de teste o vídeo <b>não vai para o YouTube</b>: ele entra na lista do canal simulado, aqui mesmo, e o arquivo é descartado depois de enviado. Serve para você ver a tela e o fluxo inteiro.'
+        : 'O arquivo vai direto do seu computador para o YouTube (não passa pelo nosso servidor). Para publicar em data marcada, escolha "Agendar".'} ${costOf('video_upload')}</p>
       <div id="pmsg"></div>
       ${state.pendingUpload ? alertBox('info', `Vídeo vindo do editor: <b>${esc(state.pendingUpload.name)}</b> (${(state.pendingUpload.size / 1048576).toFixed(1)} MB). <a href="#" id="pClear">usar outro arquivo</a>`) : ''}
       <p class="small"><a href="#/ferramentas/preparar">📝 Preparar título, descrição e tags com IA</a> · <a href="#/canal/editar">✂️ Editar o vídeo antes</a></p>
@@ -1353,7 +1357,7 @@ const canalTabs = {
           <div><label>Categoria</label><select name="categoryId"><option value="20">Jogos</option><option value="22">Pessoas e blogs</option><option value="24">Entretenimento</option><option value="27">Educação</option><option value="28">Ciência e tecnologia</option><option value="10">Música</option><option value="26">Como fazer e estilo</option></select></div>
           <div><label>Agendar publicação (opcional)</label><input type="datetime-local" name="publishAt"></div>
         </div>
-        <p><button class="btn" id="pbtn">Enviar para o YouTube</button></p>
+        <p><button class="btn" id="pbtn">Enviar ${destinoPara()}</button></p>
         <div id="pprog" class="muted small"></div>
       </form></div>`;
     const pc = $('#pClear');
@@ -1381,6 +1385,17 @@ const canalTabs = {
   },
 
   async live(el) {
+    // Live é a única coisa que o canal de teste não consegue imitar: ela
+    // depende de um canal real recebendo o sinal no YouTube. Então a tela diz
+    // isso ANTES, em vez de deixar a pessoa preencher o formulário e levar
+    // erro no fim.
+    if (noTeste()) {
+      el.innerHTML = `<div class="card" style="max-width:720px"><h3>Criar transmissão ao vivo</h3>
+        ${alertBox('warn', '🧪 <b>Esta é a única parte que o canal de teste não faz.</b> Uma transmissão ao vivo precisa de um canal de verdade no YouTube recebendo o sinal, e de uma chave de transmissão que só o YouTube emite. Eu poderia desenhar a tela e inventar uma chave, mas ela não transmitiria nada, e isso seria um botão de mentira.')}
+        <p class="muted small">Com seu canal vinculado, aqui você cria a live e recebe a URL RTMP e a chave para colar no OBS ou Streamlabs. Lá ela custa ${(state.costs.find((c) => c.tool === 'live_create') || {}).cost || 20} créditos.</p>
+        <p><a class="btn sm ghost" href="#/canal-teste">Desligar o canal de teste</a></p></div>`;
+      return;
+    }
     el.innerHTML = `<div class="card" style="max-width:720px"><h3>Criar transmissão ao vivo</h3>
       <p class="muted small">Cria a live no seu canal e devolve a URL RTMP e a chave de transmissão para colar no OBS/Streamlabs. Seu canal precisa ter transmissões ao vivo habilitadas no YouTube. ${costOf('live_create')}</p>
       <div id="lmsg"></div>
@@ -1419,7 +1434,7 @@ const canalTabs = {
       </section>
       <div class="card"><h3>Views por dia</h3>
         <div style="display:flex;align-items:flex-end;gap:3px;height:140px">${a.daily.map((d) => `<div title="${esc(d.day)}: ${fmt(d.views)} views" style="flex:1;background:var(--accent);height:${Math.max(2, Math.round((d.views / max) * 130))}px;border-radius:3px 3px 0 0"></div>`).join('')}</div>
-        <p class="muted small">${esc(a.daily[0]?.day || '')} → ${esc(a.daily[a.daily.length - 1]?.day || '')} · dados oficiais da YouTube Analytics API</p></div>
+        <p class="muted small">${esc(a.daily[0]?.day || '')} → ${esc(a.daily[a.daily.length - 1]?.day || '')} · ${noTeste() ? '<b>números simulados</b> do canal de teste, não são do YouTube' : 'dados oficiais da YouTube Analytics API'}</p></div>
       <div class="card scroll"><h3>Vídeos com mais views no período</h3>
         ${a.topVideos.length ? `<table><tr><th>Vídeo</th><th>Views</th><th>Min. assistidos</th><th>Duração média</th></tr>${a.topVideos.map((v) => `<tr><td><a href="https://www.youtube.com/watch?v=${esc(v.id)}" target="_blank" rel="noopener">${esc(v.title)}</a></td><td>${fmt(v.views)}</td><td>${fmt(Math.round(v.minutes))}</td><td>${Math.round(v.avgSec)}s</td></tr>`).join('')}</table>` : '<p class="muted">Sem dados no período.</p>'}</div>`;
   },
@@ -1428,7 +1443,7 @@ const canalTabs = {
     const c = await api('/channel/comments');
     el.innerHTML = `<div class="card scroll"><h3>Comentários recentes do canal</h3>
       ${c.items.length ? c.items.map((m) => `<div style="border-bottom:1px solid var(--line);padding:8px 0" id="c-${esc(m.id)}">
-        <b>${esc(m.author)}</b> <span class="muted small">${dt(m.publishedAt)} · 👍 ${fmt(m.likes)} · ${m.replies} respostas · <a href="https://www.youtube.com/watch?v=${esc(m.videoId)}" target="_blank" rel="noopener">vídeo</a></span>
+        <b>${esc(m.author)}</b> <span class="muted small">${dt(m.publishedAt)} · 👍 ${fmt(m.likes)} · ${m.replies} respostas · ${noTeste() ? '<span title="vídeo do canal simulado">vídeo</span>' : `<a href="https://www.youtube.com/watch?v=${esc(m.videoId)}" target="_blank" rel="noopener">vídeo</a>`}</span>
         <p>${esc(m.text)}</p>
         <div class="row"><div><input placeholder="Responder…" data-reply="${esc(m.id)}"></div>
           <div class="fit"><button class="btn sm ghost" data-suggest="${esc(m.id)}" data-text="${esc(m.text)}">✨ Sugerir ${costOf('reply_ai')}</button></div>
@@ -1487,9 +1502,21 @@ function uploadToYouTube(uploadUrl, file, onProgress) {
   });
 }
 
+/** Está usando o canal de teste? Várias telas mudam de texto por causa disso:
+ *  lá nada cobra crédito e nada vai para o YouTube, e a tela não pode dizer o
+ *  contrário. */
+const noTeste = () => !!state.user?.youtube?.teste;
+/** Para onde a ação vai de verdade. A tela nunca pode prometer YouTube quando
+ *  o destino é o canal simulado. */
+const destino = () => (noTeste() ? 'no canal de teste' : 'no YouTube');
+const destinoPara = () => (noTeste() ? 'para o canal de teste' : 'para o YouTube');
+
 function costOf(tool) {
   const c = state.costs.find((x) => x.tool === tool);
   if (!c) return '';
+  // No canal de teste nada cobra. Continuar mostrando "(20 créditos)" seria a
+  // tela avisando de uma cobrança que não acontece.
+  if (noTeste()) return `<span title="Num canal de verdade esta ferramenta custa ${c.cost} créditos">(grátis no teste)</span>`;
   return state.user?.unlimited ? '(ilimitado)' : `(${c.cost} créditos)`;
 }
 
