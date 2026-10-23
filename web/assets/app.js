@@ -257,7 +257,7 @@ views.home = async () => {
     <p class="center"><a class="btn ghost" href="#/avaliacoes">⭐ Ver e escrever avaliações</a></p>
     <div data-slot="home-antes-planos" hidden></div>
     <h2 class="center" style="margin-top:34px">Planos</h2>
-    <p class="center muted small">Toda conta tem o saldo restaurado sozinho uma vez por mês, no plano Free ou pago. Pagar um plano dá um lote de créditos por cima, a cada pagamento confirmado: não existe cobrança automática. As comparações de capacidade são metas internas de referência, não números auditados.</p>
+    <p class="center muted small">Toda conta tem o saldo restaurado sozinho uma vez por mês. Com um plano pago valendo, o que entra todo mês é o valor do plano; sem plano, é a recarga comum. Um pagamento vale 2 meses, ou 12 no anual, e não existe cobrança automática. As comparações de capacidade são metas internas de referência, não números auditados.</p>
     <section class="grid cols3">${plans.map(planCard).join('')}</section>`;
   // o resumo das avaliações vem do banco; se ainda não houver nenhuma, a própria função avisa
   try {
@@ -267,14 +267,24 @@ views.home = async () => {
   } catch { const alvo = $('#rvhome'); if (alvo) alvo.innerHTML = '<p class="muted center">Não foi possível carregar as avaliações agora.</p>'; }
 };
 
+/** Preço do plano num período. As mesmas contas do servidor (payments.js):
+ *  2 meses = o preço do plano; 1 ano = 6 pagamentos com 10% de desconto. */
+const PERIODOS = { '2m': { meses: 2, vezes: 1, desconto: 0, rotulo: '2 meses' },
+                   '12m': { meses: 12, vezes: 6, desconto: 0.10, rotulo: '1 ano' } };
+const precoPeriodo = (p, per) => Math.round(p.price_cents * PERIODOS[per].vezes * (1 - PERIODOS[per].desconto));
+
 function planCard(p) {
+  const ano = p.price_cents ? precoPeriodo(p, '12m') : 0;
+  const cheio = p.price_cents * 6;
   return `<div class="card planCard">
     <h3>${esc(p.name)}</h3>
-    <div class="price">${p.price_cents ? money(p.price_cents) : 'Grátis'}<small>${p.price_cents ? ' por pagamento' : '/mês'}</small></div>
-    <div><b>${fmt(p.monthly_credits)}</b> créditos ${p.price_cents ? 'a cada pagamento confirmado' : 'por mês'}</div>
+    <div class="price">${p.price_cents ? money(p.price_cents) : 'Grátis'}<small>${p.price_cents ? ' por 2 meses' : '/mês'}</small></div>
+    <div><b>${fmt(p.monthly_credits)}</b> créditos ${p.price_cents ? 'por mês, enquanto o prazo estiver valendo' : 'por mês'}</div>
     <p class="muted small">${esc(p.description || '')}</p>
     ${p.price_cents
-      ? `<a class="btn" href="#/checkout?plan=${esc(p.id)}">Pagar via Pix</a>`
+      ? `<a class="btn" href="#/checkout?plan=${esc(p.id)}&periodo=2m">Pagar 2 meses · ${money(p.price_cents)}</a>
+         <a class="btn secondary" href="#/checkout?plan=${esc(p.id)}&periodo=12m" style="margin-top:6px">1 ano · ${money(ano)}</a>
+         <p class="muted small" style="margin-top:6px">No ano você paga ${money(ano)} em vez de ${money(cheio)}: 10% a menos, e os créditos entram todo mês durante 12 meses.</p>`
       : `<a class="btn secondary" href="#/login">Entrar com Google</a>`}
   </div>`;
 }
@@ -380,10 +390,17 @@ views.dashboard = async () => {
     ${ytBanner}
     <section class="grid cols3">
       <div class="card"><h3>Créditos</h3><div class="kpi">💎 ${u.unlimited ? 'Ilimitado' : fmt(u.credits)}</div>
-        <p class="muted small">${u.unlimited ? 'Conta do administrador principal: uso ilimitado e isento de cobrança.' : 'Plano Free recarrega todo mês. Cada ferramenta mostra o custo antes de usar.'}</p></div>
-      <div class="card"><h3>Seu plano</h3><div class="kpi">${esc(u.plan?.name || u.plan_id)}</div>
-        <p class="muted small">${u.plan?.price_cents ? money(u.plan.price_cents) + '/mês' : 'Gratuito'} · ${fmt(u.plan?.monthly_credits)} créditos/mês</p>
-        ${u.unlimited ? '' : '<a class="btn sm secondary" href="#/planos">Fazer upgrade</a>'}</div>
+        <p class="muted small">${u.unlimited ? 'Conta do administrador principal: uso ilimitado e isento de cobrança.'
+          : u.plano_valendo ? 'Os créditos do seu plano entram todo mês enquanto o prazo estiver valendo. Cada ferramenta mostra o custo antes de usar.'
+          : 'Seu saldo é completado todo mês. Cada ferramenta mostra o custo antes de usar.'}</p></div>
+      <div class="card"><h3>Seu plano</h3><div class="kpi">${esc(u.plano_valendo ? (u.plan?.name || u.plan_id) : 'Free')}</div>
+        ${u.unlimited ? '<p class="muted small">Uso ilimitado e isento de cobrança.</p>'
+          : u.plano_valendo
+            ? `<p class="muted small">${fmt(u.plan?.monthly_credits)} créditos por mês · <b>vale até ${new Date(u.plano_ate).toLocaleDateString('pt-BR')}</b></p>
+               <p class="muted small">Depois dessa data nada é cobrado de você: a conta volta a receber a recarga comum. Pagar antes soma ao prazo que falta.</p>
+               <a class="btn sm secondary" href="#/planos">Renovar ou trocar de plano</a>`
+            : `<p class="muted small">${u.plano_ate ? `Seu plano ${esc(u.plan?.name || '')} venceu em ${new Date(u.plano_ate).toLocaleDateString('pt-BR')}. ` : ''}${fmt(topupFree())} créditos por mês, de graça.</p>
+               <a class="btn sm secondary" href="#/planos">${u.plano_ate ? 'Pagar de novo' : 'Ver planos'}</a>`}</div>
       <div class="card"><h3>📺 Meu canal</h3><p class="muted small">${u.youtube?.connected ? `${u.youtube.teste ? '🧪 Canal de teste: ' : 'Conectado: '}<b>${esc(u.youtube.channel_title || 'canal')}</b>. Capas, A/B, edição de títulos.` : 'Conecte seu canal do YouTube para gerenciar capas, títulos e testes A/B.'}</p>
         <a class="btn sm secondary" href="#/canal">${u.youtube?.connected ? 'Abrir meu canal' : 'Conectar canal'}</a></div>
       <div class="card"><h3>Extensão Chrome</h3><p class="muted small">Analise vídeos direto no YouTube com a mesma conta.</p>
@@ -1568,7 +1585,7 @@ views.planos = async () => {
   const plans = (await api('/plans')).items;
   appEl().innerHTML = `
     <h1>Planos e preços</h1>
-    <p class="muted">Pagamento avulso via Pix, sem cobrança automática: os créditos do plano são liberados após a confirmação do pagamento pelo provedor, nunca antes, e para receber de novo é preciso pagar de novo. Metas de capacidade comparativa são referências internas, não números auditados.</p>
+    <p class="muted">Um pagamento vale <b>2 meses</b>, e os créditos do plano entram <b>mês a mês</b> enquanto o prazo estiver valendo. Pagando o <b>ano inteiro</b> sai 10% mais barato. Pix único, sem cobrança automática: nada é descontado de você depois, e quando o prazo acabar a conta volta a receber a recarga mensal comum até você decidir pagar de novo. Metas de capacidade comparativa são referências internas, não números auditados.</p>
     ${state.pub.payments_enabled ? '' : alertBox('warn', 'Os pagamentos ainda não foram ativados pelo administrador (falta configurar o provedor Pix). As assinaturas ficarão disponíveis assim que isso for concluído; nenhuma cobrança é simulada.')}
     <section class="grid cols3">${plans.map(planCard).join('')}</section>
     <h2>Como funcionam os créditos</h2>
@@ -1580,21 +1597,27 @@ views.planos = async () => {
 views.checkout = async (params) => {
   if (!state.user) return needLogin();
   const planId = params.get('plan');
+  const periodo = PERIODOS[params.get('periodo')] ? params.get('periodo') : '2m';
   const plans = (await api('/plans')).items;
   const plan = plans.find((p) => p.id === planId);
   if (!plan) { appEl().innerHTML = alertBox('err', 'Plano não encontrado.'); return; }
+  const per = PERIODOS[periodo], valor = precoPeriodo(plan, periodo);
+  const ateQuando = new Date(); ateQuando.setMonth(ateQuando.getMonth() + per.meses);
   appEl().innerHTML = `
-    <h1>Assinar plano ${esc(plan.name)}</h1>
+    <h1>Plano ${esc(plan.name)} · ${per.rotulo}</h1>
     <div class="card" style="max-width:560px">
-      <p><b>${money(plan.price_cents)}</b>/mês · ${fmt(plan.monthly_credits)} créditos liberados após a confirmação do pagamento.</p>
+      <p><b>${money(valor)}</b> por ${per.rotulo}${periodo === '12m' ? ` <span class="pill ok">10% a menos que ${money(plan.price_cents * 6)}</span>` : ''}</p>
+      <p>${fmt(plan.monthly_credits)} créditos <b>por mês</b>, durante ${per.meses} meses — o primeiro lote entra assim que o pagamento for confirmado, e os outros entram sozinhos a cada mês, até ${ateQuando.toLocaleDateString('pt-BR')}.</p>
+      <p class="muted small">Pagamento único: nada é cobrado automaticamente depois. Quando o prazo acabar, a conta volta a receber a recarga mensal comum e você decide se paga de novo. Se pagar antes de vencer, o tempo novo soma ao que ainda falta.</p>
+      <p><a href="#/planos" class="muted small">← trocar de plano ou de período</a></p>
       <div id="msg"></div>
-      <p><button id="go" class="btn">Gerar cobrança Pix</button></p>
+      <p><button id="go" class="btn">Gerar cobrança Pix de ${money(valor)}</button></p>
       <div id="pix"></div>
     </div>`;
   $('#go').onclick = async () => {
     $('#msg').innerHTML = ''; $('#go').disabled = true;
     try {
-      const { payment } = await api('/payments/create', { method: 'POST', body: { plan_id: plan.id } });
+      const { payment } = await api('/payments/create', { method: 'POST', body: { plan_id: plan.id, periodo } });
       renderPix(payment);
       pollPayment(payment.id);
     } catch (e) {
@@ -1659,8 +1682,8 @@ views.conta = async () => {
           <p><button class="btn sm">Reivindicar administração</button></p></form></div>` : ''}
     </section>
     <h2>Seus pagamentos</h2>
-    <div class="card scroll">${pays.length ? `<table><tr><th>Data</th><th>Plano</th><th>Valor</th><th>Status</th></tr>
-      ${pays.map((p) => `<tr><td>${dt(p.created_at)}</td><td>${esc(p.plan_id)}</td><td>${money(p.amount_cents)}</td><td><span class="pill ${p.status === 'approved' ? 'ok' : p.status === 'pending' ? 'warn' : 'err'}">${esc(p.status)}</span></td></tr>`).join('')}</table>` : '<p class="muted">Nenhum pagamento ainda.</p>'}</div>`;
+    <div class="card scroll">${pays.length ? `<table><tr><th>Data</th><th>Plano</th><th>Período</th><th>Valor</th><th>Status</th></tr>
+      ${pays.map((p) => `<tr><td>${dt(p.created_at)}</td><td>${esc(p.plan_id)}</td><td>${esc(p.periodo_rotulo || '2 meses')}</td><td>${money(p.amount_cents)}</td><td><span class="pill ${p.status === 'approved' ? 'ok' : p.status === 'pending' ? 'warn' : 'err'}">${esc(p.status)}</span></td></tr>`).join('')}</table>` : '<p class="muted">Nenhum pagamento ainda.</p>'}</div>`;
   $('#tok').onclick = async () => {
     const r = await api('/auth/token');
     $('#tokout').innerHTML = `<div class="copybox">${esc(r.token)}</div><p>${copyBtn(r.token, 'Copiar token', 'secondary')}</p>`;
@@ -1694,7 +1717,7 @@ views.ajuda = async () => {
     <h1>Central de ajuda</h1>
     <div class="grid cols2">
       <div class="card"><h3>Como funcionam os créditos?</h3>
-        <p class="muted">Cada ferramenta tem um custo em créditos, mostrado antes de usar. Seu saldo é completado até ${fmt(topupFree())} créditos no início de cada mês, em qualquer plano — é o piso de toda conta, e não soma: se você já tiver mais do que isso, nada entra. Pagar um plano libera os créditos daquele plano por cima, a cada pagamento confirmado; não há cobrança automática, então para receber de novo é preciso pagar de novo. Se uma ferramenta falhar, os créditos daquela chamada são estornados automaticamente.</p></div>
+        <p class="muted">Cada ferramenta tem um custo em créditos, mostrado antes de usar. No início de cada mês o seu saldo é completado — até ${fmt(topupFree())} créditos se você não tem plano valendo, ou até o mensal do seu plano se tem. É "completa até", não soma: se você já tiver mais do que isso, nada entra. Um pagamento compra 2 meses de plano (ou 12, no anual) e os créditos entram mês a mês durante esse prazo; não há cobrança automática. Se uma ferramenta falhar, os créditos daquela chamada são estornados automaticamente.</p></div>
       <div class="card"><h3>Como instalo a extensão do Chrome?</h3>
         <p><a class="btn sm" href="/turbocanal-extensao.zip" download id="extDl">⬇️ Baixar extensão (.zip)</a> <span class="muted small" id="extVer"></span></p>
         <ol class="muted">
@@ -3599,11 +3622,13 @@ const adminTabs = {
   async planos(el) {
     const r = await api('/admin/plans');
     el.innerHTML = `<div class="card scroll"><p class="muted small">Edite preço (em centavos), créditos mensais e status. O plano Free continua sempre gratuito.</p>
-      <table><tr><th>ID</th><th>Nome</th><th>Preço (centavos)</th><th>Créditos/mês</th><th>Ativo</th><th></th></tr>
+      <p class="muted small">O <b>preço</b> é o de <b>um pagamento, que vale 2 meses</b>. O valor do ano sai sozinho daqui: 6 × o preço, menos 10%. Os <b>créditos/mês</b> entram uma vez por mês enquanto o prazo pago estiver valendo.</p>
+      <table><tr><th>ID</th><th>Nome</th><th>Preço de 2 meses (centavos)</th><th>1 ano (−10%)</th><th>Créditos/mês</th><th>Ativo</th><th></th></tr>
       ${r.items.map((p) => `<tr>
         <td>${esc(p.id)}</td>
         <td><input value="${esc(p.name)}" data-f="name" data-p="${p.id}" style="min-width:110px"></td>
         <td><input type="number" value="${p.price_cents}" data-f="price_cents" data-p="${p.id}" style="min-width:90px" ${p.id === 'free' ? 'disabled' : ''}></td>
+        <td class="muted small">${p.price_cents ? money(precoPeriodo(p, '12m')) : '—'}</td>
         <td><input type="number" value="${p.monthly_credits}" data-f="monthly_credits" data-p="${p.id}" style="min-width:100px"></td>
         <td><input type="checkbox" ${p.active ? 'checked' : ''} data-f="active" data-p="${p.id}"></td>
         <td><button class="btn sm" data-save="${p.id}">Salvar</button></td></tr>`).join('')}</table></div>`;

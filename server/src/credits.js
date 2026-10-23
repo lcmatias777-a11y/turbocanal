@@ -12,23 +12,36 @@ export function getUser(db, id) {
   return db.get('SELECT * FROM users WHERE id=?', [id]);
 }
 
+/** O plano pago desta conta ainda está valendo? */
+export const planoValendo = (user, agora = new Date()) =>
+  !!(user?.plano_ate && new Date(user.plano_ate) > agora);
+
 /**
- * Recarga mensal de TODA conta: no primeiro uso de cada mês, o saldo é
- * completado até free_monthly_topup (padrão 5000). "Completa até", não soma:
- * quem já tem mais do que isso não recebe nada.
+ * Recarga mensal de TODA conta, no primeiro uso de cada mês.
  *
- * Antes isto valia só para o plano Free, e o efeito era uma armadilha: quem
- * pagava um plano recebia os créditos daquele pagamento UMA vez e, a partir
- * dali, parava de receber a recarga mensal. No mês seguinte ficava com o que
- * sobrou e sem recarga nenhuma — ou seja, pior do que se nunca tivesse pagado.
- * Não existe cobrança recorrente no site; pagar dá um lote de créditos por
- * cima, e esta recarga é o piso de toda conta, tenha ela pagado ou não.
+ * Quanto entra depende do plano estar valendo ou não:
+ *  - plano pago dentro do prazo -> completa até os créditos mensais do plano;
+ *  - fora do prazo, ou plano Free -> completa até free_monthly_topup (5000).
+ *
+ * "Completa até", não soma: quem já tem mais do que isso não recebe nada.
+ *
+ * É assim que o pagamento por período paga: a pessoa compra 2 meses (ou 12, no
+ * anual) e os créditos do plano entram MÊS A MÊS enquanto o prazo corre, em vez
+ * de virem todos de uma vez. Quando o prazo acaba, a conta não fica no vácuo:
+ * volta a receber o piso de 5000, igual a qualquer outra.
  */
 export async function ensureRefill(db, user) {
   if (!user || user.role === 'owner') return user;
   const m = ym();
   if (user.last_refill === m) return user;
-  const topup = parseInt((await getSetting(db, 'free_monthly_topup')) || '5000', 10);
+
+  const piso = parseInt((await getSetting(db, 'free_monthly_topup')) || '5000', 10);
+  let alvo = piso, doPlano = false;
+  if (planoValendo(user)) {
+    const plano = await db.get('SELECT monthly_credits FROM plans WHERE id=?', [user.plan_id]);
+    if (plano && plano.monthly_credits > alvo) { alvo = plano.monthly_credits; doPlano = true; }
+  }
+
   let recarregou = 0;
   // A recarga mensal roda sozinha na primeira visita do mês, em qualquer
   // página, inclusive dentro do painel administrativo. Ela não é ação de
@@ -40,14 +53,17 @@ export async function ensureRefill(db, user) {
   await semGuarda('recarga mensal de créditos', ['users:credits', 'transactions'], () => db.tx(async (q) => {
     const u = await q.get('SELECT credits,last_refill FROM users WHERE id=?', [user.id]);
     if (!u || u.last_refill === m) return;
-    const delta = Math.max(0, topup - u.credits);
+    const delta = Math.max(0, alvo - u.credits);
     await q.run('UPDATE users SET last_refill=?, credits=credits+? WHERE id=?', [m, delta, user.id]);
-    if (delta > 0) await insertTx(q, user.id, delta, u.credits + delta, null, 'Recarga mensal de créditos');
+    if (delta > 0) {
+      await insertTx(q, user.id, delta, u.credits + delta, null,
+        doPlano ? 'Créditos do mês do seu plano' : 'Recarga mensal de créditos');
+    }
     recarregou = delta;
   }));
   if (recarregou > 0) {
     const { avisos } = await import('./notify.js');
-    await avisos.recarga(db, user.id, recarregou, topup);
+    await avisos.recarga(db, user.id, recarregou, alvo, doPlano);
   }
   return getUser(db, user.id);
 }

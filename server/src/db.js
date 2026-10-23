@@ -25,6 +25,10 @@ CREATE TABLE IF NOT EXISTS users (
   banido_motivo TEXT NOT NULL DEFAULT '',
   sessao_v INTEGER NOT NULL DEFAULT 0,
   foto_url TEXT,
+  -- Até quando o plano pago vale. Cada pagamento compra um período; enquanto
+  -- esta data estiver no futuro, a recarga mensal entrega os créditos do plano
+  -- em vez do piso gratuito. Vazio = conta sem plano pago valendo.
+  plano_ate TEXT,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS plans (
@@ -61,6 +65,8 @@ CREATE TABLE IF NOT EXISTS payments (
   provider TEXT,
   provider_id TEXT,
   status TEXT NOT NULL,
+  -- Quantos meses este pagamento compra: '2m' (um período) ou '12m' (o ano).
+  periodo TEXT NOT NULL DEFAULT '2m',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   raw TEXT
@@ -713,6 +719,15 @@ async function seed(db) {
   try { await db.run("ALTER TABLE chat_bloqueios ADD COLUMN onde TEXT NOT NULL DEFAULT 'bate-papo'"); } catch {}
   // Capa enviada para um vídeo do canal de teste
   try { await db.run('ALTER TABLE demo_edicoes ADD COLUMN capa TEXT'); } catch {}
+  // Plano pago por período: até quando vale, e o que cada pagamento comprou
+  try { await db.run('ALTER TABLE users ADD COLUMN plano_ate TEXT'); } catch {}
+  try { await db.run("ALTER TABLE payments ADD COLUMN periodo TEXT NOT NULL DEFAULT '2m'"); } catch {}
+  // Quem JÁ tinha plano pago antes desta mudança não pode perder o plano porque
+  // o prazo nasceu vazio. Ganha 2 meses a partir de agora, uma vez só.
+  try {
+    const d = new Date(); d.setMonth(d.getMonth() + 2);
+    await db.run("UPDATE users SET plano_ate=? WHERE plano_ate IS NULL AND plan_id <> 'free'", [d.toISOString()]);
+  } catch {}
   // review_replies virou 'respostas' (que serve também para comentários); só sai se estiver vazia
   try {
     const r = await db.get('SELECT COUNT(*) AS n FROM review_replies');

@@ -1,5 +1,5 @@
 import { getSetting } from './db.js';
-import { HttpError, audit, must, now, uid } from './util.js';
+import { HttpError, audit, must, now, uid, ym } from './util.js';
 import { grant } from './credits.js';
 
 /**
@@ -50,17 +50,26 @@ export async function activatePayment(db, payment, actor = null, viaLabel = 'web
     const plan = await q.get('SELECT * FROM plans WHERE id=?', [fresh.plan_id]);
     if (!plan) throw new HttpError(500, 'Plano do pagamento não existe mais.');
     await q.run("UPDATE payments SET status='approved', updated_at=? WHERE id=?", [now(), fresh.id]);
-    await q.run('UPDATE users SET plan_id=? WHERE id=?', [plan.id, fresh.user_id]);
-    const u = await q.get('SELECT credits FROM users WHERE id=?', [fresh.user_id]);
-    const bal = u.credits + plan.monthly_credits;
-    await q.run('UPDATE users SET credits=? WHERE id=?', [bal, fresh.user_id]);
-    await q.run('INSERT INTO transactions(id,user_id,delta,balance_after,tool,note,idem_key,created_at) VALUES(?,?,?,?,?,?,?,?)', [
-      uid(), fresh.user_id, plan.monthly_credits, bal, null, `Ativação do plano ${plan.name} (pagamento ${fresh.id.slice(0, 8)})`, null, now()
-    ]);
+    const per = PERIODOS[lerPeriodo(fresh.periodo)];
+    const u = await q.get('SELECT credits, plano_ate FROM users WHERE id=?', [fresh.user_id]);
+    // O pagamento compra TEMPO. A data nova soma ao que ainda falta, então quem
+    // paga antes de vencer não perde os dias que sobraram.
+    const ate = somarMeses(u.plano_ate, per.meses);
+    // Os créditos do plano entram mês a mês (credits.js), mas o primeiro mês
+    // entra agora: quem acabou de pagar não pode ficar esperando a virada do mês.
+    const bal = Math.max(u.credits, plan.monthly_credits);
+    await q.run('UPDATE users SET plan_id=?, plano_ate=?, credits=?, last_refill=? WHERE id=?',
+      [plan.id, ate, bal, ym(), fresh.user_id]);
+    if (bal !== u.credits) {
+      await q.run('INSERT INTO transactions(id,user_id,delta,balance_after,tool,note,idem_key,created_at) VALUES(?,?,?,?,?,?,?,?)', [
+        uid(), fresh.user_id, bal - u.credits, bal, null,
+        `Ativação do plano ${plan.name} por ${per.rotulo} (pagamento ${fresh.id.slice(0, 8)})`, null, now()
+      ]);
+    }
     await q.run('INSERT INTO audit(id, actor_id, actor_email, action, target, detail, created_at) VALUES(?,?,?,?,?,?,?)', [
       uid(), actor?.id || null, actor?.email || 'sistema', 'payment.approved', fresh.id, `plano ${plan.id}, via ${viaLabel}`, now()
     ]);
-    aviso = { user: fresh.user_id, plano: plan.name, creditos: plan.monthly_credits, valorCentavos: fresh.amount_cents };
+    aviso = { user: fresh.user_id, plano: plan.name, creditos: plan.monthly_credits, valorCentavos: fresh.amount_cents, meses: per.meses, ate };
     return q.get('SELECT * FROM payments WHERE id=?', [fresh.id]);
   }).then(async (r) => {
     if (aviso) {
@@ -84,7 +93,42 @@ function pubPayment(p) {
   if (!p) return null;
   let pix = null;
   try { const raw = JSON.parse(p.raw || '{}'); if (raw.pix) pix = raw.pix; } catch {}
-  return { id: p.id, plan_id: p.plan_id, amount_cents: p.amount_cents, provider: p.provider, status: p.status, created_at: p.created_at, updated_at: p.updated_at, pix };
+  const per = PERIODOS[lerPeriodo(p.periodo)];
+  return { id: p.id, plan_id: p.plan_id, amount_cents: p.amount_cents, provider: p.provider, status: p.status,
+    periodo: lerPeriodo(p.periodo), periodo_rotulo: per.rotulo, meses: per.meses,
+    created_at: p.created_at, updated_at: p.updated_at, pix };
+}
+
+/** O que cada pagamento compra.
+ *
+ *  Não existe cobrança automática no site: o Mercado Pago não cobra ninguém
+ *  sozinho. O que existe é pagamento por PERÍODO. Um pagamento compra 2 meses
+ *  pelo preço do plano; o anual compra 12 meses por 6 pagamentos com 10% de
+ *  desconto (Starter: 6 x R$ 10 = R$ 60, menos 10% = R$ 54).
+ *
+ *  Os créditos NÃO entram todos de uma vez: entram mês a mês, enquanto o prazo
+ *  estiver valendo, pela recarga mensal (credits.js). Quem paga de novo soma
+ *  ao que falta, não joga fora o tempo que sobrou. */
+export const PERIODOS = {
+  '2m': { meses: 2, vezes: 1, desconto: 0, rotulo: '2 meses' },
+  '12m': { meses: 12, vezes: 6, desconto: 0.10, rotulo: '1 ano' }
+};
+// Cuidado com o atalho esperto aqui: a primeira versao era
+//   PERIODOS[String(v || '2m')] ? String(v) : '2m'
+// e com v = null o teste do meio passava pelo fallback mas o retorno era a
+// string "null". Simples e sem gracinha:
+export const lerPeriodo = (v) => (Object.hasOwn(PERIODOS, String(v)) ? String(v) : '2m');
+/** Preço final em centavos de um plano num período, já com o desconto. */
+export function precoDoPeriodo(plan, periodo) {
+  const p = PERIODOS[lerPeriodo(periodo)];
+  return Math.round(plan.price_cents * p.vezes * (1 - p.desconto));
+}
+/** Nova data de fim: soma os meses ao que ainda falta, não ao dia de hoje. */
+export function somarMeses(ateAtual, meses, agora = new Date()) {
+  const base = ateAtual && new Date(ateAtual) > agora ? new Date(ateAtual) : new Date(agora);
+  const d = new Date(base);
+  d.setMonth(d.getMonth() + meses);
+  return d.toISOString();
 }
 
 export function paymentRoutes(app, db, auth) {
@@ -104,12 +148,13 @@ export function paymentRoutes(app, db, auth) {
         throw new HttpError(409, 'Os pagamentos estão desativados pelo administrador no momento.');
       }
       const id = uid();
+      const valor = precoDoPeriodo(plan, periodo);
       const body = {
-        transaction_amount: Math.round(plan.price_cents) / 100,
-        // "(mensal)" saia aqui e ia parar no extrato do cliente, mas nao existe
-        // cobranca recorrente: cada Pix e um pagamento avulso que libera os
-        // creditos daquele plano uma vez.
-        description: `TurboCanal - Plano ${plan.name}`,
+        transaction_amount: valor / 100,
+        // O que a pessoa vai ver no extrato: o plano e o periodo que ela comprou.
+        // Nada de "(mensal)": nao existe cobranca automatica, e dizer que existe
+        // no extrato do cliente seria mentira no lugar mais caro de mentir.
+        description: `TurboCanal - Plano ${plan.name} (${PERIODOS[periodo].rotulo})`,
         payment_method_id: 'pix',
         external_reference: id,
         payer: { email: req.user.email }
@@ -117,10 +162,10 @@ export function paymentRoutes(app, db, auth) {
       const mpData = await mp(db, 'POST', '/v1/payments', body, id);
       const td = mpData?.point_of_interaction?.transaction_data || {};
       const raw = JSON.stringify({ pix: { qr_code: td.qr_code || null, qr_code_base64: td.qr_code_base64 || null, ticket_url: td.ticket_url || null }, status: mpData.status });
-      await db.run('INSERT INTO payments(id,user_id,plan_id,amount_cents,provider,provider_id,status,created_at,updated_at,raw) VALUES(?,?,?,?,?,?,?,?,?,?)', [
-        id, req.user.id, plan.id, plan.price_cents, 'mercadopago', String(mpData.id || ''), mapStatus(mpData.status), now(), now(), raw
+      await db.run('INSERT INTO payments(id,user_id,plan_id,amount_cents,provider,provider_id,status,periodo,created_at,updated_at,raw) VALUES(?,?,?,?,?,?,?,?,?,?,?)', [
+        id, req.user.id, plan.id, valor, 'mercadopago', String(mpData.id || ''), mapStatus(mpData.status), periodo, now(), now(), raw
       ]);
-      await audit(db, req.user, 'payment.created', id, `plano ${plan.id}, R$ ${(plan.price_cents / 100).toFixed(2)}`);
+      await audit(db, req.user, 'payment.created', id, `plano ${plan.id}, ${PERIODOS[periodo].rotulo}, R$ ${(valor / 100).toFixed(2)}`);
       res.json({ payment: pubPayment(await db.get('SELECT * FROM payments WHERE id=?', [id])) });
     } catch (e) {
       next(e);

@@ -57,16 +57,20 @@ export const avisos = {
     corpo: `Sua conta está pronta com ${n(user.credits)} créditos. Vincule seu canal do YouTube para liberar as ferramentas que leem os seus próprios números.`,
     link: '#/dashboard'
   }),
-  recarga: (db, userId, quanto, teto) => notificar(db, userId, 'creditos_recarregados', `Seus créditos do mês foram restaurados`, {
-    corpo: `Entraram ${n(quanto)} créditos para completar o saldo até ${n(teto)}, que é o piso mensal de toda conta. Isso acontece sozinho no primeiro uso de cada mês, e não soma: se você já tiver mais do que isso, nada entra.`,
-    link: '#/historico',
-    dados: { quanto, teto }
-  }),
-  pagamento: (db, userId, { plano, creditos, valorCentavos }) => notificar(db, userId, 'creditos_pagamento', `Pagamento confirmado: +${n(creditos)} créditos`, {
-    corpo: `Seu plano agora é o ${plano}. Os ${n(creditos)} créditos já estão no seu saldo. Não há cobrança automática: para receber esta quantidade de novo, é preciso fazer outro pagamento.`,
-    link: '#/historico',
-    dados: { plano, creditos, valorCentavos }
-  }),
+  recarga: (db, userId, quanto, teto, doPlano = false) => notificar(db, userId, 'creditos_recarregados',
+    doPlano ? 'Entraram os créditos do mês do seu plano' : 'Seus créditos do mês foram restaurados', {
+      corpo: doPlano
+        ? `Entraram ${n(quanto)} créditos para completar o saldo até ${n(teto)}, que é o mensal do seu plano. Isso se repete todo mês enquanto o prazo que você pagou estiver valendo, e não soma: se você já tiver mais do que isso, nada entra.`
+        : `Entraram ${n(quanto)} créditos para completar o saldo até ${n(teto)}, que é o piso mensal de toda conta. Isso acontece sozinho no primeiro uso de cada mês, e não soma: se você já tiver mais do que isso, nada entra.`,
+      link: '#/historico',
+      dados: { quanto, teto, doPlano }
+    }),
+  pagamento: (db, userId, { plano, creditos, valorCentavos, meses, ate }) => notificar(db, userId, 'creditos_pagamento',
+    `Pagamento confirmado: plano ${plano} por ${meses} ${meses === 1 ? 'mês' : 'meses'}`, {
+      corpo: `Seu plano agora é o ${plano}, valendo até ${new Date(ate).toLocaleDateString('pt-BR')}. Os ${n(creditos)} créditos deste mês já estão no seu saldo, e os próximos entram sozinhos todo mês enquanto esse prazo estiver valendo. Não há cobrança automática: quando o prazo acabar, nada é cobrado e a conta volta a receber a recarga comum.`,
+      link: '#/historico',
+      dados: { plano, creditos, valorCentavos, meses, ate }
+    }),
   ajuste: (db, userId, delta, motivo, porQuem) => notificar(
     db, userId,
     delta >= 0 ? 'creditos_aumentados' : 'creditos_diminuidos',

@@ -129,12 +129,17 @@ check('o pagamento continua pendente antes do Sim', (await db.get('SELECT status
 check('e os créditos do usuário não mudaram', Number((await db.get('SELECT credits FROM users WHERE id=?', [alvo.id])).credits) === 5000);
 await aprova(pPag);
 check('depois do Sim, o pagamento é aprovado', (await db.get('SELECT status FROM payments WHERE id=?', [pag])).status === 'approved');
-check('e aí sim os créditos entram', Number((await db.get('SELECT credits FROM users WHERE id=?', [alvo.id])).credits) > 5000);
+// O pagamento compra TEMPO: o saldo vai ao mensal do plano (completa ate), e a
+// conta ganha prazo. Antes isto somava 60000 ao que ja tinha.
+check('e aí sim os créditos entram', Number((await db.get('SELECT credits FROM users WHERE id=?', [alvo.id])).credits) === 60000,
+  String((await db.get('SELECT credits FROM users WHERE id=?', [alvo.id])).credits));
+check('e a conta ganha prazo de plano', !!(await db.get('SELECT plano_ate FROM users WHERE id=?', [alvo.id])).plano_ate);
 
 const pCred = await pede('ajustar créditos vira pedido', `/api/admin/users/${alvo.id}/credits`, { body: { delta: 5000, motivo: 'cortesia' } });
-check('o saldo não muda antes do Sim', Number((await db.get('SELECT credits FROM users WHERE id=?', [alvo.id])).credits) === 65000, String((await db.get('SELECT credits FROM users WHERE id=?', [alvo.id])).credits));
+check('o saldo não muda antes do Sim', Number((await db.get('SELECT credits FROM users WHERE id=?', [alvo.id])).credits) === 60000, String((await db.get('SELECT credits FROM users WHERE id=?', [alvo.id])).credits));
 await aprova(pCred);
-check('depois do Sim o saldo muda', Number((await db.get('SELECT credits FROM users WHERE id=?', [alvo.id])).credits) === 70000);
+check('depois do Sim o saldo muda', Number((await db.get('SELECT credits FROM users WHERE id=?', [alvo.id])).credits) === 65000,
+  String((await db.get('SELECT credits FROM users WHERE id=?', [alvo.id])).credits));
 
 console.log('\n== Planos e preços ==');
 const pPlano = await pede('criar plano vira pedido', '/api/admin/plans', { body: { id: 'turbo9', name: 'Turbo 9', price_cents: 900, monthly_credits: 999999 } });

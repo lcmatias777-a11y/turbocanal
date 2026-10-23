@@ -65,6 +65,10 @@ async function publicUserBase(db, user, plan, yt) {
     role: user.role,
     plan_id: user.plan_id,
     plan,
+    // Até quando o plano pago vale, e se ainda vale. A tela precisa dos dois
+    // para não dizer "você é Starter" para quem já venceu o prazo.
+    plano_ate: user.plano_ate || null,
+    plano_valendo: !!(user.plano_ate && new Date(user.plano_ate) > new Date()),
     credits: user.credits,
     unlimited: user.role === 'owner',
     // Avatar: a foto quando existe, senão a inicial sobre uma cor fixa, para a

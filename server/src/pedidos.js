@@ -263,18 +263,30 @@ export const ACOES = {
   plano_do_usuario: {
     rotulo: 'Trocar o plano de um usuário',
     async validar(db, dados) {
-      const plano = await db.get('SELECT id,name,monthly_credits FROM plans WHERE id=?', [txt(dados.plan_id, 40)]);
+      const plano = await db.get('SELECT id,name,monthly_credits,price_cents FROM plans WHERE id=?', [txt(dados.plan_id, 40)]);
       if (!plano) throw new HttpError(404, 'Plano não encontrado.');
       const alvo = await usuario(db, dados.alvo_user);
       if (alvo.plan_id === plano.id) throw new HttpError(409, 'Essa conta já está nesse plano.');
-      return { plan_id: plano.id, plano: plano.name, creditos: Number(plano.monthly_credits), antes: alvo.plan_id };
+      // Meses de brinde, quando o administrador dá um plano pago na mão. O
+      // padrão é 2, igual a um pagamento. Sem isto o plano ficava sem prazo e a
+      // pessoa via o nome do plano na tela mas continuava recebendo só o piso.
+      const meses = Math.min(36, Math.max(1, parseInt(dados.meses, 10) || 2));
+      return { plan_id: plano.id, plano: plano.name, creditos: Number(plano.monthly_credits), antes: alvo.plan_id,
+        meses: plano.price_cents > 0 ? meses : 0 };
     },
-    descrever: (p, alvo) => `trocar o plano de ${alvo} de ${p.payload.antes} para ${p.payload.plano} (${n(p.payload.creditos)} créditos por mês)`,
+    descrever: (p, alvo) => `trocar o plano de ${alvo} de ${p.payload.antes} para ${p.payload.plano}`
+      + (p.payload.meses ? ` por ${p.payload.meses} ${p.payload.meses === 1 ? 'mês' : 'meses'} (${n(p.payload.creditos)} créditos por mês)` : ' (plano gratuito)'),
     async executar(db, p, quem) {
-      await db.run('UPDATE users SET plan_id=? WHERE id=?', [p.payload.plan_id, p.alvo_user]);
+      const { somarMeses } = await import('./payments.js');
+      const u = await db.get('SELECT plano_ate FROM users WHERE id=?', [p.alvo_user]);
+      // Plano pago ganha prazo (somando ao que ainda falta); voltar para o Free
+      // zera o prazo, senão a conta ficaria com uma data de validade órfã.
+      const ate = p.payload.meses ? somarMeses(u?.plano_ate, p.payload.meses) : null;
+      await db.run('UPDATE users SET plan_id=?, plano_ate=? WHERE id=?', [p.payload.plan_id, ate, p.alvo_user]);
       const alvo = await db.get('SELECT email FROM users WHERE id=?', [p.alvo_user]);
-      await audit(db, quem, 'admin.user_plan_set', alvo?.email || p.alvo_user, p.payload.plan_id);
-      return { plan_id: p.payload.plan_id };
+      await audit(db, quem, 'admin.user_plan_set', alvo?.email || p.alvo_user,
+        p.payload.plan_id + (ate ? ` até ${ate.slice(0, 10)}` : ''));
+      return { plan_id: p.payload.plan_id, plano_ate: ate };
     }
   },
 
