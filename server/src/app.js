@@ -111,8 +111,27 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
   app.use('/vendor/ffmpeg/ffmpeg', express.static(path.join(nm, 'ffmpeg/dist/esm'), vendorOpts));
   app.use('/vendor/ffmpeg/util', express.static(path.join(nm, 'util/dist/esm'), vendorOpts));
   app.use('/vendor/ffmpeg/core', express.static(path.join(nm, 'core/dist/esm'), vendorOpts));
+  /* A página sempre sai com um número de versão colado no endereço do app.js e
+   * do styles.css. Sem isso o navegador guarda os arquivos e continua usando a
+   * cópia velha depois de uma publicação: a correção sobe para o servidor e
+   * quem já tinha entrado no site nunca a vê. Com o número mudando a cada
+   * publicação, o endereço muda junto e o navegador é obrigado a buscar de novo.
+   * No Render o número é o commit publicado; fora dele, a hora em que o
+   * servidor subiu. */
+  const VERSAO = (process.env.RENDER_GIT_COMMIT || '').slice(0, 8) || String(Date.now());
+  let paginaInicial = null;
+  const servirPagina = (req, res, next) => {
+    try {
+      if (paginaInicial === null) {
+        paginaInicial = fs.readFileSync(path.join(webDir, 'index.html'), 'utf8')
+          .replace(/(\/assets\/(?:app\.js|styles\.css))(["'])/g, `$1?v=${VERSAO}$2`);
+      }
+      res.type('html').set('Cache-Control', 'no-cache').send(paginaInicial);
+    } catch (e) { next(e); }
+  };
+  app.get(['/', '/index.html'], servirPagina);
   app.use(express.static(webDir));
-  app.get('*', (req, res) => res.sendFile(path.join(webDir, 'index.html')));
+  app.get('*', servirPagina);
 
   // eslint-disable-next-line no-unused-vars
   // Código curto para a pessoa citar quando avisar do erro; o mesmo código sai

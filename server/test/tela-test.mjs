@@ -75,5 +75,21 @@ appJs.forEach((l, i) => {
     `app.js:${i + 1} mensagem de sucesso promete YouTube sem olhar o canal de teste`);
 });
 
+/* ---------- 4) a pagina tem de sair com versao nos arquivos ---------- */
+// Sem numero de versao no endereco do app.js, o navegador guarda a copia velha
+// e a pessoa que ja visitou o site continua vendo a versao antiga depois de uma
+// publicacao. A correcao sobe e ninguem ve.
+{
+  process.env.OWNER_EMAIL = 'dono@example.com';
+  const { buildApp } = await import(RAIZ + '/server/src/app.js');
+  const { app } = await buildApp({ databaseUrl: undefined, dataDir: ':memory:', scheduler: false });
+  const srv = app.listen(0);
+  await new Promise((r) => srv.on('listening', r));
+  const html = await (await fetch(`http://127.0.0.1:${srv.address().port}/`)).text();
+  srv.close();
+  ok(/\/assets\/app\.js\?v=[^"']+/.test(html), 'a pagina serve o app.js com numero de versao');
+  ok(/\/assets\/styles\.css\?v=[^"']+/.test(html), 'a pagina serve o styles.css com numero de versao');
+}
+
 console.log(falhas ? `tela-test: ${falhas} de ${checks} FALHARAM` : `tela-test: ${checks} verificacoes, todas passaram`);
 process.exit(falhas ? 1 : 0);
