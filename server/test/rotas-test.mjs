@@ -38,7 +38,10 @@ async function bate(metodo, caminho, token){
 // Publicas de proposito, conferidas uma a uma. O webhook de pagamento esta
 // aqui porque ele NAO confia no corpo da requisicao: ele busca o pagamento
 // no Mercado Pago antes de liberar qualquer coisa.
-const PUBLICAS=/^(\*|\/privacidade|\/termos|\/api\/(health|settings\/public|tools\/costs|payments\/webhook|auth\/(register|login|google|logout|token)|public|plans|reviews|comments|replies|votes|reports|extension|blocks|estatisticas|canal-teste\/(capa|avatar|banner)))/;
+// A pagina do site e publica de proposito: e a porta de entrada, tem de abrir
+// para quem nao tem conta. Ela aparece como rota desde que passou a ser servida
+// com numero de versao nos arquivos (senao o navegador guarda a copia velha).
+const PUBLICAS=/^(\*|\/$|\/,|\/index\.html|\/privacidade|\/termos|\/api\/(health|settings\/public|tools\/costs|payments\/webhook|auth\/(register|login|google|logout|token)|public|plans|reviews|comments|replies|votes|reports|extension|blocks|estatisticas|canal-teste\/(capa|avatar|banner)))/;
 console.log(`rotas registradas: ${rotas.length}\n`);
 const suspeitas=[];
 for (const [m,p] of rotas.filter(r=>typeof r[1]==='string').sort((a,b)=>a[1]<b[1]?-1:1)) {
