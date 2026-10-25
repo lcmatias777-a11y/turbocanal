@@ -7,7 +7,7 @@ import { googleConfigured } from './auth.js';
 import { testGemini } from './gemini.js';
 
 const SETTING_KEYS = ['site_name', 'free_monthly_topup', 'yt_api_key', 'gemini_api_key', 'mp_access_token', 'payments_enabled', 'pix_key_value', 'pix_key_type', 'pix_key_confirmed',
-  'hotmart_hottok', 'hotmart_product_id', 'hotmart_ofertas'];
+  'hotmart_hottok', 'hotmart_product_id', 'hotmart_ofertas', 'support_email'];
 /** TUDO o que é segredo dentro da tabela settings, numa lista só.
  *  Antes havia duas listas: uma para mascarar na tela e outra para tirar do
  *  backup. Elas saíram do lugar e a chave privada das notificações (vapid_private)

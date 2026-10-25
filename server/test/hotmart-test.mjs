@@ -339,6 +339,19 @@ console.log('\n== Os botoes de compra do site apontam para a Hotmart ==');
   await setSetting(db, 'hotmart_ofertas', mapaAntes.value);
 }
 
+console.log('\n== O contato de suporte: a Hotmart exige que apareca ==');
+{
+  // Item 4.20 da politica da Hotmart: pagina de vendas sem dados de contato e
+  // suspensa. A pagina de vendas do TurboCanal e o proprio site.
+  const pub = await (await fetch(base + '/api/settings/public')).json();
+  check('o e-mail de suporte vem nas configuracoes publicas',
+    /@/.test(String(pub.support_email || '')), String(pub.support_email));
+  const html = await (await fetch(base + '/')).text();
+  check('o rodape do site ja traz um contato mesmo antes do JS rodar',
+    /Suporte:/.test(html) && /mailto:/.test(html), html.slice(0, 80));
+  check('o rodape diz em quanto tempo responde', /24 horas/.test(html));
+}
+
 console.log('\n== O token nunca sai do servidor ==');
 {
   const r = await fetch(base + '/api/settings/public');

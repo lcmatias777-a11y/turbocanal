@@ -99,7 +99,8 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
         payments_enabled: (await getSetting(db, 'payments_enabled')) === '1' && (await providerReady(db)),
         youtube_configured: !!((await getSetting(db, 'yt_api_key')) || process.env.YT_API_KEY),
         gemini_configured: !!(await geminiKey(db)),
-        google_login: googleConfigured()
+        google_login: googleConfigured(),
+        support_email: (await getSetting(db, 'support_email')) || ''
       });
     } catch (e) { next(e); }
   });

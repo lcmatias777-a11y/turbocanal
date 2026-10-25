@@ -637,6 +637,10 @@ const DEFAULT_SETTINGS = () => ({
   // Autenticacao); o product_id e o ID do produto; as ofertas sao o mapa
   // {"CODIGO": {"plan": "p10", "periodo": "12m"}} que diz quanto cada oferta
   // vale. Vazio significa integracao desligada, e nada libera acesso.
+  // Contato de suporte. Nao e enfeite: o item 4.20 da politica da Hotmart
+  // manda suspender produto cuja pagina de vendas omite dados de contato, e a
+  // pagina de vendas do TurboCanal e o proprio site.
+  support_email: 'turbocanaloficial@gmail.com',
   hotmart_hottok: '',
   hotmart_product_id: '',
   hotmart_ofertas: '{}'

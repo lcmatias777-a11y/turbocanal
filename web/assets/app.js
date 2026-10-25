@@ -3801,6 +3801,12 @@ const adminTabs = {
         <textarea id="c_hmof" rows="6" placeholder="OFMES p10 1m https://pay.hotmart.com/...&#10;OFANO p10 12m https://pay.hotmart.com/...">${esc(ofertasEmLinhas(s.hotmart_ofertas))}</textarea>
         <p class="small muted">O código da oferta e o endereço de compra saem da própria Hotmart depois que você cria cada oferta. Os planos são ${esc(['p10', 'p20', 'p40', 'p70', 'p100'].join(', '))} e os períodos são 1m e 12m. O endereço é opcional: sem ele a Hotmart continua liberando o acesso, mas o botão de comprar não aparece no site.</p>
         <p><button id="hmsave" class="btn sm">Salvar Hotmart</button></p></div>
+
+        <div class="card"><h3>✉️ Contato de suporte</h3><div id="supmsg"></div>
+        <p class="small muted">Aparece no rodapé do site e é o endereço que o cliente usa para pedir reembolso ou falar de um problema. A Hotmart suspende produto cuja página de vendas não mostra contato, então este campo não pode ficar vazio.</p>
+        <label>E-mail de suporte</label>
+        <input id="c_sup" value="${esc(s.support_email || '')}" placeholder="suporte@seudominio.com">
+        <p><button id="supsave" class="btn sm">Salvar contato</button></p></div>
       </div>`;
     (async () => {
       const el = $('#bkp');
@@ -3859,6 +3865,15 @@ const adminTabs = {
         $('#hmmsg').innerHTML = alertBox('ok', 'Configuração da Hotmart salva.');
         adminTabs.config(el);
       } catch (e) { showErr($('#hmmsg'), e); }
+    };
+    $('#supsave').onclick = async () => {
+      try {
+        await api('/admin/settings', { method: 'PUT', body: { updates: { support_email: $('#c_sup').value.trim() } } });
+        $('#supmsg').innerHTML = alertBox('ok', 'Contato de suporte salvo.');
+        state.pub = await api('/settings/public');
+        rodapeSuporte();
+        adminTabs.config(el);
+      } catch (e) { showErr($('#supmsg'), e); }
     };
   },
 
@@ -4182,8 +4197,22 @@ async function route() {
 
 window.addEventListener('hashchange', route);
 
+/* O e-mail de suporte fica no rodape, que e HTML fixo para aparecer mesmo antes
+ * do JS rodar: a Hotmart suspende produto cuja pagina de vendas nao tem
+ * contato, e a pagina de vendas do TurboCanal e o proprio site. O administrador
+ * pode trocar o endereco em Admin > Configuracoes, e e isto que atualiza o
+ * rodape quando ele trocar. */
+function rodapeSuporte() {
+  const a = document.getElementById('rodapeSuporte');
+  const email = String(state.pub?.support_email || '').trim();
+  if (!a || !email) return;                       // sem configuracao, fica o fixo
+  a.textContent = email;
+  a.href = 'mailto:' + email;
+}
+
 (async function boot() {
   try { state.pub = await api('/settings/public'); } catch {}
+  rodapeSuporte();
   try { state.costs = (await api('/tools/costs')).costs; } catch {}
   await refreshMe();
   route();
