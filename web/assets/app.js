@@ -228,7 +228,12 @@ views.home = async () => {
   const plans = (await api('/plans')).items;
   appEl().innerHTML = `
     <section class="hero">
-      <h1>Faça seu canal crescer com dados de verdade</h1>
+      <!-- A frase antiga era "Faça seu canal crescer com dados de verdade".
+           Trocada porque o site vai ser a página de vendas que a Hotmart
+           analisa, e o item 4.16 da Política de Uso Responsável dela proíbe
+           produto que prometa crescimento de público. Agora a frase diz o que a
+           ferramenta FAZ, sem prometer o que vai acontecer com o canal. -->
+      <h1>Os dados do seu canal no YouTube, organizados para decidir o que gravar</h1>
       <p>Pesquisa de palavras-chave, análise de SEO de vídeos e canais, tendências e ferramentas de IA para criadores do YouTube. Plano gratuito generoso com recarga mensal de créditos, site e extensão para Chrome na mesma conta.</p>
       <p>
         <a class="btn" href="#/login">Entrar com Google e ganhar ${fmt(topupFree())} créditos</a>
@@ -272,6 +277,28 @@ views.home = async () => {
 const PERIODOS = { '2m': { meses: 2, vezes: 1, desconto: 0, rotulo: '2 meses' },
                    '12m': { meses: 12, vezes: 6, desconto: 0.10, rotulo: '1 ano' } };
 const precoPeriodo = (p, per) => Math.round(p.price_cents * PERIODOS[per].vezes * (1 - PERIODOS[per].desconto));
+
+/* O mapa de ofertas da Hotmart e guardado como JSON, mas digitar JSON na mao e
+ * pedir erro de virgula. Na tela ele aparece como uma linha por oferta:
+ *   OF2MESES p10 2m
+ * Linha torta nao vira configuracao torta: ela e simplesmente descartada, e o
+ * webhook ja recusa liberar acesso por oferta que nao reconhece. */
+function ofertasEmLinhas(bruto) {
+  let m = {};
+  try { m = JSON.parse(bruto || '{}') || {}; } catch { return ''; }
+  return Object.entries(m)
+    .map(([codigo, v]) => `${codigo} ${v?.plan || ''} ${v?.periodo || ''}`.trim())
+    .join('\n');
+}
+function linhasEmOfertas(texto) {
+  const out = {};
+  for (const linha of String(texto || '').split('\n')) {
+    const [codigo, plano, periodo] = linha.trim().split(/\s+/);
+    if (!codigo || !plano || !Object.hasOwn(PERIODOS, periodo)) continue;
+    out[codigo] = { plan: plano, periodo };
+  }
+  return out;
+}
 
 function planCard(p) {
   const ano = p.price_cents ? precoPeriodo(p, '12m') : 0;
@@ -3728,6 +3755,18 @@ const adminTabs = {
         <p class="small muted">Webhook para cadastrar no Mercado Pago: <span class="copybox" style="display:inline-block">${esc(s.webhook_url)}</span></p>
         <p><label style="display:inline"><input type="checkbox" id="c_payon" style="width:auto" ${s.payments_enabled === '1' ? 'checked' : ''}> Pagamentos ativados</label></p>
         <p><button id="psave" class="btn sm">Salvar pagamentos</button></p></div>
+
+        <div class="card"><h3>🔶 Hotmart</h3><div id="hmmsg"></div>
+        <p class="small muted">Quando alguém compra o TurboCanal na Hotmart, ela avisa este endereço e o acesso é liberado sozinho. Sem as três coisas abaixo preenchidas, nada é liberado: o aviso fica gravado e você recebe um recado.</p>
+        <p class="small muted">Endereço para cadastrar na Hotmart, em Ferramentas &gt; Webhook: <span class="copybox" style="display:inline-block">${esc(s.hotmart_webhook_url || '')}</span></p>
+        <label>Hottok ${s.hotmart_hottok?.set ? `<span class="pill ok">configurado (${esc(s.hotmart_hottok.masked)})</span>` : '<span class="pill warn">pendente</span>'}</label>
+        <input id="c_hmtok" placeholder="o token em Hotmart &gt; Ferramentas &gt; Webhook &gt; Autenticação (vazio mantém o atual)">
+        <label>ID do produto na Hotmart</label>
+        <input id="c_hmprod" value="${esc(s.hotmart_product_id || '')}" placeholder="só números, por exemplo 1234567">
+        <label>Ofertas: uma por linha, no formato <code>CODIGO plano periodo</code></label>
+        <textarea id="c_hmof" rows="4" placeholder="OF2MESES p10 2m&#10;OFANO p10 12m">${esc(ofertasEmLinhas(s.hotmart_ofertas))}</textarea>
+        <p class="small muted">O código da oferta sai da própria Hotmart depois que você cria cada oferta. Os planos são ${esc(['free', 'p10', 'p20', 'p40', 'p70', 'p100'].join(', '))} e os períodos são 2m e 12m.</p>
+        <p><button id="hmsave" class="btn sm">Salvar Hotmart</button></p></div>
       </div>`;
     (async () => {
       const el = $('#bkp');
@@ -3774,6 +3813,18 @@ const adminTabs = {
         $('#pmsg2').innerHTML = alertBox('ok', 'Configurações de pagamento salvas.');
         adminTabs.config(el);
       } catch (e) { showErr($('#pmsg2'), e); }
+    };
+    $('#hmsave').onclick = async () => {
+      try {
+        const updates = {
+          hotmart_product_id: $('#c_hmprod').value.trim(),
+          hotmart_ofertas: JSON.stringify(linhasEmOfertas($('#c_hmof').value))
+        };
+        if ($('#c_hmtok').value.trim()) updates.hotmart_hottok = $('#c_hmtok').value.trim();
+        await api('/admin/settings', { method: 'PUT', body: { updates } });
+        $('#hmmsg').innerHTML = alertBox('ok', 'Configuração da Hotmart salva.');
+        adminTabs.config(el);
+      } catch (e) { showErr($('#hmmsg'), e); }
     };
   },
 

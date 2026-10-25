@@ -107,7 +107,14 @@ export function makeAuth(db) {
         throw new HttpError(401, 'Esta sessão foi encerrada. Entre de novo com o Google.');
       }
       if (user.banido) throw new HttpError(403, `Esta conta está suspensa.${user.banido_motivo ? ` Motivo: ${user.banido_motivo}` : ''} Se achar que é engano, fale com o administrador do site.`);
-      req.user = await ensureRefill(db, user);
+      // A compra da Hotmart entra ANTES da recarga: primeiro o plano, para a
+      // recarga ja dar os creditos do plano novo e nao os do Free.
+      let dono = user;
+      try {
+        const { aplicarCompraPendente } = await import('./hotmart.js');
+        dono = await aplicarCompraPendente(db, user);
+      } catch {}
+      req.user = await ensureRefill(db, dono);
       next();
     } catch (e) {
       next(e);
@@ -159,10 +166,16 @@ async function createUser(db, { email, passHash = null, name = '', googleSub = n
       [uid(), id, free.monthly_credits, free.monthly_credits, null, 'Créditos iniciais do plano Free', null, now()]
     );
   });
-  const novo = await getUser(db, id);
+  let novo = await getUser(db, id);
   try {
     const { avisos } = await import('./notify.js');
     await avisos.boasVindas(db, novo);
+  } catch {}
+  // Quem comprou na Hotmart antes de ter conta: a compra estava guardada e
+  // entra agora, senao a pessoa pagaria e entraria no plano Free.
+  try {
+    const { aplicarCompraPendente } = await import('./hotmart.js');
+    novo = await aplicarCompraPendente(db, novo);
   } catch {}
   return novo;
 }

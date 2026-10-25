@@ -73,6 +73,40 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 CREATE INDEX IF NOT EXISTS idx_pay_user ON payments(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_pay_provider ON payments(provider_id);
+-- Toda chamada do webhook da Hotmart fica gravada aqui, com o corpo inteiro.
+-- E o que permite conferir o formato real do aviso, entender por que um acesso
+-- nao saiu, e liberar na mao quando preciso.
+CREATE TABLE IF NOT EXISTS hotmart_eventos (
+  id TEXT PRIMARY KEY,
+  evento TEXT NOT NULL,
+  transacao TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  produto TEXT NOT NULL DEFAULT '',
+  oferta TEXT NOT NULL DEFAULT '',
+  resultado TEXT NOT NULL,
+  detalhe TEXT NOT NULL DEFAULT '',
+  corpo TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_hm_transacao ON hotmart_eventos(transacao, evento);
+CREATE INDEX IF NOT EXISTS idx_hm_data ON hotmart_eventos(created_at);
+-- Compra que chegou antes da conta existir: quem compra na Hotmart ainda nao
+-- tem conta no site. Fica guardada aqui e entra no primeiro acesso de quem usar
+-- esse mesmo e-mail.
+CREATE TABLE IF NOT EXISTS hotmart_pendentes (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  plan_id TEXT NOT NULL,
+  periodo TEXT NOT NULL DEFAULT '2m',
+  oferta TEXT NOT NULL DEFAULT '',
+  transacao TEXT NOT NULL DEFAULT '',
+  valor_centavos INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  aplicado_em TEXT,
+  cancelado_em TEXT,
+  user_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_hmp_email ON hotmart_pendentes(email, aplicado_em);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
@@ -587,7 +621,14 @@ const DEFAULT_SETTINGS = () => ({
   payments_enabled: '0',
   pix_key_value: '54984398807',
   pix_key_type: 'phone',
-  pix_key_confirmed: '0'
+  pix_key_confirmed: '0',
+  // Hotmart: o hottok e o token fixo do painel (Ferramentas > Webhook >
+  // Autenticacao); o product_id e o ID do produto; as ofertas sao o mapa
+  // {"CODIGO": {"plan": "p10", "periodo": "12m"}} que diz quanto cada oferta
+  // vale. Vazio significa integracao desligada, e nada libera acesso.
+  hotmart_hottok: '',
+  hotmart_product_id: '',
+  hotmart_ofertas: '{}'
 });
 
 function toPg(sql) {

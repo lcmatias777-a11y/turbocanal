@@ -8,6 +8,7 @@ import { HttpError, rateLimit } from './util.js';
 import { makeAuth, authRoutes, googleConfigured } from './auth.js';
 import { toolRoutes } from './tools.js';
 import { paymentRoutes, providerReady } from './payments.js';
+import { hotmartRoutes } from './hotmart.js';
 import { adminRoutes } from './admin.js';
 import { channelRoutes, runAbScheduler } from './channel.js';
 import { reviewRoutes } from './reviews.js';
@@ -55,6 +56,7 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
   authRoutes(app, db, auth);
   toolRoutes(app, db, auth);
   paymentRoutes(app, db, auth);
+  hotmartRoutes(app, db);
   adminRoutes(app, db, auth);
   channelRoutes(app, db, auth);
   reviewRoutes(app, db, auth);

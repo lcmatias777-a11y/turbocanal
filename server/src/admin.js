@@ -6,14 +6,18 @@ import { activatePayment, providerReady } from './payments.js';
 import { googleConfigured } from './auth.js';
 import { testGemini } from './gemini.js';
 
-const SETTING_KEYS = ['site_name', 'free_monthly_topup', 'yt_api_key', 'gemini_api_key', 'mp_access_token', 'payments_enabled', 'pix_key_value', 'pix_key_type', 'pix_key_confirmed'];
+const SETTING_KEYS = ['site_name', 'free_monthly_topup', 'yt_api_key', 'gemini_api_key', 'mp_access_token', 'payments_enabled', 'pix_key_value', 'pix_key_type', 'pix_key_confirmed',
+  'hotmart_hottok', 'hotmart_product_id', 'hotmart_ofertas'];
 /** TUDO o que é segredo dentro da tabela settings, numa lista só.
  *  Antes havia duas listas: uma para mascarar na tela e outra para tirar do
  *  backup. Elas saíram do lugar e a chave privada das notificações (vapid_private)
  *  ficava mascarada na tela mas ia em texto puro dentro do arquivo de backup.
  *  Uma lista só não tem como sair do lugar. */
 export const SEGREDOS_SETTINGS = new Set([
-  'yt_api_key', 'gemini_api_key', 'mp_access_token', 'vapid_private', 'jwt_secret', 'admin_setup_token'
+  'yt_api_key', 'gemini_api_key', 'mp_access_token', 'vapid_private', 'jwt_secret', 'admin_setup_token',
+  // O hottok e o que prova que a venda veio da Hotmart: vazado, qualquer um
+  // libera acesso pago no site.
+  'hotmart_hottok'
 ]);
 const SECRET_KEYS = SEGREDOS_SETTINGS;
 const PIX_TYPES = new Set(['phone', 'cpf', 'cnpj', 'email', 'random']);
@@ -221,6 +225,7 @@ export function adminRoutes(app, db, auth) {
     out.owner_email = await getSetting(db, 'owner_email');
     out.base_url = process.env.BASE_URL || 'http://localhost:8787';
     out.webhook_url = (process.env.BASE_URL || 'http://localhost:8787').replace(/\/$/, '') + '/api/payments/webhook';
+    out.hotmart_webhook_url = (process.env.BASE_URL || 'http://localhost:8787').replace(/\/$/, '') + '/api/hotmart/webhook';
     out.google_login_configured = googleConfigured();
     out.google_redirect_uri = out.base_url.replace(/\/$/, '') + '/api/auth/google/callback';
     out.database = db.kind;
