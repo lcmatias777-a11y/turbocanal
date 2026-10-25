@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="TurboCanal">
+  <defs>
+    <linearGradient id="tcFogo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff5d3b"/>
+      <stop offset="1" stop-color="#ffb03b"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#tcFogo)"/>
+  <!-- Tres barras que crescem: a leitura de dados que a ferramenta faz. -->
+  <g fill="#fff">
+    <rect x="96" y="168" width="70"  height="40" rx="20"/>
+    <rect x="96" y="236" width="92"  height="40" rx="20"/>
+    <rect x="96" y="304" width="114" height="40" rx="20"/>
+  </g>
+  <!-- O play, que diz de que plataforma se trata. -->
+  <path fill="#fff" d="M248 148.5a26 26 0 0 1 39.6-22.2l130 107.5a26 26 0 0 1 0 44.4l-130 107.5A26 26 0 0 1 248 363.5z"/>
+</svg>

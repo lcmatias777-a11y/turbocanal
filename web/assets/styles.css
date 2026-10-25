@@ -39,6 +39,7 @@ h3 { font-size: 1.1rem; margin: .8em 0 .3em; }
 .nav { display: flex; align-items: center; gap: 14px; padding: 10px 0; flex-wrap: wrap; }
 .brand { font-weight: 800; font-size: 1.25rem; letter-spacing: .3px; color: var(--text); display: flex; align-items: center; gap: 8px; }
 .brand b { color: var(--accent); }
+.brand-mark { border-radius: 7px; display: block; flex: none; }
 .nav .links { display: flex; gap: 4px; flex-wrap: wrap; }
 .nav a.navlink { color: var(--muted); padding: 6px 10px; border-radius: 8px; }
 .nav a.navlink:hover, .nav a.navlink.active { color: var(--text); background: var(--card); text-decoration: none; }

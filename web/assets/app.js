@@ -62,7 +62,7 @@ function renderNav() {
     `<a class="navlink ${route.startsWith(href) && href !== '#/' ? 'active' : route === href ? 'active' : ''}" href="${href}">${label}</a>`;
   $('#topbar').innerHTML = `
     <div class="container nav">
-      <a class="brand" href="#/">🚀 Turbo<b>Canal</b></a>
+      <a class="brand" href="#/"><img src="/assets/marca.svg" alt="" width="28" height="28" class="brand-mark">Turbo<b>Canal</b></a>
       <div class="links">
         ${u ? link('#/dashboard', 'Painel') + link('#/ferramentas/palavras', 'Ferramentas') + link('#/canal', '📺 Meu canal') + link('#/historico', 'Histórico') : ''}
         ${link('#/planos', 'Planos')}
