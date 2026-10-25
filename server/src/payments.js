@@ -135,6 +135,9 @@ export function paymentRoutes(app, db, auth) {
   app.post('/api/payments/create', auth.required, async (req, res, next) => {
     try {
       const planId = must(req.body?.plan_id, 'plano', { max: 40 });
+      // Faltava esta linha: o resto da rota usava `periodo` sem nunca declarar,
+      // e toda tentativa de pagar morria num ReferenceError mascarado como 500.
+      const periodo = lerPeriodo(req.body?.periodo);
       const plan = await db.get('SELECT * FROM plans WHERE id=? AND active=1', [planId]);
       if (!plan) throw new HttpError(404, 'Plano não encontrado ou inativo.');
       if (plan.price_cents <= 0) throw new HttpError(400, 'O plano Free não precisa de pagamento.');
