@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS plans (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   price_cents INTEGER NOT NULL,
+  -- Preco do ANO, em centavos. E um valor proprio, nao uma conta sobre o mensal:
+  -- 99,00 nao e 12 x 9,99 com nenhum desconto redondo. Zero significa "nao
+  -- gravado", e ai o codigo cai na conta antiga (12x menos 10%) para nunca
+  -- cobrar zero por um ano de plano.
+  price_year_cents INTEGER NOT NULL DEFAULT 0,
   monthly_credits INTEGER NOT NULL,
   sort INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
@@ -65,8 +70,9 @@ CREATE TABLE IF NOT EXISTS payments (
   provider TEXT,
   provider_id TEXT,
   status TEXT NOT NULL,
-  -- Quantos meses este pagamento compra: '2m' (um período) ou '12m' (o ano).
-  periodo TEXT NOT NULL DEFAULT '2m',
+  -- Quantos meses este pagamento compra: '1m' (um mês) ou '12m' (o ano).
+  -- Pagamentos antigos guardam '2m', do modelo que vendia dois meses de uma vez.
+  periodo TEXT NOT NULL DEFAULT '1m',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   raw TEXT
@@ -97,7 +103,7 @@ CREATE TABLE IF NOT EXISTS hotmart_pendentes (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL,
   plan_id TEXT NOT NULL,
-  periodo TEXT NOT NULL DEFAULT '2m',
+  periodo TEXT NOT NULL DEFAULT '1m',
   oferta TEXT NOT NULL DEFAULT '',
   transacao TEXT NOT NULL DEFAULT '',
   valor_centavos INTEGER NOT NULL DEFAULT 0,
@@ -572,14 +578,19 @@ CREATE TABLE IF NOT EXISTS regras_estat (
 );
 `;
 
+// id, nome, preco do MES em centavos, preco do ANO em centavos, creditos/mes, ordem, ativo, descricao
 const PLAN_SEED = [
-  ['free', 'Free', 0, 5000, 0, 1, 'Plano gratuito com recarga mensal automática de créditos. Meta interna: uso muito superior ao de planos gratuitos de ferramentas similares.'],
-  ['p10', 'Starter', 1000, 60000, 1, 1, 'Para quem publica toda semana. Créditos mensais com folga para pesquisa e análises.'],
-  ['p20', 'Creator', 2000, 140000, 2, 1, 'Para canais em crescimento, com análises de concorrentes frequentes.'],
-  ['p40', 'Pro', 4000, 320000, 3, 1, 'Para criadores profissionais e equipes pequenas.'],
-  ['p70', 'Studio', 7000, 600000, 4, 1, 'Para estúdios e múltiplos canais.'],
-  ['p100', 'Max', 10000, 1000000, 5, 1, 'Maior capacidade de utilização entre os planos disponíveis.']
+  ['free', 'Free', 0, 0, 5000, 0, 1, 'Plano gratuito com recarga mensal automática de créditos. Meta interna: uso muito superior ao de planos gratuitos de ferramentas similares.'],
+  ['p10', 'Starter', 999, 9900, 60000, 1, 1, 'Para quem publica toda semana. Créditos mensais com folga para pesquisa e análises.'],
+  ['p20', 'Creator', 1999, 19900, 140000, 2, 1, 'Para canais em crescimento, com análises de concorrentes frequentes.'],
+  ['p40', 'Pro', 3999, 39900, 320000, 3, 1, 'Para criadores profissionais e equipes pequenas.'],
+  ['p70', 'Studio', 6999, 69900, 600000, 4, 1, 'Para estúdios e múltiplos canais.'],
+  ['p100', 'Max', 9999, 99900, 1000000, 5, 1, 'Maior capacidade de utilização entre os planos disponíveis.']
 ];
+/* Precos do modelo ANTIGO, que vendia 2 meses pelo preco do plano. A migracao
+ * abaixo so troca o preco de um plano que AINDA esta no valor antigo: se o dono
+ * ajustou o preco na mao, o ajuste dele fica. */
+const PRECOS_ANTIGOS = { p10: 1000, p20: 2000, p40: 4000, p70: 7000, p100: 10000 };
 
 const TOOL_SEED = [
   ['video_search', 4, 'Busca de vídeos'],
@@ -738,9 +749,19 @@ export async function setSetting(db, key, value) {
 async function seed(db) {
   for (const p of PLAN_SEED) {
     await db.run(
-      'INSERT INTO plans(id,name,price_cents,monthly_credits,sort,active,description) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
+      'INSERT INTO plans(id,name,price_cents,price_year_cents,monthly_credits,sort,active,description) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
       p
     );
+  }
+  /* Modelo novo de preco (1 mes em vez de 2, e preco do ano proprio), pedido
+   * pelo dono. ON CONFLICT DO NOTHING acima nao mexe em plano que ja existe,
+   * entao a troca tem de ser explicita aqui, e so quando o valor ainda e o
+   * antigo. */
+  for (const linha of PLAN_SEED) {
+    const [id, , mes, ano] = linha;
+    if (!PRECOS_ANTIGOS[id]) continue;
+    await db.run('UPDATE plans SET price_cents=? WHERE id=? AND price_cents=?', [mes, id, PRECOS_ANTIGOS[id]]);
+    await db.run('UPDATE plans SET price_year_cents=? WHERE id=? AND price_year_cents=0', [ano, id]);
   }
   for (const t of TOOL_SEED) {
     await db.run('INSERT INTO tool_costs(tool,cost,label) VALUES(?,?,?) ON CONFLICT(tool) DO NOTHING', t);
@@ -763,6 +784,7 @@ async function seed(db) {
   // Plano pago por período: até quando vale, e o que cada pagamento comprou
   try { await db.run('ALTER TABLE users ADD COLUMN plano_ate TEXT'); } catch {}
   try { await db.run("ALTER TABLE payments ADD COLUMN periodo TEXT NOT NULL DEFAULT '2m'"); } catch {}
+  try { await db.run('ALTER TABLE plans ADD COLUMN price_year_cents INTEGER NOT NULL DEFAULT 0'); } catch {}
   // Quem JÁ tinha plano pago antes desta mudança não pode perder o plano porque
   // o prazo nasceu vazio. Ganha 2 meses a partir de agora, uma vez só.
   try {

@@ -262,7 +262,7 @@ views.home = async () => {
     <p class="center"><a class="btn ghost" href="#/avaliacoes">⭐ Ver e escrever avaliações</a></p>
     <div data-slot="home-antes-planos" hidden></div>
     <h2 class="center" style="margin-top:34px">Planos</h2>
-    <p class="center muted small">Toda conta tem o saldo restaurado sozinho uma vez por mês. Com um plano pago valendo, o que entra todo mês é o valor do plano; sem plano, é a recarga comum. Um pagamento vale 2 meses, ou 12 no anual, e não existe cobrança automática. As comparações de capacidade são metas internas de referência, não números auditados.</p>
+    <p class="center muted small">Toda conta tem o saldo restaurado sozinho uma vez por mês. Com um plano pago valendo, o que entra todo mês é o valor do plano; sem plano, é a recarga comum. Um pagamento vale 1 mês, ou 12 no anual, e não existe cobrança automática. As comparações de capacidade são metas internas de referência, não números auditados.</p>
     <section class="grid cols3">${plans.map(planCard).join('')}</section>`;
   // o resumo das avaliações vem do banco; se ainda não houver nenhuma, a própria função avisa
   try {
@@ -273,10 +273,21 @@ views.home = async () => {
 };
 
 /** Preço do plano num período. As mesmas contas do servidor (payments.js):
- *  2 meses = o preço do plano; 1 ano = 6 pagamentos com 10% de desconto. */
-const PERIODOS = { '2m': { meses: 2, vezes: 1, desconto: 0, rotulo: '2 meses' },
-                   '12m': { meses: 12, vezes: 6, desconto: 0.10, rotulo: '1 ano' } };
-const precoPeriodo = (p, per) => Math.round(p.price_cents * PERIODOS[per].vezes * (1 - PERIODOS[per].desconto));
+ *  1 mês = o preço do plano; 1 ano = o preço do ano, que é um valor PRÓPRIO do
+ *  plano e não uma conta sobre o mensal (Starter: R$ 9,99 e R$ 99,00).
+ *  '2m' não está mais à venda e fica aqui só para o extrato antigo continuar
+ *  certo; quem decide o que pode ser comprado é aVenda. */
+const PERIODOS = { '1m': { meses: 1, rotulo: '1 mês', aVenda: true },
+  '12m': { meses: 12, rotulo: '1 ano', aVenda: true },
+  '2m': { meses: 2, rotulo: '2 meses', aVenda: false } };
+const A_VENDA = Object.keys(PERIODOS).filter((k) => PERIODOS[k].aVenda);
+const precoPeriodo = (p, per) => {
+  if (per === '12m') {
+    const ano = Number(p.price_year_cents || 0);
+    return ano > 0 ? ano : Math.round(Number(p.price_cents) * 12 * 0.9);
+  }
+  return Math.round(Number(p.price_cents));
+};
 
 /* O mapa de ofertas da Hotmart e guardado como JSON, mas digitar JSON na mao e
  * pedir erro de virgula. Na tela ele aparece como uma linha por oferta:
@@ -302,16 +313,18 @@ function linhasEmOfertas(texto) {
 
 function planCard(p) {
   const ano = p.price_cents ? precoPeriodo(p, '12m') : 0;
-  const cheio = p.price_cents * 6;
+  const cheio = p.price_cents * 12;                       // pagar mês a mês o ano inteiro
+  const economia = Math.max(cheio - ano, 0);
+  const menos = cheio ? Math.round((economia / cheio) * 100) : 0;
   return `<div class="card planCard">
     <h3>${esc(p.name)}</h3>
-    <div class="price">${p.price_cents ? money(p.price_cents) : 'Grátis'}<small>${p.price_cents ? ' por 2 meses' : '/mês'}</small></div>
+    <div class="price">${p.price_cents ? money(p.price_cents) : 'Grátis'}<small>/mês</small></div>
     <div><b>${fmt(p.monthly_credits)}</b> créditos ${p.price_cents ? 'por mês, enquanto o prazo estiver valendo' : 'por mês'}</div>
     <p class="muted small">${esc(p.description || '')}</p>
     ${p.price_cents
-      ? `<a class="btn" href="#/checkout?plan=${esc(p.id)}&periodo=2m">Pagar 2 meses · ${money(p.price_cents)}</a>
+      ? `<a class="btn" href="#/checkout?plan=${esc(p.id)}&periodo=1m">Pagar 1 mês · ${money(p.price_cents)}</a>
          <a class="btn secondary" href="#/checkout?plan=${esc(p.id)}&periodo=12m" style="margin-top:6px">1 ano · ${money(ano)}</a>
-         <p class="muted small" style="margin-top:6px">No ano você paga ${money(ano)} em vez de ${money(cheio)}: 10% a menos, e os créditos entram todo mês durante 12 meses.</p>`
+         ${economia ? `<p class="muted small" style="margin-top:6px">No ano você paga ${money(ano)} em vez de ${money(cheio)}: ${menos}% a menos, e os créditos entram todo mês durante 12 meses.</p>` : ''}`
       : `<a class="btn secondary" href="#/login">Entrar com Google</a>`}
   </div>`;
 }
@@ -1612,7 +1625,7 @@ views.planos = async () => {
   const plans = (await api('/plans')).items;
   appEl().innerHTML = `
     <h1>Planos e preços</h1>
-    <p class="muted">Um pagamento vale <b>2 meses</b>, e os créditos do plano entram <b>mês a mês</b> enquanto o prazo estiver valendo. Pagando o <b>ano inteiro</b> sai 10% mais barato. Pix único, sem cobrança automática: nada é descontado de você depois, e quando o prazo acabar a conta volta a receber a recarga mensal comum até você decidir pagar de novo. Metas de capacidade comparativa são referências internas, não números auditados.</p>
+    <p class="muted">Um pagamento vale <b>1 mês</b>, e os créditos do plano entram <b>mês a mês</b> enquanto o prazo estiver valendo. Pagando o <b>ano inteiro</b> sai mais barato que doze pagamentos mensais. Pix único, sem cobrança automática: nada é descontado de você depois, e quando o prazo acabar a conta volta a receber a recarga mensal comum até você decidir pagar de novo. Metas de capacidade comparativa são referências internas, não números auditados.</p>
     ${state.pub.payments_enabled ? '' : alertBox('warn', 'Os pagamentos ainda não foram ativados pelo administrador (falta configurar o provedor Pix). As assinaturas ficarão disponíveis assim que isso for concluído; nenhuma cobrança é simulada.')}
     <section class="grid cols3">${plans.map(planCard).join('')}</section>
     <h2>Como funcionam os créditos</h2>
@@ -1624,7 +1637,7 @@ views.planos = async () => {
 views.checkout = async (params) => {
   if (!state.user) return needLogin();
   const planId = params.get('plan');
-  const periodo = PERIODOS[params.get('periodo')] ? params.get('periodo') : '2m';
+  const periodo = PERIODOS[params.get('periodo')]?.aVenda ? params.get('periodo') : '1m';
   const plans = (await api('/plans')).items;
   const plan = plans.find((p) => p.id === planId);
   if (!plan) { appEl().innerHTML = alertBox('err', 'Plano não encontrado.'); return; }
@@ -1710,7 +1723,7 @@ views.conta = async () => {
     </section>
     <h2>Seus pagamentos</h2>
     <div class="card scroll">${pays.length ? `<table><tr><th>Data</th><th>Plano</th><th>Período</th><th>Valor</th><th>Status</th></tr>
-      ${pays.map((p) => `<tr><td>${dt(p.created_at)}</td><td>${esc(p.plan_id)}</td><td>${esc(p.periodo_rotulo || '2 meses')}</td><td>${money(p.amount_cents)}</td><td><span class="pill ${p.status === 'approved' ? 'ok' : p.status === 'pending' ? 'warn' : 'err'}">${esc(p.status)}</span></td></tr>`).join('')}</table>` : '<p class="muted">Nenhum pagamento ainda.</p>'}</div>`;
+      ${pays.map((p) => `<tr><td>${dt(p.created_at)}</td><td>${esc(p.plan_id)}</td><td>${esc(p.periodo_rotulo || '1 mês')}</td><td>${money(p.amount_cents)}</td><td><span class="pill ${p.status === 'approved' ? 'ok' : p.status === 'pending' ? 'warn' : 'err'}">${esc(p.status)}</span></td></tr>`).join('')}</table>` : '<p class="muted">Nenhum pagamento ainda.</p>'}</div>`;
   $('#tok').onclick = async () => {
     const r = await api('/auth/token');
     $('#tokout').innerHTML = `<div class="copybox">${esc(r.token)}</div><p>${copyBtn(r.token, 'Copiar token', 'secondary')}</p>`;
@@ -1744,7 +1757,7 @@ views.ajuda = async () => {
     <h1>Central de ajuda</h1>
     <div class="grid cols2">
       <div class="card"><h3>Como funcionam os créditos?</h3>
-        <p class="muted">Cada ferramenta tem um custo em créditos, mostrado antes de usar. No início de cada mês o seu saldo é completado — até ${fmt(topupFree())} créditos se você não tem plano valendo, ou até o mensal do seu plano se tem. É "completa até", não soma: se você já tiver mais do que isso, nada entra. Um pagamento compra 2 meses de plano (ou 12, no anual) e os créditos entram mês a mês durante esse prazo; não há cobrança automática. Se uma ferramenta falhar, os créditos daquela chamada são estornados automaticamente.</p></div>
+        <p class="muted">Cada ferramenta tem um custo em créditos, mostrado antes de usar. No início de cada mês o seu saldo é completado — até ${fmt(topupFree())} créditos se você não tem plano valendo, ou até o mensal do seu plano se tem. É "completa até", não soma: se você já tiver mais do que isso, nada entra. Um pagamento compra 1 mês de plano (ou 12, no anual) e os créditos entram mês a mês durante esse prazo; não há cobrança automática. Se uma ferramenta falhar, os créditos daquela chamada são estornados automaticamente.</p></div>
       <div class="card"><h3>Como instalo a extensão do Chrome?</h3>
         <p><a class="btn sm" href="/turbocanal-extensao.zip" download id="extDl">⬇️ Baixar extensão (.zip)</a> <span class="muted small" id="extVer"></span></p>
         <ol class="muted">
@@ -3649,13 +3662,13 @@ const adminTabs = {
   async planos(el) {
     const r = await api('/admin/plans');
     el.innerHTML = `<div class="card scroll"><p class="muted small">Edite preço (em centavos), créditos mensais e status. O plano Free continua sempre gratuito.</p>
-      <p class="muted small">O <b>preço</b> é o de <b>um pagamento, que vale 2 meses</b>. O valor do ano sai sozinho daqui: 6 × o preço, menos 10%. Os <b>créditos/mês</b> entram uma vez por mês enquanto o prazo pago estiver valendo.</p>
-      <table><tr><th>ID</th><th>Nome</th><th>Preço de 2 meses (centavos)</th><th>1 ano (−10%)</th><th>Créditos/mês</th><th>Ativo</th><th></th></tr>
+      <p class="muted small">O <b>preço do mês</b> e o <b>preço do ano</b> são valores separados: o do ano não é calculado a partir do mensal. Os <b>créditos/mês</b> entram uma vez por mês enquanto o prazo pago estiver valendo.</p>
+      <table><tr><th>ID</th><th>Nome</th><th>Preço do mês (centavos)</th><th>Preço do ano (centavos)</th><th>Créditos/mês</th><th>Ativo</th><th></th></tr>
       ${r.items.map((p) => `<tr>
         <td>${esc(p.id)}</td>
         <td><input value="${esc(p.name)}" data-f="name" data-p="${p.id}" style="min-width:110px"></td>
         <td><input type="number" value="${p.price_cents}" data-f="price_cents" data-p="${p.id}" style="min-width:90px" ${p.id === 'free' ? 'disabled' : ''}></td>
-        <td class="muted small">${p.price_cents ? money(precoPeriodo(p, '12m')) : '—'}</td>
+        <td><input type="number" value="${p.price_year_cents || 0}" data-f="price_year_cents" data-p="${p.id}" style="min-width:90px" ${p.id === 'free' ? 'disabled' : ''}></td>
         <td><input type="number" value="${p.monthly_credits}" data-f="monthly_credits" data-p="${p.id}" style="min-width:100px"></td>
         <td><input type="checkbox" ${p.active ? 'checked' : ''} data-f="active" data-p="${p.id}"></td>
         <td><button class="btn sm" data-save="${p.id}">Salvar</button></td></tr>`).join('')}</table></div>`;
@@ -3665,6 +3678,7 @@ const adminTabs = {
       try {
         const r = await api('/admin/plans/' + id, { method: 'PUT', body: {
           name: g('name').value, price_cents: parseInt(g('price_cents').value, 10),
+          price_year_cents: parseInt(g('price_year_cents').value, 10) || 0,
           monthly_credits: parseInt(g('monthly_credits').value, 10), active: g('active').checked
         }});
         b.textContent = feitoOuPedido(r) ? 'Salvo ✓' : 'Pedido enviado';

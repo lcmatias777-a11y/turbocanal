@@ -54,7 +54,7 @@ const criar = async (body) => {
 
 console.log('\n== Sem o provedor configurado, a rota recusa e NAO simula cobranca ==');
 {
-  const r = await criar({ plan_id: 'p10', periodo: '2m' });
+  const r = await criar({ plan_id: 'p10', periodo: '1m' });
   check('recusa com 409 enquanto o Access Token nao existe', r.s === 409, `${r.s} ${JSON.stringify(r.d).slice(0, 120)}`);
   check('nao gravou pagamento nenhum', (await db.all('SELECT * FROM payments')).length === 0);
 }
@@ -66,16 +66,16 @@ await setSetting(db, 'payments_enabled', '1');
 console.log('\n== Com o provedor ligado: a rota precisa RESPONDER, nao dar 500 ==');
 {
   chamadasMP = [];
-  const r = await criar({ plan_id: 'p10', periodo: '2m' });
-  check('criar pagamento de 2 meses responde 200 (era 500 com a variavel faltando)', r.s === 200, `${r.s} ${JSON.stringify(r.d).slice(0, 200)}`);
+  const r = await criar({ plan_id: 'p10', periodo: '1m' });
+  check('criar pagamento de 1 mes responde 200 (era 500 com a variavel faltando)', r.s === 200, `${r.s} ${JSON.stringify(r.d).slice(0, 200)}`);
   check('devolveu o pagamento com o Pix do provedor', r.d?.payment?.pix?.qr_code === 'PIX-DE-MENTIRA', JSON.stringify(r.d).slice(0, 150));
-  check('o Starter de 2 meses cobra R$ 10,00', r.d?.payment?.amount_cents === 1000, reais(r.d?.payment?.amount_cents));
-  check('o periodo gravado e 2m', r.d?.payment?.periodo === '2m', String(r.d?.payment?.periodo));
-  check('o rotulo que a pessoa ve diz 2 meses', r.d?.payment?.periodo_rotulo === '2 meses', String(r.d?.payment?.periodo_rotulo));
+  check('o Starter de 1 mes cobra R$ 9,99', r.d?.payment?.amount_cents === 999, reais(r.d?.payment?.amount_cents));
+  check('o periodo gravado e 1m', r.d?.payment?.periodo === '1m', String(r.d?.payment?.periodo));
+  check('o rotulo que a pessoa ve diz 1 mes', r.d?.payment?.periodo_rotulo === '1 mês', String(r.d?.payment?.periodo_rotulo));
   check('falou com o Mercado Pago uma vez', chamadasMP.length === 1, String(chamadasMP.length));
-  check('mandou o valor certo em reais para o provedor', chamadasMP[0]?.corpo?.transaction_amount === 10, String(chamadasMP[0]?.corpo?.transaction_amount));
+  check('mandou o valor certo em reais para o provedor', chamadasMP[0]?.corpo?.transaction_amount === 9.99, String(chamadasMP[0]?.corpo?.transaction_amount));
   check('a descricao no extrato nao promete mensalidade que nao existe',
-    /2 meses/.test(chamadasMP[0]?.corpo?.description || '') && !/mensal/i.test(chamadasMP[0]?.corpo?.description || ''),
+    /1 mês/.test(chamadasMP[0]?.corpo?.description || '') && !/mensal/i.test(chamadasMP[0]?.corpo?.description || ''),
     String(chamadasMP[0]?.corpo?.description));
 }
 
@@ -84,36 +84,46 @@ console.log('\n== O anual: 6 pagamentos com 10% de desconto ==');
   chamadasMP = [];
   const r = await criar({ plan_id: 'p10', periodo: '12m' });
   check('criar pagamento anual responde 200', r.s === 200, `${r.s} ${JSON.stringify(r.d).slice(0, 200)}`);
-  check('o Starter anual cobra R$ 54,00', r.d?.payment?.amount_cents === 5400, reais(r.d?.payment?.amount_cents));
+  check('o Starter anual cobra R$ 99,00', r.d?.payment?.amount_cents === 9900, reais(r.d?.payment?.amount_cents));
   check('o periodo gravado e 12m', r.d?.payment?.periodo === '12m', String(r.d?.payment?.periodo));
   check('o rotulo que a pessoa ve diz 1 ano', r.d?.payment?.periodo_rotulo === '1 ano', String(r.d?.payment?.periodo_rotulo));
-  check('mandou R$ 54 para o provedor, nao R$ 60', chamadasMP[0]?.corpo?.transaction_amount === 54, String(chamadasMP[0]?.corpo?.transaction_amount));
+  check('mandou R$ 99 para o provedor, nao 12 x 9,99', chamadasMP[0]?.corpo?.transaction_amount === 99, String(chamadasMP[0]?.corpo?.transaction_amount));
 }
 
 console.log('\n== Periodo invalido nao quebra e nao cobra a esmo ==');
 for (const [rotulo, valor] of [['ausente', undefined], ['nulo', null], ['inventado', 'banana'], ['numero', 12], ['objeto', { a: 1 }]]) {
   chamadasMP = [];
   const r = await criar({ plan_id: 'p10', ...(valor === undefined ? {} : { periodo: valor }) });
-  check(`periodo ${rotulo}: responde 200 e cai nos 2 meses`,
-    r.s === 200 && r.d?.payment?.periodo === '2m' && r.d?.payment?.amount_cents === 1000,
+  check(`periodo ${rotulo}: responde 200 e cai no 1 mes`,
+    r.s === 200 && r.d?.payment?.periodo === '1m' && r.d?.payment?.amount_cents === 999,
     `${r.s} ${r.d?.payment?.periodo} ${reais(r.d?.payment?.amount_cents)}`);
-  check(`periodo ${rotulo}: nao cobrou valor estranho do provedor`, chamadasMP[0]?.corpo?.transaction_amount === 10, String(chamadasMP[0]?.corpo?.transaction_amount));
+  check(`periodo ${rotulo}: nao cobrou valor estranho do provedor`, chamadasMP[0]?.corpo?.transaction_amount === 9.99, String(chamadasMP[0]?.corpo?.transaction_amount));
 }
 
 console.log('\n== Todos os planos pagos passam pela rota de verdade ==');
-for (const [plano, esperado2m, esperadoAno] of [['p10', 1000, 5400], ['p20', 2000, 10800], ['p40', 4000, 21600], ['p70', 7000, 37800], ['p100', 10000, 54000]]) {
-  const a = await criar({ plan_id: plano, periodo: '2m' });
+for (const [plano, esperadoMes, esperadoAno] of [['p10', 999, 9900], ['p20', 1999, 19900], ['p40', 3999, 39900], ['p70', 6999, 69900], ['p100', 9999, 99900]]) {
+  const a = await criar({ plan_id: plano, periodo: '1m' });
   const b = await criar({ plan_id: plano, periodo: '12m' });
-  check(`${plano}: 2 meses = ${reais(esperado2m)} e 1 ano = ${reais(esperadoAno)}`,
-    a.s === 200 && a.d?.payment?.amount_cents === esperado2m && b.s === 200 && b.d?.payment?.amount_cents === esperadoAno,
+  check(`${plano}: 1 mes = ${reais(esperadoMes)} e 1 ano = ${reais(esperadoAno)}`,
+    a.s === 200 && a.d?.payment?.amount_cents === esperadoMes && b.s === 200 && b.d?.payment?.amount_cents === esperadoAno,
     `${a.s}/${a.d?.payment?.amount_cents} ${b.s}/${b.d?.payment?.amount_cents}`);
+}
+
+console.log('\n== Periodo retirado de venda nao pode ser comprado ==');
+{
+  // '2m' existe no codigo para o extrato antigo continuar certo. Sem a barreira
+  // na rota, mandar periodo='2m' na mao comprava DOIS meses pelo preco de um.
+  const r = await criar({ plan_id: 'p10', periodo: '2m' });
+  check('pedir o periodo antigo de 2 meses e recusado com 400', r.s === 400, `${r.s} ${JSON.stringify(r.d).slice(0, 140)}`);
+  const n = (await db.all("SELECT * FROM payments WHERE periodo='2m'")).length;
+  check('e nao gravou nenhum pagamento de 2 meses', n === 0, String(n));
 }
 
 console.log('\n== O que a rota tem que continuar recusando ==');
 {
-  const r = await criar({ plan_id: 'free', periodo: '2m' });
+  const r = await criar({ plan_id: 'free', periodo: '1m' });
   check('o plano Free nao gera cobranca', r.s === 400, `${r.s} ${JSON.stringify(r.d).slice(0, 120)}`);
-  const r2 = await criar({ plan_id: 'nao-existe', periodo: '2m' });
+  const r2 = await criar({ plan_id: 'nao-existe', periodo: '1m' });
   check('plano inexistente da 404', r2.s === 404, String(r2.s));
   const r3 = await fetchReal(base + '/api/payments/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_id: 'p10' }) });
   check('sem estar logado nao cria pagamento', r3.status === 401, String(r3.status));

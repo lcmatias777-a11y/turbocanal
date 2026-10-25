@@ -194,16 +194,18 @@ export const ACOES = {
       const name = txt(dados.name, 60);
       if (!name) throw new HttpError(400, 'Dê um nome ao plano.');
       const price = parseInt(dados.price_cents, 10);
+      const priceYear = dados.price_year_cents === undefined || dados.price_year_cents === '' ? 0 : parseInt(dados.price_year_cents, 10);
       const credits = parseInt(dados.monthly_credits, 10);
       if (!Number.isInteger(price) || price < 0) throw new HttpError(400, 'Preço inválido.');
+      if (!Number.isInteger(priceYear) || priceYear < 0) throw new HttpError(400, 'Preço do ano inválido.');
       if (!Number.isInteger(credits) || credits <= 0) throw new HttpError(400, 'Créditos mensais inválidos.');
-      return { id, name, price, credits, sort: parseInt(dados.sort, 10) || 99, description: txt(dados.description, 400) };
+      return { id, name, price, priceYear, credits, sort: parseInt(dados.sort, 10) || 99, description: txt(dados.description, 400) };
     },
     descrever: (p) => `criar o plano "${p.payload.name}" a R$ ${(p.payload.price / 100).toFixed(2).replace('.', ',')} com ${n(p.payload.credits)} créditos por mês`,
     async executar(db, p, quem) {
       const v = p.payload;
-      await db.run('INSERT INTO plans(id,name,price_cents,monthly_credits,sort,active,description) VALUES(?,?,?,?,?,?,?)',
-        [v.id, v.name, v.price, v.credits, v.sort, 1, v.description]);
+      await db.run('INSERT INTO plans(id,name,price_cents,price_year_cents,monthly_credits,sort,active,description) VALUES(?,?,?,?,?,?,?,?)',
+        [v.id, v.name, v.price, v.priceYear, v.credits, v.sort, 1, v.description]);
       await audit(db, quem, 'admin.plan_create', v.id, `${v.name} R$${(v.price / 100).toFixed(2)} ${v.credits}cr`);
       return { plano: v.id };
     }
@@ -216,28 +218,33 @@ export const ACOES = {
       if (!plan) throw new HttpError(404, 'Plano não encontrado.');
       const name = dados.name !== undefined ? txt(dados.name, 60) : plan.name;
       const price = dados.price_cents !== undefined ? parseInt(dados.price_cents, 10) : Number(plan.price_cents);
+      const priceYear = dados.price_year_cents !== undefined && dados.price_year_cents !== ''
+        ? parseInt(dados.price_year_cents, 10) : Number(plan.price_year_cents || 0);
       const credits = dados.monthly_credits !== undefined ? parseInt(dados.monthly_credits, 10) : Number(plan.monthly_credits);
       const active = dados.active !== undefined ? (dados.active ? 1 : 0) : Number(plan.active);
       const sort = dados.sort !== undefined ? parseInt(dados.sort, 10) || 0 : Number(plan.sort);
       const description = dados.description !== undefined ? txt(dados.description, 400) : plan.description;
       if (!name) throw new HttpError(400, 'O plano precisa de um nome.');
       if (!Number.isInteger(price) || price < 0) throw new HttpError(400, 'Preço inválido.');
+      if (!Number.isInteger(priceYear) || priceYear < 0) throw new HttpError(400, 'Preço do ano inválido.');
       if (!Number.isInteger(credits) || credits <= 0) throw new HttpError(400, 'Créditos mensais inválidos.');
-      if (plan.id === 'free' && price > 0) throw new HttpError(400, 'O plano Free precisa continuar com preço zero.');
-      return { plano: plan.id, name, price, credits, active, sort, description, antes: { name: plan.name, price: Number(plan.price_cents), credits: Number(plan.monthly_credits), active: Number(plan.active) } };
+      if (plan.id === 'free' && (price > 0 || priceYear > 0)) throw new HttpError(400, 'O plano Free precisa continuar com preço zero.');
+      return { plano: plan.id, name, price, priceYear, credits, active, sort, description,
+        antes: { name: plan.name, price: Number(plan.price_cents), priceYear: Number(plan.price_year_cents || 0), credits: Number(plan.monthly_credits), active: Number(plan.active) } };
     },
     descrever: (p) => {
       const v = p.payload, a = v.antes, m = [];
       if (a.name !== v.name) m.push(`nome "${a.name}" → "${v.name}"`);
-      if (a.price !== v.price) m.push(`preço R$ ${(a.price / 100).toFixed(2).replace('.', ',')} → R$ ${(v.price / 100).toFixed(2).replace('.', ',')}`);
+      if (a.price !== v.price) m.push(`preço do mês R$ ${(a.price / 100).toFixed(2).replace('.', ',')} → R$ ${(v.price / 100).toFixed(2).replace('.', ',')}`);
+      if (a.priceYear !== v.priceYear) m.push(`preço do ano R$ ${(a.priceYear / 100).toFixed(2).replace('.', ',')} → R$ ${(v.priceYear / 100).toFixed(2).replace('.', ',')}`);
       if (a.credits !== v.credits) m.push(`créditos mensais ${n(a.credits)} → ${n(v.credits)}`);
       if (a.active !== v.active) m.push(v.active ? 'reativar o plano' : 'desativar o plano');
       return `mudar o plano ${v.plano}: ${m.length ? m.join(', ') : 'ajustes de ordem ou descrição'}`;
     },
     async executar(db, p, quem) {
       const v = p.payload;
-      await db.run('UPDATE plans SET name=?,price_cents=?,monthly_credits=?,active=?,sort=?,description=? WHERE id=?',
-        [v.name, v.price, v.credits, v.active, v.sort, v.description, v.plano]);
+      await db.run('UPDATE plans SET name=?,price_cents=?,price_year_cents=?,monthly_credits=?,active=?,sort=?,description=? WHERE id=?',
+        [v.name, v.price, v.priceYear, v.credits, v.active, v.sort, v.description, v.plano]);
       await audit(db, quem, 'admin.plan_update', v.plano, `R$${(v.price / 100).toFixed(2)} ${v.credits}cr ativo=${v.active}`);
       return { plano: v.plano };
     }

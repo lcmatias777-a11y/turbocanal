@@ -292,7 +292,7 @@ export function hotmartRoutes(app, db) {
       const destino = obj(mapa[oferta]);
       const planId = texto(destino.plan);
       const periodo = texto(destino.periodo);
-      if (!oferta || !planId || !Object.hasOwn(PERIODOS, periodo)) {
+      if (!oferta || !planId || !PERIODOS[periodo]?.aVenda) {
         await gravar(db, { ...base, resultado: 'nao liberado: oferta desconhecida', detalhe: `oferta "${oferta}" nao esta no mapa de ofertas` });
         await avisarDono(db, 'Venda da Hotmart com oferta que o site nao conhece',
           `${email} comprou a oferta "${oferta}" e o acesso NAO foi liberado, porque o site nao sabe qual plano e qual periodo ela vale. ` +

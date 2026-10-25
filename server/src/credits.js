@@ -25,7 +25,7 @@ export const planoValendo = (user, agora = new Date()) =>
  *
  * "Completa até", não soma: quem já tem mais do que isso não recebe nada.
  *
- * É assim que o pagamento por período paga: a pessoa compra 2 meses (ou 12, no
+ * É assim que o pagamento por período paga: a pessoa compra 1 mês (ou 12, no
  * anual) e os créditos do plano entram MÊS A MÊS enquanto o prazo corre, em vez
  * de virem todos de uma vez. Quando o prazo acaba, a conta não fica no vácuo:
  * volta a receber o piso de 5000, igual a qualquer outra.

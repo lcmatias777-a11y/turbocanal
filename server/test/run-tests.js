@@ -428,11 +428,11 @@ const depoisPago = await db.get('SELECT credits,plan_id,plano_ate FROM users WHE
 check(`pagamento confirmado: entra o plano ${planoPago.id} e o saldo do mês vai a ${planoPago.monthly_credits}`,
   depoisPago.plan_id === planoPago.id && depoisPago.credits === planoPago.monthly_credits, JSON.stringify(depoisPago));
 
-// O pagamento compra TEMPO: 2 meses, não um lote avulso de créditos.
+// O pagamento compra TEMPO: 1 mês, não um lote avulso de créditos.
 {
   const ate = new Date(depoisPago.plano_ate), hoje = new Date();
   const dias = Math.round((ate - hoje) / 86400000);
-  check('um pagamento compra 2 meses de plano (e a data fica guardada)', dias > 50 && dias < 70, `faltam ${dias} dias`);
+  check('um pagamento compra 1 mês de plano (e a data fica guardada)', dias > 25 && dias < 35, `faltam ${dias} dias`);
 }
 
 await db.run('UPDATE users SET last_refill=? WHERE id=?', [mesPassado, maria.id]);
@@ -454,22 +454,24 @@ check('prazo vencido: a conta volta a receber o piso de 5.000, não os créditos
   const faltam60 = new Date(Date.now() + 60 * 86400000).toISOString();
   await db.run('UPDATE users SET plano_ate=? WHERE id=?', [faltam60, maria.id]);
   await db.run('INSERT INTO payments(id,user_id,plan_id,amount_cents,status,provider,periodo,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
-    ['pay_teste_2', maria.id, planoPago.id, planoPago.price_cents, 'pending', 'teste', '2m', new Date().toISOString(), new Date().toISOString()]);
+    ['pay_teste_2', maria.id, planoPago.id, planoPago.price_cents, 'pending', 'teste', '1m', new Date().toISOString(), new Date().toISOString()]);
   await activatePayment(db, { id: 'pay_teste_2' }, null, 'teste');
   const somado = await db.get('SELECT plano_ate FROM users WHERE id=?', [maria.id]);
   const dias = Math.round((new Date(somado.plano_ate) - new Date()) / 86400000);
   check('pagar de novo antes de vencer SOMA ao que falta (uns 4 meses)', dias > 110 && dias < 130, `faltam ${dias} dias`);
 }
 
-// Preço do ano: 6 pagamentos com 10% de desconto
+// Preço do mês e preço do ano, que são valores separados no plano
 {
-  const { precoDoPeriodo, PERIODOS } = await import('../src/payments.js');
-  const doisMeses = precoDoPeriodo(planoPago, '2m');
+  const { precoDoPeriodo, PERIODOS, A_VENDA } = await import('../src/payments.js');
+  const mes = precoDoPeriodo(planoPago, '1m');
   const ano = precoDoPeriodo(planoPago, '12m');
-  check('o período de 2 meses custa o preço do plano', doisMeses === planoPago.price_cents, String(doisMeses));
-  check('o ano custa 6 pagamentos com 10% de desconto',
-    ano === Math.round(planoPago.price_cents * 6 * 0.9), `${ano} (esperado ${Math.round(planoPago.price_cents * 6 * 0.9)})`);
-  check('o ano vale 12 meses e o período vale 2', PERIODOS['12m'].meses === 12 && PERIODOS['2m'].meses === 2);
+  check('o período de 1 mês custa o preço do plano', mes === planoPago.price_cents, String(mes));
+  check('o ano custa o preço de ano gravado no plano',
+    ano === Number(planoPago.price_year_cents), `${ano} (gravado ${planoPago.price_year_cents})`);
+  check('o ano é mais barato que doze pagamentos mensais', ano < planoPago.price_cents * 12, `${ano} vs ${planoPago.price_cents * 12}`);
+  check('o ano vale 12 meses e o mês vale 1', PERIODOS['12m'].meses === 12 && PERIODOS['1m'].meses === 1);
+  check('só 1m e 12m estão à venda', A_VENDA.join(',') === '1m,12m', A_VENDA.join(','));
 }
 // devolve a conta ao estado que os testes seguintes esperam
 await db.run("UPDATE users SET plan_id='free', plano_ate=NULL, credits=?, last_refill=? WHERE id=?",

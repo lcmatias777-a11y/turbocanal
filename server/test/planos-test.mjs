@@ -3,34 +3,54 @@
 // Aqui ficam as contas e as bordas de calendário, que são o que erra calado.
 process.env.OWNER_EMAIL = 'dono@example.com';
 const S = '/home/claude/turbocanal/server';
-const { PERIODOS, lerPeriodo, precoDoPeriodo, somarMeses } = await import(S + '/src/payments.js');
+const { PERIODOS, A_VENDA, lerPeriodo, precoDoPeriodo, somarMeses } = await import(S + '/src/payments.js');
 
 let pass = 0, fail = 0;
 const check = (n, c, x = '') => { if (c) { pass++; console.log('  PASSOU ', n); } else { fail++; console.log('  FALHOU ', n, x); } };
 const reais = (c) => 'R$ ' + (c / 100).toFixed(2).replace('.', ',');
 
 console.log('\n== A tabela de preços, plano por plano ==');
-// Os mesmos planos que o banco semeia (db.js PLAN_SEED)
+/* Modelo NOVO, pedido pelo dono: 1 mês em vez de 2, e o preço do ANO é um valor
+ * PRÓPRIO de cada plano, não uma conta sobre o mensal. 99,00 não é 12 x 9,99
+ * com nenhum desconto redondo, e foi justamente por isso que a fórmula antiga
+ * (vezes x desconto) saiu do código. Estes são os valores semeados em db.js. */
 const PLANOS = [
-  ['Starter', 1000], ['Creator', 2000], ['Pro', 4000], ['Studio', 7000], ['Max', 10000]
+  ['Starter', 999, 9900], ['Creator', 1999, 19900], ['Pro', 3999, 39900],
+  ['Studio', 6999, 69900], ['Max', 9999, 99900]
 ];
-for (const [nome, preco] of PLANOS) {
-  const plan = { price_cents: preco };
-  const doisMeses = precoDoPeriodo(plan, '2m');
-  const ano = precoDoPeriodo(plan, '12m');
-  check(`${nome}: 2 meses custa o preço do plano (${reais(doisMeses)})`, doisMeses === preco, String(doisMeses));
-  check(`${nome}: 1 ano custa ${reais(ano)} em vez de ${reais(preco * 6)}`,
-    ano === Math.round(preco * 6 * 0.9), `${ano} (esperado ${Math.round(preco * 6 * 0.9)})`);
+for (const [nome, mes, anoEsperado] of PLANOS) {
+  const plan = { price_cents: mes, price_year_cents: anoEsperado };
+  check(`${nome}: 1 mês custa o preço do plano (${reais(mes)})`, precoDoPeriodo(plan, '1m') === mes, String(precoDoPeriodo(plan, '1m')));
+  check(`${nome}: 1 ano custa ${reais(anoEsperado)}`, precoDoPeriodo(plan, '12m') === anoEsperado, String(precoDoPeriodo(plan, '12m')));
+  check(`${nome}: o ano é mais barato que doze pagamentos mensais`, anoEsperado < mes * 12, `${anoEsperado} vs ${mes * 12}`);
 }
-check('o Starter anual dá exatamente R$ 54,00', precoDoPeriodo({ price_cents: 1000 }, '12m') === 5400);
-check('o ano é sempre mais barato que 6 pagamentos separados',
-  PLANOS.every(([, p]) => precoDoPeriodo({ price_cents: p }, '12m') < p * 6));
+check('o Starter dá R$ 9,99 no mês e R$ 99,00 no ano',
+  precoDoPeriodo({ price_cents: 999, price_year_cents: 9900 }, '1m') === 999
+  && precoDoPeriodo({ price_cents: 999, price_year_cents: 9900 }, '12m') === 9900);
 
-console.log('\n== Os períodos ==');
-check('2m vale 2 meses', PERIODOS['2m'].meses === 2);
+console.log('\n== Preço do ano não gravado: cai na conta antiga, nunca em zero ==');
+/* Banco de antes da coluna price_year_cents. Cobrar zero por um ano de plano
+ * seria o pior jeito de errar: silencioso e de graça. */
+for (const [nome, mes] of PLANOS) {
+  const antigo = { price_cents: mes, price_year_cents: 0 };
+  const esperado = Math.round(mes * 12 * 0.9);
+  check(`${nome}: sem preço de ano gravado, cobra ${reais(esperado)} e não zero`,
+    precoDoPeriodo(antigo, '12m') === esperado && precoDoPeriodo(antigo, '12m') > 0, String(precoDoPeriodo(antigo, '12m')));
+}
+check('ano ausente (undefined) também não vira zero', precoDoPeriodo({ price_cents: 999 }, '12m') > 0);
+check('ano nulo também não vira zero', precoDoPeriodo({ price_cents: 999, price_year_cents: null }, '12m') > 0);
+
+console.log('\n== Os períodos, e o que pode ser COMPRADO ==');
+check('1m vale 1 mês', PERIODOS['1m'].meses === 1);
 check('12m vale 12 meses', PERIODOS['12m'].meses === 12);
-check('período desconhecido cai no de 2 meses, não quebra', lerPeriodo('banana') === '2m' && lerPeriodo(null) === '2m' && lerPeriodo(undefined) === '2m');
-check('não existe período escondido além destes dois', Object.keys(PERIODOS).sort().join(',') === '12m,2m');
+check('período desconhecido cai no de 1 mês, não quebra',
+  lerPeriodo('banana') === '1m' && lerPeriodo(null) === '1m' && lerPeriodo(undefined) === '1m' && lerPeriodo(12) === '1m');
+check('2m continua existindo, para o extrato dos pagamentos antigos', PERIODOS['2m'].meses === 2 && lerPeriodo('2m') === '2m');
+check('2m NÃO está à venda', PERIODOS['2m'].aVenda === false);
+check('o que está à venda é exatamente 1m e 12m', A_VENDA.join(',') === '1m,12m', A_VENDA.join(','));
+check('não existe período escondido além destes três', Object.keys(PERIODOS).sort().join(',') === '12m,1m,2m', Object.keys(PERIODOS).sort().join(','));
+check('2m cobra um preço de plano, como cobrava no modelo antigo',
+  precoDoPeriodo({ price_cents: 999, price_year_cents: 9900 }, '2m') === 999);
 
 console.log('\n== Somar o prazo: paga de novo e o tempo SOMA ==');
 const dias = (a, b) => Math.round((new Date(a) - new Date(b)) / 86400000);

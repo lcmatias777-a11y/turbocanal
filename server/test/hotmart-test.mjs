@@ -24,7 +24,7 @@ const TOKEN = 'hottok-de-mentira-1234567890';
 const PRODUTO = '1234567';
 
 /** Monta um aviso no formato 2.0.0, do jeito que as implementacoes reais mostram. */
-function aviso(evento, { email = 'cliente@example.com', oferta = 'OF2MESES', transacao = 'HP' + randomUUID(), produto = PRODUTO, status = 'APPROVED', valor = 10 } = {}) {
+function aviso(evento, { email = 'cliente@example.com', oferta = 'OFMES', transacao = 'HP' + randomUUID(), produto = PRODUTO, status = 'APPROVED', valor = 9.99 } = {}) {
   return {
     id: randomUUID(), creation_date: Date.now(), event: evento, version: '2.0.0',
     data: {
@@ -114,27 +114,41 @@ console.log('\n== Oferta que o site nao conhece: grava, avisa e NAO libera ==');
 }
 
 await setSetting(db, 'hotmart_ofertas', JSON.stringify({
-  OF2MESES: { plan: 'p10', periodo: '2m' },
+  OFMES: { plan: 'p10', periodo: '1m' },
   OFANO: { plan: 'p10', periodo: '12m' }
 }));
 
 console.log('\n== Compra aprovada de verdade: libera o plano e o prazo ==');
-let trans2m;
+let transMes;
 {
-  trans2m = 'HP-2M-' + randomUUID();
-  const r = await chamar(aviso('PURCHASE_APPROVED', { transacao: trans2m }));
+  transMes = 'HP-1M-' + randomUUID();
+  const r = await chamar(aviso('PURCHASE_APPROVED', { transacao: transMes }));
   check('responde 200 e diz que liberou', r.s === 200 && r.d.acao === 'liberado', JSON.stringify(r.d));
   const u = await conta('cliente@example.com');
   check('o plano virou Starter', u.plan_id === 'p10', String(u.plan_id));
-  check('o prazo ficou em 2 meses', meses(u.plano_ate) === 2, `${u.plano_ate} (${meses(u.plano_ate)} meses)`);
+  check('o prazo ficou em 1 mes', meses(u.plano_ate) === 1, `${u.plano_ate} (${meses(u.plano_ate)} meses)`);
   const plan = await db.get("SELECT monthly_credits FROM plans WHERE id='p10'");
   check('os creditos do primeiro mes entraram', u.credits >= plan.monthly_credits, `${u.credits} de ${plan.monthly_credits}`);
+}
+
+console.log('\n== Oferta mapeada para periodo que nao esta a venda nao libera ==');
+{
+  // Se o mapa de ofertas aponta para um periodo retirado de venda ('2m'), isso
+  // e configuracao velha, nao autorizacao: o acesso NAO sai.
+  const mapaAntes = await db.get("SELECT value FROM settings WHERE key='hotmart_ofertas'");
+  await setSetting(db, 'hotmart_ofertas', JSON.stringify({ OFVELHA: { plan: 'p10', periodo: '2m' } }));
+  const id = await criaUsuario('velha@example.com');
+  const r = await chamar(aviso('PURCHASE_APPROVED', { email: 'velha@example.com', oferta: 'OFVELHA' }));
+  const u = await db.get('SELECT plan_id, plano_ate FROM users WHERE id=?', [id]);
+  check('periodo fora de venda no mapa nao libera acesso',
+    r.s === 200 && u.plan_id === 'free' && !u.plano_ate, `${r.s} ${u.plan_id} ${u.plano_ate}`);
+  await setSetting(db, 'hotmart_ofertas', mapaAntes.value);
 }
 
 console.log('\n== Reenvio da Hotmart nao soma prazo duas vezes ==');
 {
   const antes = (await conta('cliente@example.com')).plano_ate;
-  const r = await chamar(aviso('PURCHASE_APPROVED', { transacao: trans2m }));
+  const r = await chamar(aviso('PURCHASE_APPROVED', { transacao: transMes }));
   check('o reenvio e reconhecido como repetido', r.s === 200 && r.d.acao === 'repetido', JSON.stringify(r.d));
   const depois = (await conta('cliente@example.com')).plano_ate;
   check('o prazo nao mudou no reenvio', antes === depois, `${antes} -> ${depois}`);
@@ -143,7 +157,7 @@ console.log('\n== Reenvio da Hotmart nao soma prazo duas vezes ==');
 console.log('\n== A oferta anual vale 12 meses, nao 2 ==');
 {
   const id = await criaUsuario('anual@example.com');
-  await chamar(aviso('PURCHASE_APPROVED', { email: 'anual@example.com', oferta: 'OFANO', valor: 54 }));
+  await chamar(aviso('PURCHASE_APPROVED', { email: 'anual@example.com', oferta: 'OFANO', valor: 99 }));
   const u = await db.get('SELECT plan_id, plano_ate FROM users WHERE id=?', [id]);
   check('o prazo ficou em 12 meses', u.plan_id === 'p10' && meses(u.plano_ate) === 12, `${u.plan_id} ${u.plano_ate} (${meses(u.plano_ate)} meses)`);
 }
@@ -218,7 +232,7 @@ for (const evento of ['SUBSCRIPTION_CANCELLATION', 'PURCHASE_CANCELED', 'PURCHAS
 
 console.log('\n== Compra que chega ANTES da conta existir ==');
 {
-  const r = await chamar(aviso('PURCHASE_APPROVED', { email: 'novo@example.com', oferta: 'OFANO', transacao: 'HP-PEND-1', valor: 54 }));
+  const r = await chamar(aviso('PURCHASE_APPROVED', { email: 'novo@example.com', oferta: 'OFANO', transacao: 'HP-PEND-1', valor: 99 }));
   check('fica guardada como pendente', r.s === 200 && r.d.acao === 'pendente', JSON.stringify(r.d));
   const p = await db.get("SELECT * FROM hotmart_pendentes WHERE email='novo@example.com'");
   check('a pendencia guarda plano e periodo', p?.plan_id === 'p10' && p?.periodo === '12m', `${p?.plan_id} ${p?.periodo}`);

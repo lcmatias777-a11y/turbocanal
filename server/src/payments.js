@@ -102,26 +102,49 @@ function pubPayment(p) {
 /** O que cada pagamento compra.
  *
  *  Não existe cobrança automática no site: o Mercado Pago não cobra ninguém
- *  sozinho. O que existe é pagamento por PERÍODO. Um pagamento compra 2 meses
- *  pelo preço do plano; o anual compra 12 meses por 6 pagamentos com 10% de
- *  desconto (Starter: 6 x R$ 10 = R$ 60, menos 10% = R$ 54).
+ *  sozinho. O que existe é pagamento por PERÍODO. Um pagamento compra 1 mês
+ *  pelo preço do plano; o anual compra 12 meses por 12 vezes o preço, menos
+ *  10% (Starter: 12 x R$ 10 = R$ 120, menos 10% = R$ 108).
  *
  *  Os créditos NÃO entram todos de uma vez: entram mês a mês, enquanto o prazo
  *  estiver valendo, pela recarga mensal (credits.js). Quem paga de novo soma
- *  ao que falta, não joga fora o tempo que sobrou. */
+ *  ao que falta, não joga fora o tempo que sobrou.
+ *
+ *  '2m' NÃO está mais à venda, e continua aqui de propósito: os pagamentos
+ *  feitos no modelo antigo guardaram esse período no banco, e sem a entrada
+ *  aqui o extrato do cliente passaria a mostrar o período errado. Quem decide
+ *  o que pode ser COMPRADO é o campo aVenda, não a presença na tabela. */
 export const PERIODOS = {
-  '2m': { meses: 2, vezes: 1, desconto: 0, rotulo: '2 meses' },
-  '12m': { meses: 12, vezes: 6, desconto: 0.10, rotulo: '1 ano' }
+  '1m': { meses: 1, rotulo: '1 mês', aVenda: true },
+  '12m': { meses: 12, rotulo: '1 ano', aVenda: true },
+  '2m': { meses: 2, rotulo: '2 meses', aVenda: false }
 };
+/** Os períodos que podem ser comprados hoje, na ordem em que aparecem. */
+export const A_VENDA = Object.keys(PERIODOS).filter((k) => PERIODOS[k].aVenda);
 // Cuidado com o atalho esperto aqui: a primeira versao era
-//   PERIODOS[String(v || '2m')] ? String(v) : '2m'
+//   PERIODOS[String(v || '1m')] ? String(v) : '1m'
 // e com v = null o teste do meio passava pelo fallback mas o retorno era a
 // string "null". Simples e sem gracinha:
-export const lerPeriodo = (v) => (Object.hasOwn(PERIODOS, String(v)) ? String(v) : '2m');
-/** Preço final em centavos de um plano num período, já com o desconto. */
+export const lerPeriodo = (v) => (Object.hasOwn(PERIODOS, String(v)) ? String(v) : '1m');
+/** Preço em centavos de um plano num período.
+ *
+ *  O ano NÃO é uma conta sobre o mensal: é um preço próprio do plano
+ *  (price_year_cents). Starter: R$ 9,99 no mês e R$ 99,00 no ano, e 99,00 não
+ *  é 12 x 9,99 com nenhum desconto redondo. Tentar guardar isso como uma
+ *  porcentagem daria um número quebrado diferente para cada plano.
+ *
+ *  Se o plano ainda não tem preço anual gravado (banco de antes desta coluna),
+ *  cai na conta do modelo antigo em vez de cobrar zero por um ano de plano. */
 export function precoDoPeriodo(plan, periodo) {
-  const p = PERIODOS[lerPeriodo(periodo)];
-  return Math.round(plan.price_cents * p.vezes * (1 - p.desconto));
+  const k = lerPeriodo(periodo);
+  if (k === '12m') {
+    const ano = Number(plan.price_year_cents || 0);
+    return ano > 0 ? ano : Math.round(Number(plan.price_cents) * 12 * 0.9);
+  }
+  // '1m' e '2m' custam, os dois, UM preço de plano: no modelo antigo esse
+  // mesmo valor comprava dois meses, e é assim que o extrato antigo tem de
+  // continuar aparecendo.
+  return Math.round(Number(plan.price_cents));
 }
 /** Nova data de fim: soma os meses ao que ainda falta, não ao dia de hoje. */
 export function somarMeses(ateAtual, meses, agora = new Date()) {
@@ -138,6 +161,12 @@ export function paymentRoutes(app, db, auth) {
       // Faltava esta linha: o resto da rota usava `periodo` sem nunca declarar,
       // e toda tentativa de pagar morria num ReferenceError mascarado como 500.
       const periodo = lerPeriodo(req.body?.periodo);
+      // lerPeriodo aceita periodo antigo para o extrato continuar certo, mas
+      // COMPRAR so vale o que esta a venda: sem isto, mandar periodo='2m' na
+      // mao comprava 2 meses pelo preco de 1.
+      if (!PERIODOS[periodo].aVenda) {
+        throw new HttpError(400, 'Este período não está mais à venda. Escolha 1 mês ou 1 ano.');
+      }
       const plan = await db.get('SELECT * FROM plans WHERE id=? AND active=1', [planId]);
       if (!plan) throw new HttpError(404, 'Plano não encontrado ou inativo.');
       if (plan.price_cents <= 0) throw new HttpError(400, 'O plano Free não precisa de pagamento.');
