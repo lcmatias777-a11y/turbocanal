@@ -747,6 +747,34 @@ export async function setSetting(db, key, value) {
 }
 
 async function seed(db) {
+  /* AS COLUNAS NOVAS ENTRAM PRIMEIRO, ANTES DE QUALQUER INSERT OU UPDATE.
+   *
+   * Isto já quebrou a produção uma vez, e o jeito que quebrou vale deixar
+   * escrito: a carga inicial passou a inserir em plans usando a coluna
+   * price_year_cents, e o ALTER que cria essa coluna estava trinta linhas
+   * ABAIXO, na mesma função. Em banco novo nada acontece, porque o CREATE TABLE
+   * já nasce com a coluna, e por isso os 37 arquivos de teste passaram. No
+   * banco de produção, criado antes da coluna existir, o insert morria com
+   * "column price_year_cents of relation plans does not exist" e o site não
+   * subia.
+   *
+   * Regra, então: coluna nova SEMPRE aqui em cima. Quem acrescentar um ALTER
+   * lá embaixo e usar a coluna na carga inicial repete o mesmo erro. */
+  // Banimento de conta (pedido do dono): coluna nova nas contas já existentes
+  try { await db.run('ALTER TABLE users ADD COLUMN banido INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { await db.run("ALTER TABLE users ADD COLUMN banido_motivo TEXT NOT NULL DEFAULT ''"); } catch {}
+  try { await db.run('ALTER TABLE users ADD COLUMN sessao_v INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { await db.run('ALTER TABLE users ADD COLUMN foto_url TEXT'); } catch {}
+  // De onde veio o bloqueio do filtro: o bate-papo ou um comentário de postagem.
+  // Sem isso o dono via só metade do que o filtro barrou.
+  try { await db.run("ALTER TABLE chat_bloqueios ADD COLUMN onde TEXT NOT NULL DEFAULT 'bate-papo'"); } catch {}
+  // Capa enviada para um vídeo do canal de teste
+  try { await db.run('ALTER TABLE demo_edicoes ADD COLUMN capa TEXT'); } catch {}
+  // Plano pago por período: até quando vale, e o que cada pagamento comprou
+  try { await db.run('ALTER TABLE users ADD COLUMN plano_ate TEXT'); } catch {}
+  try { await db.run("ALTER TABLE payments ADD COLUMN periodo TEXT NOT NULL DEFAULT '2m'"); } catch {}
+  try { await db.run('ALTER TABLE plans ADD COLUMN price_year_cents INTEGER NOT NULL DEFAULT 0'); } catch {}
+
   for (const p of PLAN_SEED) {
     await db.run(
       'INSERT INTO plans(id,name,price_cents,price_year_cents,monthly_credits,sort,active,description) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
@@ -771,20 +799,6 @@ async function seed(db) {
     ['video_insights_ai', 40, 300, 'IA assiste o vídeo (insights)', 'IA do vídeo: assiste e sugere título, descrição e tags']
   ];
   await db.run("DELETE FROM tool_costs WHERE tool='thumbnail_ai'"); // capa com IA foi retirada do site
-  // Banimento de conta (pedido do dono): coluna nova nas contas já existentes
-  try { await db.run('ALTER TABLE users ADD COLUMN banido INTEGER NOT NULL DEFAULT 0'); } catch {}
-  try { await db.run("ALTER TABLE users ADD COLUMN banido_motivo TEXT NOT NULL DEFAULT ''"); } catch {}
-  try { await db.run('ALTER TABLE users ADD COLUMN sessao_v INTEGER NOT NULL DEFAULT 0'); } catch {}
-  try { await db.run('ALTER TABLE users ADD COLUMN foto_url TEXT'); } catch {}
-  // De onde veio o bloqueio do filtro: o bate-papo ou um comentário de postagem.
-  // Sem isso o dono via só metade do que o filtro barrou.
-  try { await db.run("ALTER TABLE chat_bloqueios ADD COLUMN onde TEXT NOT NULL DEFAULT 'bate-papo'"); } catch {}
-  // Capa enviada para um vídeo do canal de teste
-  try { await db.run('ALTER TABLE demo_edicoes ADD COLUMN capa TEXT'); } catch {}
-  // Plano pago por período: até quando vale, e o que cada pagamento comprou
-  try { await db.run('ALTER TABLE users ADD COLUMN plano_ate TEXT'); } catch {}
-  try { await db.run("ALTER TABLE payments ADD COLUMN periodo TEXT NOT NULL DEFAULT '2m'"); } catch {}
-  try { await db.run('ALTER TABLE plans ADD COLUMN price_year_cents INTEGER NOT NULL DEFAULT 0'); } catch {}
   // Quem JÁ tinha plano pago antes desta mudança não pode perder o plano porque
   // o prazo nasceu vazio. Ganha 2 meses a partir de agora, uma vez só.
   try {
