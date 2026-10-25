@@ -77,7 +77,15 @@ export async function buildApp({ databaseUrl = process.env.DATABASE_URL, dataDir
 
   app.get('/api/plans', async (req, res, next) => {
     try {
-      res.json({ items: await db.all('SELECT id,name,price_cents,price_year_cents,monthly_credits,description FROM plans WHERE active=1 ORDER BY sort') });
+      const items = await db.all('SELECT id,name,price_cents,price_year_cents,monthly_credits,description FROM plans WHERE active=1 ORDER BY sort');
+      // Onde se compra cada plano na Hotmart. Vazio enquanto o dono não
+      // cadastrar a oferta: a tela mostra "ainda não abriu" em vez de um botão
+      // que não leva a lugar nenhum.
+      const { linksDeCompra } = await import('./hotmart.js');
+      const links = await linksDeCompra(db);
+      res.json({
+        items: items.map((p) => ({ ...p, compra_1m: links[`${p.id}:1m`] || null, compra_12m: links[`${p.id}:12m`] || null }))
+      });
     } catch (e) { next(e); }
   });
   app.get('/api/settings/public', async (req, res, next) => {

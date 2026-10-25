@@ -72,6 +72,24 @@ function ofertaDoPayload(d) {
  *    {"ABC12345": {"plan": "p10", "periodo": "12m"}}
  *  Lixo no lugar do JSON nao derruba o webhook: vira mapa vazio, e o evento
  *  cai no caminho de "oferta desconhecida", que avisa o dono. */
+/** Para cada plano e período, o endereço de compra na Hotmart, montado a
+ *  partir do mesmo mapa de ofertas. É o que faz o botão do site levar para a
+ *  Hotmart em vez de abrir um checkout próprio que não existe mais.
+ *  Devolve { 'p10:1m': 'https://pay.hotmart.com/...' }. */
+export async function linksDeCompra(db) {
+  const mapa = await mapaDeOfertas(db);
+  const out = {};
+  for (const dados of Object.values(mapa)) {
+    const d = obj(dados);
+    const url = texto(d.url);
+    if (!url || !/^https:\/\//i.test(url)) continue;     // só https, e só se existir
+    const plano = texto(d.plan), periodo = texto(d.periodo);
+    if (!plano || !PERIODOS[periodo]?.aVenda) continue;
+    out[`${plano}:${periodo}`] = url;
+  }
+  return out;
+}
+
 async function mapaDeOfertas(db) {
   try {
     const m = JSON.parse((await getSetting(db, 'hotmart_ofertas')) || '{}');

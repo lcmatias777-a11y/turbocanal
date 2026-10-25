@@ -298,6 +298,47 @@ for (const [rotulo, corpo] of [
   check(`corpo ${rotulo}: responde 200 ou 401, nunca 500`, r.s === 200 || r.s === 401, String(r.s));
 }
 
+console.log('\n== Os botoes de compra do site apontam para a Hotmart ==');
+{
+  // A venda passou a ser so pela Hotmart. O site nao tem checkout proprio na
+  // tela, entao o botao precisa do endereco da oferta. Sem endereco, o cartao
+  // do plano nao pode mostrar botao nenhum: um botao que nao leva a lugar
+  // nenhum e pior que nenhum botao.
+  const mapaAntes = await db.get("SELECT value FROM settings WHERE key='hotmart_ofertas'");
+
+  const planos = async () => (await (await fetch(base + '/api/plans')).json()).items;
+
+  await setSetting(db, 'hotmart_ofertas', JSON.stringify({ OFMES: { plan: 'p10', periodo: '1m' } }));
+  let p10 = (await planos()).find((x) => x.id === 'p10');
+  check('oferta sem endereco nao vira botao', !p10.compra_1m && !p10.compra_12m, `${p10.compra_1m} ${p10.compra_12m}`);
+
+  await setSetting(db, 'hotmart_ofertas', JSON.stringify({
+    OFMES: { plan: 'p10', periodo: '1m', url: 'https://pay.hotmart.com/MES' },
+    OFANO: { plan: 'p10', periodo: '12m', url: 'https://pay.hotmart.com/ANO' }
+  }));
+  p10 = (await planos()).find((x) => x.id === 'p10');
+  check('com endereco, o plano traz os dois links',
+    p10.compra_1m === 'https://pay.hotmart.com/MES' && p10.compra_12m === 'https://pay.hotmart.com/ANO',
+    `${p10.compra_1m} ${p10.compra_12m}`);
+  const outro = (await planos()).find((x) => x.id === 'p20');
+  check('plano sem oferta cadastrada continua sem link', !outro.compra_1m && !outro.compra_12m);
+
+  // Endereco torto nao pode virar botao.
+  for (const [rotulo, url] of [['http sem s', 'http://pay.hotmart.com/X'], ['texto solto', 'clique aqui'],
+    ['javascript:', 'javascript:alert(1)'], ['vazio', ''], ['numero', 42]]) {
+    await setSetting(db, 'hotmart_ofertas', JSON.stringify({ OFX: { plan: 'p40', periodo: '1m', url } }));
+    const p40 = (await planos()).find((x) => x.id === 'p40');
+    check(`endereco ${rotulo} nao vira botao`, !p40.compra_1m, String(p40.compra_1m));
+  }
+
+  // Periodo fora de venda tambem nao gera botao.
+  await setSetting(db, 'hotmart_ofertas', JSON.stringify({ OFV: { plan: 'p40', periodo: '2m', url: 'https://pay.hotmart.com/V' } }));
+  const p40 = (await planos()).find((x) => x.id === 'p40');
+  check('periodo fora de venda nao gera botao', !p40.compra_1m && !p40.compra_12m);
+
+  await setSetting(db, 'hotmart_ofertas', mapaAntes.value);
+}
+
 console.log('\n== O token nunca sai do servidor ==');
 {
   const r = await fetch(base + '/api/settings/public');

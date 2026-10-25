@@ -298,17 +298,41 @@ function ofertasEmLinhas(bruto) {
   let m = {};
   try { m = JSON.parse(bruto || '{}') || {}; } catch { return ''; }
   return Object.entries(m)
-    .map(([codigo, v]) => `${codigo} ${v?.plan || ''} ${v?.periodo || ''}`.trim())
+    .map(([codigo, v]) => `${codigo} ${v?.plan || ''} ${v?.periodo || ''} ${v?.url || ''}`.trim())
     .join('\n');
 }
 function linhasEmOfertas(texto) {
   const out = {};
   for (const linha of String(texto || '').split('\n')) {
-    const [codigo, plano, periodo] = linha.trim().split(/\s+/);
+    const [codigo, plano, periodo, url] = linha.trim().split(/\s+/);
     if (!codigo || !plano || !Object.hasOwn(PERIODOS, periodo)) continue;
-    out[codigo] = { plan: plano, periodo };
+    // O endereco de compra e opcional e so entra se for https: um link torto
+    // viraria um botao que leva a lugar nenhum.
+    out[codigo] = /^https:\/\//i.test(url || '') ? { plan: plano, periodo, url } : { plan: plano, periodo };
   }
   return out;
+}
+
+/* A venda passou a ser feita SÓ pela Hotmart, por decisão do dono, até existir
+ * um CNPJ. O site não tem mais checkout próprio na tela: o botão abre a página
+ * de compra daquela oferta na Hotmart, que o administrador cadastra em
+ * Admin > Configurações > Hotmart, uma linha por oferta.
+ *
+ * Enquanto a oferta não estiver cadastrada, o cartão NÃO mostra um botão que
+ * não leva a lugar nenhum: diz que a venda ainda não abriu. O código do
+ * pagamento por Pix continua no projeto, desligado, para quando o CNPJ sair. */
+function botoesDeCompra(p, ano, cheio, economia, menos) {
+  const mes = p.compra_1m, anual = p.compra_12m;
+  if (!mes && !anual) {
+    return `<p class="muted small">A venda deste plano ainda não abriu. Enquanto isso, o plano gratuito segue valendo.</p>`;
+  }
+  const botao = (url, classe, rotulo, estilo = '') => url
+    ? `<a class="btn ${classe}" href="${esc(url)}" target="_blank" rel="noopener noreferrer"${estilo}>${rotulo}</a>`
+    : '';
+  return `${botao(mes, '', `Assinar 1 mês · ${money(p.price_cents)}`)}
+    ${botao(anual, 'secondary', `1 ano · ${money(ano)}`, ' style="margin-top:6px"')}
+    ${anual && economia ? `<p class="muted small" style="margin-top:6px">No ano você paga ${money(ano)} em vez de ${money(cheio)}: ${menos}% a menos, e os créditos entram todo mês durante 12 meses.</p>` : ''}
+    <p class="muted small" style="margin-top:6px">O pagamento é feito na Hotmart. O acesso é liberado na sua conta assim que o pagamento for aprovado, com o mesmo e-mail da compra.</p>`;
 }
 
 function planCard(p) {
@@ -321,11 +345,7 @@ function planCard(p) {
     <div class="price">${p.price_cents ? money(p.price_cents) : 'Grátis'}<small>/mês</small></div>
     <div><b>${fmt(p.monthly_credits)}</b> créditos ${p.price_cents ? 'por mês, enquanto o prazo estiver valendo' : 'por mês'}</div>
     <p class="muted small">${esc(p.description || '')}</p>
-    ${p.price_cents
-      ? `<a class="btn" href="#/checkout?plan=${esc(p.id)}&periodo=1m">Pagar 1 mês · ${money(p.price_cents)}</a>
-         <a class="btn secondary" href="#/checkout?plan=${esc(p.id)}&periodo=12m" style="margin-top:6px">1 ano · ${money(ano)}</a>
-         ${economia ? `<p class="muted small" style="margin-top:6px">No ano você paga ${money(ano)} em vez de ${money(cheio)}: ${menos}% a menos, e os créditos entram todo mês durante 12 meses.</p>` : ''}`
-      : `<a class="btn secondary" href="#/login">Entrar com Google</a>`}
+    ${p.price_cents ? botoesDeCompra(p, ano, cheio, economia, menos) : `<a class="btn secondary" href="#/login">Entrar com Google</a>`}
   </div>`;
 }
 
@@ -3777,9 +3797,9 @@ const adminTabs = {
         <input id="c_hmtok" placeholder="o token em Hotmart &gt; Ferramentas &gt; Webhook &gt; Autenticação (vazio mantém o atual)">
         <label>ID do produto na Hotmart</label>
         <input id="c_hmprod" value="${esc(s.hotmart_product_id || '')}" placeholder="só números, por exemplo 1234567">
-        <label>Ofertas: uma por linha, no formato <code>CODIGO plano periodo</code></label>
-        <textarea id="c_hmof" rows="4" placeholder="OF2MESES p10 2m&#10;OFANO p10 12m">${esc(ofertasEmLinhas(s.hotmart_ofertas))}</textarea>
-        <p class="small muted">O código da oferta sai da própria Hotmart depois que você cria cada oferta. Os planos são ${esc(['free', 'p10', 'p20', 'p40', 'p70', 'p100'].join(', '))} e os períodos são 2m e 12m.</p>
+        <label>Ofertas: uma por linha, no formato <code>CODIGO plano periodo endereço-de-compra</code></label>
+        <textarea id="c_hmof" rows="6" placeholder="OFMES p10 1m https://pay.hotmart.com/...&#10;OFANO p10 12m https://pay.hotmart.com/...">${esc(ofertasEmLinhas(s.hotmart_ofertas))}</textarea>
+        <p class="small muted">O código da oferta e o endereço de compra saem da própria Hotmart depois que você cria cada oferta. Os planos são ${esc(['p10', 'p20', 'p40', 'p70', 'p100'].join(', '))} e os períodos são 1m e 12m. O endereço é opcional: sem ele a Hotmart continua liberando o acesso, mas o botão de comprar não aparece no site.</p>
         <p><button id="hmsave" class="btn sm">Salvar Hotmart</button></p></div>
       </div>`;
     (async () => {
