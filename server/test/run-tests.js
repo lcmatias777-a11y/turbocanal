@@ -458,7 +458,9 @@ check('prazo vencido: a conta volta a receber o piso de 5.000, não os créditos
   await activatePayment(db, { id: 'pay_teste_2' }, null, 'teste');
   const somado = await db.get('SELECT plano_ate FROM users WHERE id=?', [maria.id]);
   const dias = Math.round((new Date(somado.plano_ate) - new Date()) / 86400000);
-  check('pagar de novo antes de vencer SOMA ao que falta (uns 4 meses)', dias > 110 && dias < 130, `faltam ${dias} dias`);
+  // Faltavam 60 dias e a pessoa pagou 1 mes: tem de dar uns 90, nao 30. A
+  // expectativa antiga era de 120 porque um pagamento valia 2 meses.
+  check('pagar de novo antes de vencer SOMA ao que falta (uns 3 meses)', dias > 80 && dias < 100, `faltam ${dias} dias`);
 }
 
 // Preço do mês e preço do ano, que são valores separados no plano
